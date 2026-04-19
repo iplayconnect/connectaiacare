@@ -4,8 +4,11 @@
 
 BEGIN;
 
+-- Extensions precisam vir ANTES de qualquer índice/função que as use.
+-- pg_trgm é usada pelo índice gin_trgm_ops em full_name.
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
 -- =====================================================
 -- Pacientes (residentes do SPA ou idosos em casa)
@@ -35,7 +38,6 @@ CREATE TABLE IF NOT EXISTS aia_health_patients (
 
 CREATE INDEX IF NOT EXISTS idx_patients_tenant ON aia_health_patients(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_patients_name_trgm ON aia_health_patients USING gin(full_name gin_trgm_ops);
-CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
 -- =====================================================
 -- Cuidadores profissionais
