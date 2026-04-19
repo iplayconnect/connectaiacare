@@ -1,6 +1,8 @@
 """Rotas HTTP — webhook + API para dashboard."""
 from __future__ import annotations
 
+import uuid
+
 from flask import Blueprint, jsonify, request
 
 from src.handlers.pipeline import get_pipeline
@@ -21,18 +23,30 @@ def health():
 # ---------- Webhook WhatsApp (Evolution API) ----------
 @bp.post("/webhook/whatsapp")
 def whatsapp_webhook():
-    try:
-        event = request.get_json(silent=True) or {}
-    except Exception as exc:
-        logger.error("webhook_json_parse_failed", error=str(exc))
+    # `silent=True` já retorna None em JSON inválido (não levanta exceção).
+    # Remove o try/except dead code que existia antes.
+    event = request.get_json(silent=True)
+    if event is None:
+        logger.warning("webhook_invalid_json", remote=request.remote_addr)
         return jsonify({"status": "error", "reason": "invalid_json"}), 400
 
+    # Não vazar str(exc) para o cliente — pode conter stack trace, detalhes de DB,
+    # nomes de paciente em mensagens de erro, etc. Retorna trace_id para correlacionar
+    # com o log interno (structlog preserva todo o traceback).
+    # Ver FINDING-004 do security audit.
     try:
         result = get_pipeline().handle_webhook(event)
         return jsonify(result), 200
-    except Exception as exc:
-        logger.exception("webhook_processing_failed", error=str(exc))
-        return jsonify({"status": "error", "reason": str(exc)}), 200  # Evolution spera 200
+    except Exception as exc:  # noqa: BLE001 - catchall intencional (webhook pode receber qualquer coisa)
+        trace_id = str(uuid.uuid4())
+        logger.exception(
+            "webhook_processing_failed",
+            trace_id=trace_id,
+            error_class=type(exc).__name__,
+        )
+        # Evolution API espera 200 para confirmar entrega (senão desabilita webhook).
+        # TODO(P1): distinguir erros transitórios (retry) vs permanentes — FINDING-007.
+        return jsonify({"status": "error", "reason": "internal_error", "trace_id": trace_id}), 200
 
 
 # ---------- API para dashboard ----------
