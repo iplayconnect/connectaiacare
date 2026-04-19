@@ -44,5 +44,9 @@ demo-assets/audio_samples/*.ogg
 demo-assets/audio_samples/*.mp3
 !demo-assets/audio_samples/.gitkeep
 
-.claude/
+# Claude Code: ignora config local mas mantem commands/skills compartilhados
+.claude/*
+!.claude/commands/
+!.claude/skills/
+!.claude/settings.json
 .cursor/
