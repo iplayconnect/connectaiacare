@@ -1,0 +1,91 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: connectaiacare-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: connectaiacare
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    volumes:
+      - connectaiacare_pg_data:/var/lib/postgresql/data
+      - ./backend/migrations:/docker-entrypoint-initdb.d
+    ports:
+      - "5433:5432"
+    networks:
+      - connectaiacare_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d connectaiacare"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: connectaiacare-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - connectaiacare_redis_data:/data
+    ports:
+      - "6380:6379"
+    networks:
+      - connectaiacare_net
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: connectaiacare-api
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/connectaiacare
+      REDIS_URL: redis://redis:6379/5
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    ports:
+      - "5055:5055"
+    networks:
+      - connectaiacare_net
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.connectaiacare-api.rule: "Host(`demo.connectaiacare.com`)"
+      traefik.http.routers.connectaiacare-api.entrypoints: "websecure"
+      traefik.http.routers.connectaiacare-api.tls.certresolver: "letsencrypt"
+      traefik.http.services.connectaiacare-api.loadbalancer.server.port: "5055"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: connectaiacare-frontend
+    restart: unless-stopped
+    environment:
+      NEXT_PUBLIC_API_URL: https://demo.connectaiacare.com
+    depends_on:
+      - api
+    ports:
+      - "3030:3000"
+    networks:
+      - connectaiacare_net
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.connectaiacare-web.rule: "Host(`app.connectaiacare.com`)"
+      traefik.http.routers.connectaiacare-web.entrypoints: "websecure"
+      traefik.http.routers.connectaiacare-web.tls.certresolver: "letsencrypt"
+      traefik.http.services.connectaiacare-web.loadbalancer.server.port: "3000"
+
+volumes:
+  connectaiacare_pg_data:
+  connectaiacare_redis_data:
+
+networks:
+  connectaiacare_net:
+    driver: bridge
