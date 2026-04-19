@@ -1,0 +1,47 @@
+# Architecture Decision Records (ADRs)
+
+Registros de decisões arquiteturais significativas do ConnectaIACare.
+Format: **MADR** (Markdown Architecture Decision Records).
+
+## Sobre
+
+Cada ADR documenta **uma** decisão arquitetural com contexto, opções consideradas, trade-offs e consequências. ADRs são **imutáveis** — quando superados, novo ADR é criado com status `Superseded by ADR-NNN` no anterior.
+
+Seguir: `NNN-kebab-case-title.md` (zero-padded, kebab-case).
+
+## Índice
+
+| # | Decisão | Status | Data |
+|---|---------|--------|------|
+| [001](001-stack-isolada-da-connectaia.md) | Stack isolada da ConnectaIA produção | Accepted | 2026-04-19 |
+| [002](002-compartilhar-infra-hostinger-traefik.md) | Compartilhar nó Hostinger + Traefik com ConnectaIA | Accepted | 2026-04-19 |
+| [003](003-postgres-compartilhado-database-separado.md) | Postgres mesmo host, database separado | Accepted | 2026-04-19 |
+| [004](004-pgvector-em-vez-de-vector-db-dedicado.md) | pgvector em vez de Qdrant/Pinecone | Accepted | 2026-04-19 |
+| [005](005-resemblyzer-em-vez-de-pyannote.md) | Resemblyzer para biometria de voz | Accepted | 2026-04-19 |
+| [006](006-reaproveitar-evolution-instancia-v6.md) | Evolution API compartilhado, instância V6 dedicada | Accepted | 2026-04-19 |
+| [007](007-sofia-voz-como-servico-externo.md) | Sofia Voz consumida como microsserviço | Accepted | 2026-04-19 |
+| [008](008-hash-chain-opentimestamps-em-vez-de-blockchain.md) | Hash-chain + OpenTimestamps (não blockchain pleno) | Accepted | 2026-04-19 |
+| [009](009-nextjs-14-app-router-com-ssr.md) | Next.js 14 com App Router + SSR | Accepted | 2026-04-19 |
+| [010](010-multi-tenant-desde-o-dia-1.md) | Multi-tenant desde o dia 1 | Accepted | 2026-04-19 |
+| [011](011-locale-aware-architecture-para-latam-europa.md) | Arquitetura locale-aware para LATAM + Europa | Accepted | 2026-04-19 |
+
+## Como contribuir
+
+1. Use `/add-adr` (slash command a criar) OU siga o template MADR existente
+2. Pegue o próximo número sequencial
+3. Nome kebab-case descritivo
+4. **Nunca edite** um ADR existente — crie novo com `Superseded by` no original
+5. Atualize este índice
+
+## Convenções
+
+- **Título**: frase nominal imperativa (ex: "Use PostgreSQL", não "Devemos usar PostgreSQL?")
+- **Context**: as _forças_ que tornaram a decisão necessária
+- **Consequences**: trade-offs **honestos** (não só positivos)
+- **Length**: 200-500 palavras idealmente
+
+## Referências
+
+- [MADR format](https://adr.github.io/madr/)
+- [Nygard original format](https://www.cognitect.com/blog/2011/11/15/documenting-architecture-decisions)
+- Skill `.claude/skills/create-adr/` neste repo
