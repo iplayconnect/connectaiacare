@@ -18,7 +18,7 @@ export default async function ReportDetailPage({ params }: { params: { id: strin
   }
 
   const analysis = report.analysis || {};
-  const age = calcAge(report.patient?.birth_date ?? null);
+  const age = calcAge(report.patient_birth_date ?? null);
 
   return (
     <div className="space-y-6 max-w-4xl">
@@ -46,7 +46,7 @@ export default async function ReportDetailPage({ params }: { params: { id: strin
           <p className="text-muted-foreground">
             {age && `${age} anos`}
             {report.patient_room && ` · Quarto ${report.patient_room}`}
-            {report.patient?.care_unit && ` · ${report.patient.care_unit}`}
+            {report.patient_care_unit && ` · ${report.patient_care_unit}`}
           </p>
           <div className="mt-2 flex items-center gap-2">
             <ClassificationBadge classification={report.classification} />

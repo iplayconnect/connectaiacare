@@ -66,7 +66,10 @@ services:
     container_name: connectaiacare-frontend
     restart: unless-stopped
     environment:
-      NEXT_PUBLIC_API_URL: https://demo.connectaiacare.com
+      # Browser (Client Components) — hostname público ou localhost em dev
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:5055}
+      # Server Components (SSR dentro do container) — usa service name Docker
+      INTERNAL_API_URL: http://api:5055
     depends_on:
       - api
     ports:

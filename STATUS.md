@@ -6,6 +6,59 @@
 
 ---
 
+## 🌐 Visão estratégica expandida: de plataforma a **Ecossistema do Cuidado**
+
+Desde 2026-04-19, a visão do projeto evolui oficialmente de "plataforma de relato de cuidador" para **ecossistema integrado de cuidado**, com 4 camadas:
+
+```
+   ┌──────────────────────────────────────────────────────────────┐
+   │  ECOSSISTEMA CONNECTAIACARE — visão 12-18 meses              │
+   └──────────────────────────────────────────────────────────────┘
+           ┌──────────────┴──────────────┐
+           ▼                             ▼
+   ┌──────────────┐              ┌──────────────┐
+   │  Casa do     │              │  Clínica/    │
+   │  Paciente    │              │  Hospital    │
+   └──────┬───────┘              └──────┬───────┘
+          │                             │
+   ┌──────┴────────────────────────────┴───────┐
+   │  Camadas do ecossistema:                   │
+   │                                            │
+   │  1. RELATO   cuidador → WhatsApp → IA      │
+   │              (MVP em curso — sexta 24/04)  │
+   │                                            │
+   │  2. MONITOR  sinais vitais MedMonitor      │
+   │              sensores IoT Tecnosenior      │
+   │              biometria voz cuidadores      │
+   │              (em roadmap — pós-MVP)        │
+   │                                            │
+   │  3. TELEMED  consulta vídeo com IA live    │
+   │              dashboard médico lateral       │
+   │              prescrição digital             │
+   │              (ADR-012, 15-20 semanas)      │
+   │                                            │
+   │  4. INTEGRA  FHIR com hospitais             │
+   │              operadoras de saúde            │
+   │              prontuário nacional            │
+   │              (visão Q3-Q4 2027)            │
+   └────────────────────────────────────────────┘
+```
+
+**Camada TELEMED (ADR-012)** é a que transforma a narrativa:
+- Médico conecta-se ao paciente via vídeo
+- Dashboard lateral mostra **em tempo real**:
+  - Sinais vitais MedMonitor (live streaming)
+  - Últimos relatos do cuidador + análise IA
+  - Alertas de biometria + eventos de sensor
+  - Condições, medicações, alergias do prontuário
+- **Prescrição digital** assinada via ICP-Brasil → farmácia credenciada (Memed)
+- Transcription clínica vira parte do prontuário
+- Compliance CFM 2.314/2022 + arquivamento 20 anos
+
+Isso **não é uma consulta por vídeo com dados ao lado** — é um **copiloto de saúde para o médico**, materializando a promessa "hospital em casa".
+
+---
+
 ## 🔐 Biometria de voz (v2 — robusta)
 - [x] **Módulo `audio_preprocessing.py`** — decode multi-formato (via ffmpeg), normalização, VAD energético, trimming para melhor segmento de fala, scoring de qualidade (RMS+SNR+clipping)
 - [x] **Quality gates separados** para enrollment (≥0.55) e identification (≥0.30)

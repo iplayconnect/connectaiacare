@@ -24,6 +24,7 @@ Seguir: `NNN-kebab-case-title.md` (zero-padded, kebab-case).
 | [009](009-nextjs-14-app-router-com-ssr.md) | Next.js 14 com App Router + SSR | Accepted | 2026-04-19 |
 | [010](010-multi-tenant-desde-o-dia-1.md) | Multi-tenant desde o dia 1 | Accepted | 2026-04-19 |
 | [011](011-locale-aware-architecture-para-latam-europa.md) | Arquitetura locale-aware para LATAM + Europa | Accepted | 2026-04-19 |
+| [012](012-telemed-hibrido-livekit-fork-aplicacao.md) | Tele-consulta híbrida — reuso LiveKit + fork da camada médica | Accepted | 2026-04-19 |
 
 ## Como contribuir
 
