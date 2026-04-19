@@ -6,6 +6,25 @@
 
 ---
 
+## 🔐 Biometria de voz (v2 — robusta)
+- [x] **Módulo `audio_preprocessing.py`** — decode multi-formato (via ffmpeg), normalização, VAD energético, trimming para melhor segmento de fala, scoring de qualidade (RMS+SNR+clipping)
+- [x] **Quality gates separados** para enrollment (≥0.55) e identification (≥0.30)
+- [x] **Rejeição explícita** de áudios ruins (silêncio, fala < 2s, clipping > 20%, SNR < 3dB)
+- [x] **Cache em memória** de embeddings por tenant (TTL 5min, invalidação em enroll/delete)
+- [x] **Ambiguidade guard**: 1:N só identifica se margem top1-top2 ≥ 0.05
+- [x] **Log de calibração**: cada decisão (score, qualidade, aceito) gravado em `aia_health_voice_consent_log` para tuning posterior
+- [x] **Test CLI** (`scripts/test_voice_biometrics.py`): preprocess | compare | enroll | identify
+- [x] Resemblyzer 256-dim + pgvector schema
+- [x] Endpoints REST: `POST /api/voice/enroll`, `GET /api/voice/enrollment/<id>`, `DELETE /api/voice/enrollment/<id>`
+- [x] Integrado no pipeline: antes da extração de paciente, identifica cuidador (1:1 por phone → 1:N → fallback phone)
+
+**Roadmap biometria** (pós-MVP):
+- [ ] Enrollment via WhatsApp (cuidador grava 3 frases direto pelo WhatsApp em onboarding)
+- [ ] UI de enrollment + status no dashboard médico
+- [ ] Upgrade para pyannote.audio (SOTA, treinado multilíngue) quando volume justificar GPU
+- [ ] Encryption-at-rest para embeddings (pgcrypto)
+- [ ] Métricas: dashboard com FAR/FRR baseado nos logs de calibração
+
 ## ✅ O que está pronto (Dia 1 — 100% do dia)
 
 ### Backend completo
