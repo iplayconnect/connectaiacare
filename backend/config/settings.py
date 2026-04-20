@@ -47,6 +47,12 @@ class Settings:
     sofia_voice_url: str = os.getenv("SOFIA_VOICE_API_URL", "")
     sofia_voice_key: str = os.getenv("SOFIA_VOICE_API_KEY", "")
 
+    # MedMonitor / TotalCare API (ADR-019)
+    # Base URL: https://<tenant>.contactto.care/agent
+    # Fornecido pela Tecnosenior em 2026-04-20 (tenant vf-totalcare).
+    medmonitor_api_url: str = os.getenv("MEDMONITOR_API_URL", "")
+    medmonitor_api_key: str = os.getenv("MEDMONITOR_API_KEY", "")
+
     public_base_url: str = os.getenv("PUBLIC_BASE_URL", "http://localhost:5055")
     # Sem default wildcard — dev auto-populado com localhost em __post_init__.
     allowed_origins: str = os.getenv("ALLOWED_ORIGINS", "")

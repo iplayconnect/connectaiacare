@@ -1,30 +1,57 @@
-"""Orquestrador do pipeline de relato do cuidador.
+"""Orquestrador de Eventos de Cuidado (ADR-018).
 
-Fluxo:
-    1. Recebe áudio via WhatsApp → salva relato inicial
-    2. Transcreve com Deepgram
-    3. Extrai entidades com Claude Haiku (rápido)
-    4. Busca paciente no DB por fuzzy matching
-    5. Envia WhatsApp de confirmação com foto + nome
-    6. [aguarda confirmação SIM]
-    7. Analisa com Claude Opus + histórico
-    8. Salva análise + classifica
-    9. Responde ao cuidador com resumo
-    10. Se critical/urgent → dispara ligação Sofia Voice (opcional)
+Substitui o modelo antigo de "sessão conversacional única" pelo modelo de
+CareEvent com ciclo de vida, múltiplos eventos paralelos por cuidador e
+escalação hierárquica real.
+
+Fluxo principal:
+
+    Áudio chega
+        ↓
+    Detecta caregiver (biometria + phone + MedMonitor)
+        ↓
+    Existe evento ativo deste cuidador? (0..N)
+        ├─ Sim, paciente específico mencionado bate → FOLLOW-UP
+        ├─ Sim, mas paciente diferente → NOVO EVENTO em paralelo
+        └─ Não → NOVO EVENTO
+        ↓
+    Identifica paciente (local + MedMonitor search)
+        ↓
+    Confirma com foto/nome (SIM/NÃO)
+        ↓
+    Abre CareEvent + roda análise clínica
+        ↓
+    Agenda checkins (t+5min pattern, t+10min status, t+30min closure)
+        ↓
+    Se classification >= urgent → escalação hierárquica imediata
+        ↓
+    Scheduler em background dispara checkins + escalações no tempo certo
+
+Texto do cuidador:
+    - Em awaiting_patient_confirmation → SIM/NÃO
+    - Em evento ativo → answer_followup_text (LLM contextualizado)
+    - Nenhum evento → onboarding genérico
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from config.settings import settings
 from src.services.analysis_service import get_analysis_service
+from src.services.care_event_service import (
+    STATUS_AWAITING_ACK, STATUS_AWAITING_STATUS_UPDATE,
+    get_care_event_service,
+)
+from src.services.embedding_service import get_embedding_service
+from src.services.escalation_service import get_escalation_service
 from src.services.evolution import get_evolution
+from src.services.medmonitor_client import get_medmonitor_client
 from src.services.patient_service import get_patient_service
 from src.services.postgres import get_postgres
 from src.services.report_service import get_report_service
-from src.services.session_manager import get_session_manager
 from src.services.sofia_voice_client import get_sofia_voice
+from src.services.tenant_config_service import get_tenant_config_service
 from src.services.transcription import get_transcription
 from src.services.voice_biometrics_service import get_voice_biometrics
 from src.utils.logger import get_logger
@@ -33,17 +60,26 @@ logger = get_logger(__name__)
 
 
 CLASSIFICATION_EMOJI = {
-    "routine": "✅",
-    "attention": "⚠️",
-    "urgent": "🚨",
-    "critical": "🆘",
+    "routine": "✅", "attention": "⚠️", "urgent": "🚨", "critical": "🆘",
+}
+CLASSIFICATION_LABEL_PT = {
+    "routine": "ROTINA", "attention": "ATENÇÃO",
+    "urgent": "URGENTE", "critical": "CRÍTICO",
 }
 
-CLASSIFICATION_LABEL_PT = {
-    "routine": "ROTINA",
-    "attention": "ATENÇÃO",
-    "urgent": "URGENTE",
-    "critical": "CRÍTICO",
+# Tags clínicas inferíveis a partir de entities/transcrição — input pro pattern detection
+DERIVABLE_TAGS_FROM_TEXT = {
+    "queda": ["caiu", "queda", "caído", "tombo", "tropeçou"],
+    "dispneia": ["falta de ar", "cansaço", "dispneia", "sem ar", "respiração", "ofegante"],
+    "dor_toracica": ["dor no peito", "dor torácica", "aperto no peito"],
+    "confusao": ["confuso", "desorientad", "agitad", "não reconhece"],
+    "febre": ["febre", "febril", "temperatura alta", "quente"],
+    "sangramento": ["sangue", "sangrament", "sangrando"],
+    "convulsao": ["convulsão", "convulsion", "crise"],
+    "engasgo": ["engasg", "aspirar", "aspirou"],
+    "dor_abdominal": ["dor na barriga", "dor abdominal", "estômago"],
+    "recusa_alimentar": ["não quer comer", "recusa alimentação", "não come"],
+    "insonia": ["não dorm", "insônia", "acordad", "noite inteira"],
 }
 
 
@@ -54,12 +90,18 @@ class EldercarePipeline:
         self.analyzer = get_analysis_service()
         self.patients = get_patient_service()
         self.reports = get_report_service()
-        self.sessions = get_session_manager()
         self.sofia_voice = get_sofia_voice()
         self.voice_bio = get_voice_biometrics()
+        self.events = get_care_event_service()
+        self.escalation = get_escalation_service()
+        self.medmonitor = get_medmonitor_client()
+        self.tenant_cfg = get_tenant_config_service()
+        self.embeddings = get_embedding_service()
         self.db = get_postgres()
 
-    # ---------- Entry point ----------
+    # ==================================================================
+    # ENTRY POINT
+    # ==================================================================
     def handle_webhook(self, event: dict[str, Any]) -> dict[str, Any]:
         event_type = event.get("event") or event.get("type")
         data = event.get("data", event)
@@ -89,74 +131,93 @@ class EldercarePipeline:
             )
             return {"status": "ok", "reason": "unsupported_message_type"}
 
-    # ---------- Áudio = novo relato ----------
+    # ==================================================================
+    # ÁUDIO
+    # ==================================================================
     def _handle_audio(self, phone: str, data: dict[str, Any]) -> dict[str, Any]:
+        """Áudio: transcreve, extrai entidades, identifica paciente, abre/atualiza evento."""
         tenant = settings.tenant_id
         self.evo.set_presence(phone, "composing")
-
         self.evo.send_text(phone, "🎙️ Recebi seu áudio, estou analisando...")
 
+        # Download áudio
         try:
             audio_bytes = self.evo.download_media_base64(data)
-            logger.info("audio_downloaded", bytes=len(audio_bytes))
         except Exception as exc:
             logger.error("audio_download_failed", error=str(exc))
             self.evo.send_text(phone, "❌ Não consegui baixar o áudio. Pode tentar de novo?")
             return {"status": "error", "reason": "audio_download_failed"}
 
+        # Cria relato (sem evento ainda — associamos depois)
         duration = (data.get("message", {}).get("audioMessage", {}) or {}).get("seconds")
         report = self.reports.create_initial(
-            tenant_id=tenant,
-            caregiver_phone=phone,
-            caregiver_name_claimed=None,
-            audio_url=None,
+            tenant_id=tenant, caregiver_phone=phone,
+            caregiver_name_claimed=None, audio_url=None,
             audio_duration_seconds=duration,
         )
         report_id = report["id"]
 
-        # ---------- Biometria de voz (identificação do cuidador) ----------
+        # Biometria (identifica caregiver interno)
         caregiver_id, voice_method = self._identify_caregiver_by_voice(phone, audio_bytes, tenant)
         if caregiver_id:
             self.db.execute(
-                """
-                UPDATE aia_health_reports
-                SET caregiver_id = %s, caregiver_voice_method = %s
-                WHERE id = %s
-                """,
+                "UPDATE aia_health_reports SET caregiver_id = %s, caregiver_voice_method = %s WHERE id = %s",
                 (caregiver_id, voice_method, report_id),
             )
 
+        # Transcrição
         try:
-            result = self.transcriber.transcribe_bytes(audio_bytes)
-            transcription = result["transcript"]
-            confidence = result["confidence"]
+            tr = self.transcriber.transcribe_bytes(audio_bytes)
+            transcription, confidence = tr["transcript"], tr["confidence"]
         except Exception as exc:
             logger.error("transcription_failed", error=str(exc))
-            self.evo.send_text(phone, "❌ Não consegui transcrever o áudio. Tente gravar em local mais silencioso.")
+            self.evo.send_text(phone, "❌ Não consegui transcrever o áudio. Tente em local mais silencioso.")
             return {"status": "error", "reason": "transcription_failed"}
 
         if not transcription:
-            self.evo.send_text(phone, "🤔 Não consegui entender o áudio. Pode falar mais claramente?")
+            self.evo.send_text(phone, "🤔 Não consegui entender. Pode falar mais claramente?")
             return {"status": "error", "reason": "empty_transcription"}
 
         self.reports.update_transcription(report_id, transcription, confidence)
-
         entities = self.analyzer.extract_entities(transcription)
         self.reports.update_extracted_entities(report_id, entities)
 
-        patient_name = entities.get("patient_name_mentioned")
-        if not patient_name:
+        # Decide: é follow-up de evento existente, ou novo?
+        active_events = self.events.list_active_by_caregiver(tenant, phone)
+        patient_name_in_audio = (entities or {}).get("patient_name_mentioned")
+
+        # Tenta match com evento ativo específico (se nome bate com paciente de evento aberto)
+        if patient_name_in_audio and active_events:
+            matched_event = self._match_active_event_by_name(active_events, patient_name_in_audio)
+            if matched_event:
+                return self._handle_followup_audio(phone, matched_event, report_id, transcription, entities)
+
+        # Se sem nome e há UM evento ativo → assume follow-up daquele
+        if not patient_name_in_audio and len(active_events) == 1:
+            return self._handle_followup_audio(phone, active_events[0], report_id, transcription, entities)
+
+        # Se sem nome e há MÚLTIPLOS eventos ativos → desambigua
+        if not patient_name_in_audio and len(active_events) > 1:
+            self.evo.send_text(
+                phone,
+                "❓ Você tem mais de um paciente em acompanhamento no momento. "
+                "Pode dizer o nome do idoso para quem o relato se refere?",
+            )
+            return {"status": "need_clarification", "reason": "multiple_active_events"}
+
+        # Novo evento: identifica paciente
+        if not patient_name_in_audio:
             self.evo.send_text(
                 phone,
                 "❓ Não identifiquei o nome do idoso no áudio. Pode gravar novamente dizendo o nome dele?",
             )
             return {"status": "need_clarification", "reason": "no_patient_name"}
 
-        patient = self.patients.best_match(tenant, patient_name, threshold=0.5)
+        patient = self._resolve_patient(tenant, patient_name_in_audio)
         if not patient:
             self.evo.send_text(
                 phone,
-                f"❓ Entendi que você falou sobre *{patient_name}*, mas não encontrei essa pessoa no sistema. Pode confirmar o nome completo?",
+                f"❓ Entendi que você falou sobre *{patient_name_in_audio}*, mas não encontrei essa pessoa no sistema. Pode confirmar o nome completo?",
             )
             return {"status": "need_clarification", "reason": "patient_not_found"}
 
@@ -164,102 +225,449 @@ class EldercarePipeline:
             report_id, patient["id"], float(patient.get("match_score", 0.0))
         )
 
+        # Envia confirmação + sessão temporária esperando SIM/NÃO
         self._send_confirmation(phone, patient)
-        self.sessions.set(
-            tenant,
-            phone,
-            state="awaiting_patient_confirmation",
-            context={"report_id": str(report_id), "patient_id": str(patient["id"])},
+        # Usa sessão legada (conversation_sessions) apenas como buffer curto de confirmação
+        self.db.execute(
+            """
+            INSERT INTO aia_health_legacy_conversation_sessions (tenant_id, phone, state, context, expires_at)
+            VALUES (%s, %s, 'awaiting_patient_confirmation', %s, NOW() + INTERVAL '10 minutes')
+            ON CONFLICT (tenant_id, phone) DO UPDATE
+                SET state = EXCLUDED.state, context = EXCLUDED.context,
+                    expires_at = EXCLUDED.expires_at, updated_at = NOW()
+            """,
+            (
+                tenant, phone,
+                self.db.json_adapt({
+                    "report_id": str(report_id),
+                    "patient_id": str(patient["id"]),
+                    "patient_name": patient.get("full_name"),
+                    "patient_nickname": patient.get("nickname"),
+                    "transcription": transcription,
+                    "entities": entities,
+                }),
+            ),
         )
-
         return {"status": "awaiting_confirmation", "report_id": str(report_id)}
 
-    # ---------- Texto = resposta do cuidador ----------
+    # ==================================================================
+    # FOLLOW-UP ÁUDIO (evento ativo)
+    # ==================================================================
+    def _handle_followup_audio(
+        self, phone: str, event: dict, report_id: str,
+        transcription: str, entities: dict[str, Any],
+    ) -> dict[str, Any]:
+        tenant = event["tenant_id"]
+        patient = self.patients.get_by_id(str(event["patient_id"]))
+        if not patient:
+            logger.warning("followup_audio_patient_missing", event_id=str(event["id"]))
+            # Fallback: trata como novo áudio sem contexto
+            self.evo.send_text(phone, "❌ Perdi o contexto do paciente. Pode reenviar mencionando o nome?")
+            return {"status": "error", "reason": "patient_missing"}
+
+        patient_ref = patient.get("nickname") or patient.get("full_name")
+        self.evo.set_presence(phone, "composing")
+        self.evo.send_text(phone, f"🎙️ Mais um relato sobre *{patient_ref}*. Analisando a evolução...")
+
+        # Link report ↔ event
+        self.db.execute(
+            "UPDATE aia_health_reports SET care_event_id = %s WHERE id = %s",
+            (str(event["id"]), report_id),
+        )
+        self.reports.set_patient_candidate(report_id, patient["id"], match_score=1.0)
+        self.reports.confirm_patient(report_id)
+
+        # Registra no histórico do evento
+        self.events.append_message(
+            str(event["id"]),
+            {"role": "caregiver", "kind": "audio", "text": transcription, "report_id": str(report_id)},
+        )
+
+        # Análise com histórico acumulado da conversa
+        conversation_history = (event.get("context") or {}).get("messages") or []
+        history = self.reports.recent_for_patient(patient["id"], limit=5)
+
+        analysis = self.analyzer.analyze(
+            transcription, entities, patient, history,
+            conversation_history=conversation_history,
+        )
+        self._finalize_analysis(
+            event=event, patient=patient, report_id=report_id,
+            transcription=transcription, analysis=analysis, is_followup=True,
+        )
+        return {
+            "status": "analyzed_followup",
+            "event_id": str(event["id"]),
+            "report_id": str(report_id),
+            "classification": analysis.get("classification"),
+        }
+
+    # ==================================================================
+    # TEXTO
+    # ==================================================================
     def _handle_text(self, phone: str, text: str, data: dict[str, Any]) -> dict[str, Any]:
         tenant = settings.tenant_id
-        session = self.sessions.get(tenant, phone)
         text_lower = (text or "").strip().lower()
 
-        if not session:
+        # Primeiro: verifica se há sessão legada (confirmação SIM/NÃO)
+        legacy = self.db.fetch_one(
+            """
+            SELECT state, context FROM aia_health_legacy_conversation_sessions
+            WHERE tenant_id = %s AND phone = %s AND expires_at > NOW()
+            """,
+            (tenant, phone),
+        )
+        if legacy and legacy["state"] == "awaiting_patient_confirmation":
+            return self._handle_confirmation_response(phone, text_lower, legacy["context"])
+
+        # Depois: evento ativo?
+        active_events = self.events.list_active_by_caregiver(tenant, phone)
+        if not active_events:
             self.evo.send_text(
                 phone,
-                "👋 Oi! Para registrar um relato sobre um idoso, envie um *áudio* contando como ele está. Eu faço o resto.",
+                "👋 Oi! Para registrar um relato sobre um idoso, envie um *áudio*. Eu faço o resto.",
             )
-            return {"status": "ok", "reason": "no_active_session"}
+            return {"status": "ok", "reason": "no_active_event"}
 
-        state = session["state"]
-        context = session["context"]
+        if len(active_events) > 1:
+            # Texto ambíguo — pergunta qual paciente
+            names = ", ".join(
+                e.get("patient_nickname") or e.get("patient_name") or "paciente"
+                for e in active_events[:5]
+            )
+            self.evo.send_text(
+                phone,
+                f"❓ Você tem eventos ativos para: {names}. Sobre qual você está falando?",
+            )
+            return {"status": "need_clarification", "reason": "multiple_active_events"}
 
-        if state == "awaiting_patient_confirmation":
-            affirmative = any(w in text_lower for w in ["sim", "isso", "confirmo", "correto", "é ele", "é ela"])
-            negative = any(w in text_lower for w in ["não", "nao", "errado", "não é", "outro"])
+        # Single active event → follow-up textual
+        return self._handle_followup_text(phone, active_events[0], text)
 
-            if affirmative:
-                return self._on_patient_confirmed(phone, context)
-            if negative:
-                self.sessions.clear(tenant, phone)
-                self.evo.send_text(
-                    phone,
-                    "👍 Entendi. Pode gravar novamente o áudio com o nome correto do idoso, por favor?",
-                )
-                return {"status": "ok", "reason": "patient_rejected"}
+    def _handle_confirmation_response(
+        self, phone: str, text_lower: str, context: dict,
+    ) -> dict[str, Any]:
+        tenant = settings.tenant_id
+        affirmative = any(w in text_lower for w in ["sim", "isso", "confirmo", "correto", "é ele", "é ela"])
+        negative = any(w in text_lower for w in ["não", "nao", "errado", "não é", "outro"])
 
+        if negative:
+            self.db.execute(
+                "DELETE FROM aia_health_legacy_conversation_sessions WHERE tenant_id = %s AND phone = %s",
+                (tenant, phone),
+            )
+            self.evo.send_text(
+                phone,
+                "👍 Entendi. Pode gravar novamente o áudio com o nome correto do idoso?",
+            )
+            return {"status": "ok", "reason": "patient_rejected"}
+
+        if not affirmative:
             self.evo.send_text(phone, "Por favor responda *SIM* se é o paciente correto, ou *NÃO* se não for.")
             return {"status": "ok", "reason": "waiting_yes_no"}
 
-        return {"status": "ok", "reason": "unknown_state"}
+        # Confirmado → abre CareEvent
+        return self._open_event_from_confirmation(phone, context)
 
-    # ---------- Após confirmação, analisa ----------
-    def _on_patient_confirmed(self, phone: str, context: dict[str, Any]) -> dict[str, Any]:
+    def _open_event_from_confirmation(
+        self, phone: str, context: dict,
+    ) -> dict[str, Any]:
         tenant = settings.tenant_id
         report_id = context.get("report_id")
         patient_id = context.get("patient_id")
+        transcription = context.get("transcription") or ""
+        entities = context.get("entities") or {}
 
         report = self.reports.get_by_id(report_id)
         patient = self.patients.get_by_id(patient_id)
         if not report or not patient:
-            self.evo.send_text(phone, "❌ Ops, perdi o contexto desse relato. Pode reenviar o áudio?")
-            self.sessions.clear(tenant, phone)
+            self.evo.send_text(phone, "❌ Ops, perdi o contexto. Pode reenviar o áudio?")
             return {"status": "error", "reason": "context_lost"}
 
         self.reports.confirm_patient(report_id)
-        self.evo.send_text(phone, "✅ Confirmado. Analisando o relato agora, um momento...")
+
+        # Tags derivadas do relato (input pro pattern detection)
+        event_tags = self._derive_tags(transcription, entities)
+
+        # Abre evento
+        event = self.events.open(
+            tenant_id=tenant, patient_id=patient_id, caregiver_phone=phone,
+            event_type=event_tags[0] if event_tags else None,
+            event_tags=event_tags, initial_report_id=str(report_id),
+            initial_transcript=transcription,
+        )
+        # Link report ↔ event
+        self.db.execute(
+            "UPDATE aia_health_reports SET care_event_id = %s WHERE id = %s",
+            (str(event["id"]), report_id),
+        )
+
+        # Limpa sessão legada de confirmação
+        self.db.execute(
+            "DELETE FROM aia_health_legacy_conversation_sessions WHERE tenant_id = %s AND phone = %s",
+            (tenant, phone),
+        )
+
+        self.evo.send_text(phone, f"✅ Confirmado. Evento #{event['human_id']:04d} aberto. Analisando o relato agora...")
         self.evo.set_presence(phone, "composing")
 
-        transcription = report.get("transcription") or ""
-        entities = report.get("extracted_entities") or {}
+        # Análise clínica
         history = self.reports.recent_for_patient(patient_id, limit=5)
+        conversation_history = (event.get("context") or {}).get("messages") or []
+        analysis = self.analyzer.analyze(
+            transcription, entities, patient, history,
+            conversation_history=conversation_history,
+        )
 
-        analysis = self.analyzer.analyze(transcription, entities, patient, history)
+        self._finalize_analysis(
+            event=event, patient=patient, report_id=str(report_id),
+            transcription=transcription, analysis=analysis, is_followup=False,
+        )
+        return {
+            "status": "event_opened",
+            "event_id": str(event["id"]),
+            "classification": analysis.get("classification"),
+        }
 
-        classification = analysis.get("classification", "routine")
+    # ==================================================================
+    # FINALIZAÇÃO COMUM — aplicada tanto na abertura quanto no follow-up
+    # ==================================================================
+    def _finalize_analysis(
+        self,
+        event: dict, patient: dict, report_id: str,
+        transcription: str, analysis: dict, is_followup: bool,
+    ) -> None:
+        tenant = event["tenant_id"]
+        classification = analysis.get("classification", "attention")
         needs_med = bool(analysis.get("needs_medical_attention"))
+
+        # Persiste análise + classificação
         self.reports.save_analysis(report_id, analysis, classification, needs_med)
 
-        self._send_analysis_summary(phone, patient, analysis)
+        # Gera + salva embedding pra pattern detection futura
+        try:
+            summary_for_embed = " ".join([
+                transcription,
+                analysis.get("summary") or "",
+                " ".join(analysis.get("symptoms_concerning") or []),
+            ])[:4000]
+            vec = self.embeddings.embed(summary_for_embed)
+            if vec:
+                self.db.execute(
+                    "UPDATE aia_health_reports SET embedding = %s::vector WHERE id = %s",
+                    (vec, report_id),
+                )
+        except Exception as exc:
+            logger.warning("embedding_save_failed", error=str(exc))
 
-        if classification in {"urgent", "critical"} and patient.get("responsible"):
-            self._try_proactive_call(patient, analysis, classification)
+        # Atualiza o evento
+        self.events.update_classification(
+            str(event["id"]), classification,
+            reasoning=analysis.get("classification_reasoning"),
+        )
+        self.events.update_summary(str(event["id"]), analysis.get("summary") or "")
+        self.events.update_status(str(event["id"]), STATUS_AWAITING_ACK)
 
-        self.sessions.clear(tenant, phone)
-        return {"status": "analyzed", "classification": classification, "report_id": str(report_id)}
+        # Envia resumo ao cuidador
+        self._send_analysis_summary(event["caregiver_phone"], event, patient, analysis)
+        self.events.append_message(
+            str(event["id"]),
+            {
+                "role": "assistant", "kind": "analysis_summary",
+                "summary": analysis.get("summary"),
+                "classification": classification,
+            },
+        )
 
-    # ---------- Helpers de envio WhatsApp ----------
+        # Agenda check-ins timeline (só na abertura — follow-ups já estão no ciclo)
+        if not is_followup:
+            self._schedule_event_timeline(event, classification)
+
+        # Escalação imediata se urgente/crítico
+        if self.escalation.should_escalate(classification):
+            self.escalation.escalate_initial(event, patient, classification, analysis)
+
+    # ==================================================================
+    # Timeline — pattern_analysis + status_update + closure_check
+    # ==================================================================
+    def _schedule_event_timeline(self, event: dict, classification: str) -> None:
+        tenant = event["tenant_id"]
+        timings = self.tenant_cfg.get_timings(tenant, classification)
+        now = datetime.now(timezone.utc)
+
+        # Pattern analysis (+5 min default, configurável por classificação)
+        if self.tenant_cfg.is_feature_enabled(tenant, "pattern_detection"):
+            self.events.schedule_checkin(
+                event_id=str(event["id"]), tenant_id=tenant,
+                kind="pattern_analysis",
+                scheduled_for=now + timedelta(minutes=timings["pattern_analysis_after_min"]),
+            )
+
+        # Status update (+10 min)
+        if self.tenant_cfg.is_feature_enabled(tenant, "proactive_checkin"):
+            self.events.schedule_checkin(
+                event_id=str(event["id"]), tenant_id=tenant,
+                kind="status_update",
+                scheduled_for=now + timedelta(minutes=timings["check_in_after_min"]),
+            )
+
+        # Closure check (+30 min)
+        self.events.schedule_checkin(
+            event_id=str(event["id"]), tenant_id=tenant,
+            kind="closure_check",
+            scheduled_for=now + timedelta(minutes=timings["closure_decision_after_min"]),
+        )
+
+    # ==================================================================
+    # FOLLOW-UP TEXTO
+    # ==================================================================
+    def _handle_followup_text(self, phone: str, event: dict, text: str) -> dict[str, Any]:
+        tenant = event["tenant_id"]
+        patient = self.patients.get_by_id(str(event["patient_id"]))
+        if not patient:
+            self.evo.send_text(phone, "❌ Perdi o contexto. Pode reenviar?")
+            return {"status": "error", "reason": "patient_missing"}
+
+        # Registra mensagem antes de responder
+        self.events.append_message(
+            str(event["id"]),
+            {"role": "caregiver", "kind": "text", "text": text},
+        )
+
+        conversation_history = (event.get("context") or {}).get("messages") or []
+        context = event.get("context") or {}
+        last_analysis = context.get("last_analysis")
+
+        self.evo.set_presence(phone, "composing")
+        result = self.analyzer.answer_followup_text(
+            caregiver_text=text, patient=patient,
+            conversation_history=conversation_history, last_analysis=last_analysis,
+        )
+
+        reply = result.get("reply") or "Ok, registrei."
+        self.evo.send_text(phone, reply)
+        self.events.append_message(
+            str(event["id"]),
+            {"role": "assistant", "kind": "text", "text": reply, "intent": result.get("intent")},
+        )
+        self.events.touch_check_in(str(event["id"]))
+
+        # Se indicou piora: sugere áudio detalhado
+        if result.get("should_re_analyze"):
+            self.evo.send_text(
+                phone,
+                "🎙️ Se puder gravar um áudio descrevendo o que mudou, eu atualizo a análise.",
+            )
+
+        return {"status": "ok", "reason": "followup_text", "intent": result.get("intent")}
+
+    # ==================================================================
+    # IDENTIFICAÇÃO DE PACIENTE (local + MedMonitor)
+    # ==================================================================
+    def _resolve_patient(self, tenant: str, patient_name: str) -> dict | None:
+        """Busca paciente localmente. Se não achar, tenta MedMonitor (TotalCare).
+
+        Se achado no MedMonitor, cria espelho local com external_id + foto.
+        """
+        # Busca local primeiro (fuzzy + trgm)
+        local = self.patients.best_match(tenant, patient_name, threshold=0.5)
+        if local:
+            return local
+
+        # Fallback: busca MedMonitor (assistidos reais Tecnosenior)
+        if not self.medmonitor.enabled:
+            return None
+
+        remote_matches = self.medmonitor.list_patients(search=patient_name)
+        if not remote_matches:
+            return None
+
+        # Pega primeiro match — em produção pode ser ambíguo, aí cuidador desambigua via SIM/NÃO
+        remote = remote_matches[0]
+        person = remote.get("person") or {}
+        full_name = f"{person.get('first_name','').strip()} {person.get('last_name','').strip()}".strip()
+
+        # Espelha no DB local
+        row = self.db.fetch_one(
+            """
+            INSERT INTO aia_health_patients
+                (tenant_id, external_id, full_name, nickname, birth_date, gender,
+                 photo_url, metadata, active)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, TRUE)
+            ON CONFLICT DO NOTHING
+            RETURNING id, full_name, nickname, birth_date, gender, photo_url,
+                      care_unit, room_number, care_level, conditions, medications,
+                      allergies, responsible
+            """,
+            (
+                tenant, str(remote.get("id")), full_name, person.get("first_name"),
+                person.get("birthdate"), person.get("gender"),
+                person.get("profile_picture_url"),
+                self.db.json_adapt({
+                    "source": "medmonitor",
+                    "has_vidafone": remote.get("has_vidafone"),
+                    "has_gps_location": remote.get("has_gps_location"),
+                }),
+            ),
+        )
+        if row:
+            row["match_score"] = 0.95  # alta — veio direto da fonte de verdade
+            logger.info(
+                "patient_mirrored_from_medmonitor",
+                tenant_id=tenant, external_id=remote.get("id"), name=full_name,
+            )
+            return row
+        # Se insert falhou (race), busca de novo localmente
+        return self.patients.best_match(tenant, full_name, threshold=0.3)
+
+    def _match_active_event_by_name(
+        self, active_events: list[dict], name_in_audio: str,
+    ) -> dict | None:
+        """Heurística simples: match por substring do nickname/full_name."""
+        name_lower = (name_in_audio or "").lower().strip()
+        if not name_lower:
+            return None
+        for e in active_events:
+            cand = " ".join(
+                str(v or "") for v in [e.get("patient_nickname"), e.get("patient_name")]
+            ).lower()
+            if any(part in cand for part in name_lower.split() if len(part) >= 3):
+                # Carrega dados completos do evento (list_active traz campos resumidos)
+                return self.events.get_by_id(str(e["id"]))
+        return None
+
+    # ==================================================================
+    # HELPERS
+    # ==================================================================
+    @staticmethod
+    def _derive_tags(transcription: str, entities: dict[str, Any]) -> list[str]:
+        text = (transcription or "").lower()
+        hits: list[str] = []
+        for tag, terms in DERIVABLE_TAGS_FROM_TEXT.items():
+            if any(t in text for t in terms):
+                hits.append(tag)
+        # Se analyzer já extraiu tags, mescla
+        extracted = (entities or {}).get("tags") if isinstance(entities, dict) else None
+        if isinstance(extracted, list):
+            for t in extracted:
+                if isinstance(t, str) and t not in hits:
+                    hits.append(t)
+        return hits
+
     def _send_confirmation(self, phone: str, patient: dict[str, Any]) -> None:
         age = self._calc_age(patient.get("birth_date"))
-        caption_parts = [f"*{patient['full_name']}*"]
+        parts = [f"*{patient['full_name']}*"]
         if age:
-            caption_parts.append(f"{age} anos")
+            parts.append(f"{age} anos")
         if patient.get("care_unit"):
-            caption_parts.append(patient["care_unit"])
+            parts.append(patient["care_unit"])
         if patient.get("room_number"):
-            caption_parts.append(f"Quarto {patient['room_number']}")
-        caption_header = " · ".join(caption_parts)
+            parts.append(f"Quarto {patient['room_number']}")
+        caption_header = " · ".join(parts)
         caption = (
             f"📋 Você está relatando sobre:\n\n{caption_header}\n\n"
             f"Responda *SIM* para confirmar ou *NÃO* se for outra pessoa."
         )
-
         photo = patient.get("photo_url")
         if photo:
             try:
@@ -269,20 +677,24 @@ class EldercarePipeline:
                 logger.warning("confirmation_photo_failed", error=str(exc))
         self.evo.send_text(phone, caption)
 
-    def _send_analysis_summary(self, phone: str, patient: dict[str, Any], analysis: dict[str, Any]) -> None:
+    def _send_analysis_summary(
+        self, phone: str, event: dict, patient: dict, analysis: dict,
+    ) -> None:
         classification = analysis.get("classification", "routine")
         emoji = CLASSIFICATION_EMOJI.get(classification, "✅")
         label = CLASSIFICATION_LABEL_PT.get(classification, classification.upper())
-
         summary = analysis.get("summary", "Relato registrado.")
+
+        human_id = event.get("human_id")
+        header = f"Evento #{human_id:04d}" if human_id else "Relato"
+
         lines = [
-            f"{emoji} *Relato registrado — {patient['full_name']}*",
+            f"{emoji} *{header} — {patient['full_name']}*",
             "",
             f"📊 *Resumo:* {summary}",
             "",
             f"🏷️ *Classificação:* {label}",
         ]
-
         reason = analysis.get("classification_reasoning")
         if reason:
             lines.append(f"   _{reason}_")
@@ -298,62 +710,19 @@ class EldercarePipeline:
         recs = analysis.get("recommendations_caregiver") or []
         if recs:
             lines.append("")
-            lines.append("💡 *Recomendações para você:*")
+            lines.append("💡 *Recomendações imediatas:*")
             for r in recs[:4]:
                 lines.append(f"   • {r}")
 
-        if analysis.get("needs_medical_attention"):
+        if classification in {"urgent", "critical"}:
             lines.append("")
-            lines.append("👩‍⚕️ *Equipe de enfermagem foi notificada.*")
+            lines.append("🔔 *Equipe de enfermagem e família foram notificadas automaticamente.*")
 
         self.evo.send_text(phone, "\n".join(lines))
 
-    # ---------- Ligação proativa Sofia Voice ----------
-    def _try_proactive_call(
-        self, patient: dict[str, Any], analysis: dict[str, Any], classification: str
-    ) -> None:
-        responsible = patient.get("responsible") or {}
-        phone = responsible.get("phone")
-        if not phone:
-            return
-
-        patient_name = patient["full_name"]
-        summary = analysis.get("summary", "")
-        label = CLASSIFICATION_LABEL_PT.get(classification, classification.upper())
-
-        script = (
-            f"Você é a ConnectaIACare, assistente de cuidado do SPA. Ligue para {responsible.get('name','familiar')} "
-            f"({responsible.get('relationship','responsável')} de {patient_name}) com tom calmo, acolhedor e pausado.\n\n"
-            f"Situação: {label}. {summary}\n\n"
-            f"Script da ligação:\n"
-            f"1. Cumprimente pelo nome: 'Olá {responsible.get('name','')}, aqui é a ConnectaIACare, assistente de cuidado do seu familiar {patient_name}.'\n"
-            f"2. Explique que houve uma observação relevante no plantão.\n"
-            f"3. Resuma a observação em 1-2 frases curtas.\n"
-            f"4. Informe que a equipe de enfermagem já foi acionada e está atendendo.\n"
-            f"5. Pergunte se há algo que você precisa saber sobre o paciente (ex: alergia recente, preferência).\n"
-            f"6. Ofereça passar a ligação para a equipe humana se desejar.\n"
-            f"7. Encerre com tranquilidade."
-        )
-
-        self.sofia_voice.place_call(
-            phone=phone,
-            script=script,
-            patient_context={"patient_name": patient_name, "classification": classification},
-        )
-
-    # ---------- Biometria de voz ----------
     def _identify_caregiver_by_voice(
-        self, phone: str, audio_bytes: bytes, tenant: str
+        self, phone: str, audio_bytes: bytes, tenant: str,
     ) -> tuple[str | None, str]:
-        """Tenta identificar o cuidador por voz.
-
-        Estratégia:
-        1. Busca caregiver com phone cadastrado → tenta 1:1
-        2. Se 1:1 falhar ou phone desconhecido → 1:N no tenant
-        3. Se nada → caregiver_id=None, method='none'
-
-        Returns: (caregiver_id | None, method: '1:1'|'1:N'|'phone'|'none')
-        """
         try:
             row = self.db.fetch_one(
                 "SELECT id FROM aia_health_caregivers WHERE tenant_id = %s AND phone = %s AND active = TRUE",
@@ -361,7 +730,6 @@ class EldercarePipeline:
             )
             caregiver_by_phone = row["id"] if row else None
 
-            # Tentar 1:1 se temos candidato por phone
             if caregiver_by_phone:
                 result = self.voice_bio.verify_1to1(
                     str(caregiver_by_phone), tenant, audio_bytes, sample_rate=0
@@ -369,41 +737,26 @@ class EldercarePipeline:
                 if result.get("verified"):
                     return str(caregiver_by_phone), "1:1"
                 if result.get("reason") == "not_enrolled":
-                    # Sem enrollment: confia no phone como fallback
                     return str(caregiver_by_phone), "phone"
 
-            # 1:N — busca em todos os cuidadores do tenant
             result = self.voice_bio.identify_1toN(tenant, audio_bytes, sample_rate=0)
             if result.get("identified"):
                 return str(result["matched_caregiver_id"]), "1:N"
 
-            # Se temos phone mas biometria falhou: ainda usa phone como identidade fraca
             if caregiver_by_phone:
                 return str(caregiver_by_phone), "phone"
-
             return None, "none"
         except Exception as exc:
-            logger.warning("voice_identify_failed phone=%s error=%s", phone, exc)
-            if caregiver_by_phone := self._caregiver_by_phone_fallback(phone, tenant):
-                return str(caregiver_by_phone), "phone"
+            logger.warning("voice_identify_failed", phone=phone, error=str(exc))
             return None, "none"
 
-    def _caregiver_by_phone_fallback(self, phone: str, tenant: str) -> str | None:
-        try:
-            row = self.db.fetch_one(
-                "SELECT id FROM aia_health_caregivers WHERE tenant_id = %s AND phone = %s AND active = TRUE",
-                (tenant, phone),
-            )
-            return str(row["id"]) if row else None
-        except Exception:
-            return None
-
-    # ---------- Utils ----------
-    def _extract_phone(self, data: dict) -> str:
+    @staticmethod
+    def _extract_phone(data: dict) -> str:
         remote = (data.get("key") or {}).get("remoteJid") or ""
         return remote.split("@")[0] if "@" in remote else remote
 
-    def _detect_message_type(self, msg: dict) -> str:
+    @staticmethod
+    def _detect_message_type(msg: dict) -> str:
         if msg.get("audioMessage"):
             return "audio"
         if msg.get("conversation") or msg.get("extendedTextMessage"):
@@ -412,13 +765,15 @@ class EldercarePipeline:
             return "image"
         return "unknown"
 
-    def _extract_text(self, msg: dict) -> str:
+    @staticmethod
+    def _extract_text(msg: dict) -> str:
         if "conversation" in msg:
             return msg["conversation"] or ""
         ext = msg.get("extendedTextMessage") or {}
         return ext.get("text") or ""
 
-    def _calc_age(self, birth_date) -> int | None:
+    @staticmethod
+    def _calc_age(birth_date) -> int | None:
         if not birth_date:
             return None
         try:

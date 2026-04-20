@@ -28,6 +28,7 @@ Seguir: `NNN-kebab-case-title.md` (zero-padded, kebab-case).
 | [013](013-instancia-evolution-dedicada-chip-proprio.md) | Instância Evolution dedicada com chip próprio (supersedes ADR-006) | Accepted | 2026-04-20 |
 | [014](014-integracao-medmonitor-sinais-vitais.md) | Integração MedMonitor + modelo de dados de sinais vitais | Accepted (estrutura) / Proposed (integração real) | 2026-04-20 |
 | [015](015-topologia-redes-docker-hostinger.md) | Topologia de redes Docker na Hostinger co-habitada (refina 002+003) | Accepted | 2026-04-20 |
+| [017](017-sessao-conversacional-persistente.md) | Sessão conversacional persistente pós-confirmação de paciente | Accepted | 2026-04-20 |
 
 ## Como contribuir
 

@@ -14,6 +14,7 @@ import re
 from typing import Any
 
 from src.prompts.clinical_analysis import SYSTEM_PROMPT as CLINICAL_SYSTEM
+from src.prompts.followup_answer import SYSTEM_PROMPT as FOLLOWUP_SYSTEM
 from src.prompts.patient_extraction import SYSTEM_PROMPT as EXTRACTION_SYSTEM
 from src.services.llm import MODEL_DEEP, MODEL_FAST, get_llm
 from src.services.report_service import get_report_service
@@ -79,6 +80,7 @@ class AnalysisService:
         entities: dict[str, Any],
         patient: dict[str, Any],
         recent_reports: list[dict],
+        conversation_history: list[dict] | None = None,
     ) -> dict[str, Any]:
         patient_context = {
             "full_name": patient.get("full_name"),
@@ -112,6 +114,20 @@ class AnalysisService:
             logger.warning("vitals_fetch_failed", error=str(exc))
             vitals_text = "Indisponível no momento."
 
+        # Histórico conversacional na sessão atual (últimas trocas com o cuidador).
+        # Permite ao LLM entender evolução ("piorou", "melhorou", "agora apareceu X")
+        # em vez de tratar cada mensagem como isolada. Ver ADR-017.
+        conversation_block = ""
+        if conversation_history:
+            conversation_lines = _format_conversation(conversation_history)
+            conversation_block = (
+                "\n<conversation_history>\n"
+                "Trocas recentes com este cuidador nesta sessão (da mais antiga para a mais nova).\n"
+                "Use isto para detectar evolução clínica: o paciente melhorou ou piorou desde o último relato? Os sintomas são contínuos ou novos? A classificação atual deve escalar se houver deterioração.\n\n"
+                f"{conversation_lines}\n"
+                "</conversation_history>\n"
+            )
+
         # Payload em formato de tags XML — alinha com regras invioláveis do prompt
         # que separa informação (dentro das tags) de instruções (do sistema).
         # Ver SECURITY.md §4 (Prompt Injection).
@@ -131,6 +147,7 @@ class AnalysisService:
             "<recent_history>\n"
             f"{json.dumps(history_compact, ensure_ascii=False, indent=2)}\n"
             "</recent_history>\n"
+            f"{conversation_block}"
         )
 
         try:
@@ -214,6 +231,106 @@ class AnalysisService:
 
         return result
 
+    def answer_followup_text(
+        self,
+        caregiver_text: str,
+        patient: dict[str, Any],
+        conversation_history: list[dict] | None = None,
+        last_analysis: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Responde pergunta/comentário livre do cuidador no contexto da sessão.
+
+        Usado quando a sessão está em `active_with_patient` e o cuidador envia
+        TEXTO (não áudio). Ex: "ela acabou de piorar", "quando devo checar de novo?",
+        "ela aceitou tomar o remédio agora".
+
+        Retorna um dict com ao menos:
+            - reply: str (resposta curta e direta para enviar via WhatsApp)
+            - intent: "clinical_update"|"question"|"status_report"|"other"
+            - should_re_analyze: bool (se o texto indica mudança clínica relevante,
+              o pipeline pode gerar um novo relato + análise)
+        """
+        patient_context = {
+            "full_name": patient.get("full_name"),
+            "nickname": patient.get("nickname"),
+            "conditions": patient.get("conditions") or [],
+            "medications": patient.get("medications") or [],
+            "allergies": patient.get("allergies") or [],
+            "care_level": patient.get("care_level"),
+        }
+
+        try:
+            vitals_text = get_vital_signs_service().format_for_prompt(
+                patient_id=str(patient.get("id")), hours=24
+            )
+        except Exception:
+            vitals_text = "Indisponível no momento."
+
+        conversation_lines = _format_conversation(conversation_history or [])
+        last_analysis_compact = ""
+        if last_analysis:
+            last_analysis_compact = json.dumps(
+                {
+                    "summary": last_analysis.get("summary"),
+                    "classification": last_analysis.get("classification"),
+                    "classification_reasoning": last_analysis.get("classification_reasoning"),
+                    "recommendations_caregiver": (last_analysis.get("recommendations_caregiver") or [])[:3],
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+
+        user_payload = (
+            "<patient_record>\n"
+            f"{json.dumps(patient_context, ensure_ascii=False, indent=2)}\n"
+            "</patient_record>\n\n"
+            "<vital_signs_last_24h>\n"
+            f"{vitals_text}\n"
+            "</vital_signs_last_24h>\n\n"
+            "<conversation_history>\n"
+            f"{conversation_lines or '(sem trocas anteriores)'}\n"
+            "</conversation_history>\n\n"
+            "<last_analysis>\n"
+            f"{last_analysis_compact or '(nenhuma análise anterior nesta sessão)'}\n"
+            "</last_analysis>\n\n"
+            "<caregiver_message>\n"
+            f"{caregiver_text}\n"
+            "</caregiver_message>\n"
+        )
+
+        try:
+            result = self.llm.complete_json(
+                system=FOLLOWUP_SYSTEM,
+                user=user_payload,
+                model=MODEL_FAST,
+                max_tokens=1024,
+                temperature=0.2,
+            )
+        except Exception as exc:
+            logger.error("followup_answer_failed", error=str(exc))
+            return {
+                "reply": "Entendi. Estou registrando a informação. Se for algo que exija atenção, me diga para analisar em detalhe.",
+                "intent": "other",
+                "should_re_analyze": False,
+                "_error": str(exc),
+            }
+
+        # Validação mínima
+        if not isinstance(result, dict) or "reply" not in result:
+            return {
+                "reply": "Ok, registrei. Me avise se precisar de algo.",
+                "intent": "other",
+                "should_re_analyze": False,
+            }
+        result.setdefault("intent", "other")
+        result.setdefault("should_re_analyze", False)
+        logger.info(
+            "followup_answered",
+            intent=result.get("intent"),
+            should_re_analyze=result.get("should_re_analyze"),
+        )
+        return result
+
     def _fallback_result(self, error: str) -> dict[str, Any]:
         return {
             "summary": "Erro ao processar análise automática. Revisão manual necessária.",
@@ -228,6 +345,47 @@ class AnalysisService:
             "needs_medical_attention": True,
             "_error": error,
         }
+
+
+def _format_conversation(messages: list[dict]) -> str:
+    """Formata mensagens da sessão como diálogo legível para o LLM.
+
+    Cada linha: [HH:MM] Papel (tipo): texto
+    - Papel: Cuidador | Sistema
+    - Tipo omitido se = text; áudios aparecem como "(áudio transcrito)".
+    - Resumos de sistema aparecem como "(resumo/classificação)".
+
+    Defensivo contra mensagens mal-formadas — qualquer item sem 'text' vira '...'.
+    """
+    lines: list[str] = []
+    for m in messages:
+        ts = (m.get("timestamp") or "")
+        # Extrai HH:MM do ISO timestamp se possível
+        hhmm = ""
+        if "T" in ts:
+            try:
+                hhmm = ts.split("T")[1][:5]
+            except Exception:
+                hhmm = ""
+        role_raw = (m.get("role") or "").lower()
+        role = {"caregiver": "Cuidador", "assistant": "Sistema"}.get(role_raw, "Desconhecido")
+        kind = (m.get("kind") or "text").lower()
+        text = (m.get("text") or m.get("transcript") or m.get("summary") or "").strip()
+        if not text:
+            text = "..."
+
+        kind_label = ""
+        if kind == "audio":
+            kind_label = " (áudio transcrito)"
+        elif kind in ("analysis_summary", "summary"):
+            kind_label = " (resumo/classificação)"
+        elif kind == "confirmation":
+            kind_label = " (confirmação)"
+
+        prefix = f"[{hhmm}] " if hhmm else ""
+        lines.append(f"{prefix}{role}{kind_label}: {text}")
+
+    return "\n".join(lines)
 
 
 _analysis_instance: AnalysisService | None = None

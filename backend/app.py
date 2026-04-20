@@ -74,6 +74,18 @@ def create_app() -> Flask:
             }
         )
 
+    # Checkin Scheduler — worker background que dispara timeline de care events.
+    # Concorrência: usa pg_try_advisory_lock para garantir single-writer entre workers.
+    # Desabilitar em testes ou dev curto setando ENABLE_SCHEDULER=false.
+    import os
+    if os.getenv("ENABLE_SCHEDULER", "true").lower() == "true":
+        try:
+            from src.services.checkin_scheduler import get_scheduler
+            get_scheduler().start()
+            logger.info("checkin_scheduler_thread_started")
+        except Exception as exc:
+            logger.error("checkin_scheduler_failed_to_start", error=str(exc))
+
     logger.info("app_created", env=settings.env, debug=settings.debug)
     return app
 
