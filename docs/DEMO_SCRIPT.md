@@ -44,7 +44,7 @@ Envia o áudio para **555189592617**.
 
 **Passo 2** — Enquanto o processamento roda (~15-30s), Alexandre explica:
 
-> *"A IA está baixando o áudio, transcrevendo com Deepgram em português brasileiro, extraindo o nome do paciente com Claude, e buscando na base quem é a Dona Maria da Silva."*
+> *"A IA está baixando o áudio, transcrevendo em português brasileiro clinicamente correto, extraindo o nome do paciente com nosso modelo de raciocínio, e buscando na base quem é a Dona Maria da Silva."*
 
 **Passo 3** — WhatsApp responde com foto + nome:
 
@@ -82,7 +82,7 @@ No dashboard aparece:
 
 > *"E tem mais uma coisa…"* (atende no speaker)
 
-Voz natural da Sofia Voz:
+Voz natural do agente de ligação proativa:
 
 > *"Olá, senhora Ana, aqui é a ConnectaIACare, assistente de cuidado da sua mãe Maria. Precisei te avisar que ela apresentou alguns sinais que merecem atenção — recusou a janta, está com um pouco de falta de ar e inchaço na perna. A equipe de enfermagem já foi acionada e vai atendê-la nos próximos minutos. Você prefere que eu te passe para a enfermeira de plantão agora?"*
 
@@ -118,9 +118,9 @@ Ver passo 1 acima (caso Dona Maria da Silva).
 | Falha | Plano B |
 |-------|---------|
 | WhatsApp não envia áudio | Vídeo pré-gravado do fluxo em 60s rodando no laptop |
-| Deepgram falha | Transcrição mockada aparecendo como placeholder |
-| Claude demora > 30s | *"Estamos em modelo de raciocínio pesado — em produção usaremos o modelo rápido."* |
-| Sofia Voz não liga | *"Esta feature fica para quando passarmos do piloto; hoje focamos no registro e análise."* |
+| Transcrição falha | Transcrição mockada aparecendo como placeholder |
+| Modelo de raciocínio demora > 30s | *"Estamos em modelo de raciocínio profundo — em produção otimizamos para o modelo rápido."* |
+| Ligação proativa não sai | *"Esta feature fica para quando passarmos do piloto; hoje focamos no registro e análise."* |
 | Internet caindo | Hotspot do celular; se persistir, demo offline com screenshots navegados |
 
 ---
@@ -130,7 +130,8 @@ Ver passo 1 acima (caso Dona Maria da Silva).
 - *"Isso aqui já existe, está funcionando."*
 - *"Vocês acabaram de ouvir o que pode virar padrão nacional em 2 anos."*
 - *"A tecnologia é a parte fácil. O diferencial é o que vocês três trazem: pacientes reais, dispositivos homologados, expertise clínica."*
-- *"Não estamos competindo com Silicon Valley. Estamos fazendo algo que eles não podem: plataforma integrada brasileira, em português clinicamente correto, com LGPD nativa."*
+- *"A Sensi.ai capturou 80% das redes de home care dos EUA com tese parecida. O maior fabricante de IA do mundo investiu em healthcare vertical em janeiro. O mercado está validado — estamos replicando para o Brasil com diferenciais locais."*
+- *"Não estamos competindo com Silicon Valley. Estamos fazendo algo que eles não podem: plataforma integrada brasileira, em português clinicamente correto, com LGPD + CFM nativos e parcerias de vocês."*
 - *"Nossa tese é que o futuro do cuidado é contínuo, domiciliar, assistido por IA e mediado pelo WhatsApp. E estamos a 24 horas de começar a provar isso."*
 
 ---

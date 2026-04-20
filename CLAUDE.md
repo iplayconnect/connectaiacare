@@ -381,6 +381,57 @@ Atualizar esta tabela ao fechar/adicionar items.
 
 ---
 
+## 10.2. Política de Comunicação Externa
+
+> **Regra operacional** estabelecida em 2026-04-19. Válida para qualquer
+> material que sai do projeto (pitch, one-pager, site, apresentações,
+> comunicados, PRs públicos).
+
+### NUNCA nomear em material externo
+Fornecedores específicos de IA/ML/infra: Claude, Anthropic, Claude Opus/Sonnet/Haiku, Deepgram, OpenAI, GPT, Grok, Gemini, Llama, Resemblyzer, pyannote, pgvector, Evolution API, FastMCP.
+
+### SEMPRE usar termos genéricos em material externo
+
+| ❌ Evitar | ✅ Usar |
+|-----------|---------|
+| Claude Opus / Anthropic API | Modelo de raciocínio clínico de última geração |
+| Claude Sonnet/Haiku | LLM vertical em saúde |
+| Deepgram | Motor de transcrição neural em pt-BR |
+| Sofia Voice (Grok) | Agente de voz conversacional natural |
+| Resemblyzer | Biometria de voz de produção (256-dim) |
+| pgvector | Busca vetorial em base relacional |
+| Evolution API | Integração nativa com WhatsApp |
+
+### PODE citar em material externo
+- **Cases de mercado com nome**: Sensi.ai, Hippocratic AI, Current Health, Biofourmis, Abridge, Ada Health, Corti, Tsinghua AI Hospital, Ping An, iFlytek
+- **Tendências/anúncios oficiais** como fato público: "Anthropic lançou Claude for Healthcare em jan/2026", "Meta WhatsApp Cloud API", "ANS Normativa 465/2021"
+- **Frameworks regulatórios**: LGPD, CFM 2.314/2022, ANVISA Classe II, HIPAA, GDPR, HL7 FHIR R4
+- **Parceiros do projeto**: Tecnosenior, MedMonitor, Amparo, Vita
+
+### Onde a regra se APLICA
+- ✅ `docs/PITCH_DECK.md` (material investidor/parceiro)
+- ✅ `docs/ONE_PAGER.md`
+- ✅ `docs/DEMO_SCRIPT.md` (roteiro usado na reunião)
+- ✅ Site, landing, blog, LinkedIn, press releases
+
+### Onde a regra NÃO se aplica (usar nomes normalmente)
+- ❌ Este `CLAUDE.md` (contexto interno)
+- ❌ `SECURITY.md`, `INFRASTRUCTURE.md`, `STATUS.md`
+- ❌ ADRs e RFCs em `docs/adr/`, `docs/rfc/`
+- ❌ Código, comentários, `requirements.txt`, `package.json`
+- ❌ Logs estruturados (structlog em produção)
+
+**Razão**: engenharia precisa de nomes técnicos para funcionar. Política é marketing/narrativa, não técnica.
+
+### Por quê
+1. Não dar munição a concorrente sobre stack
+2. Liberdade de troca de fornecedor sem refazer marketing
+3. Não virar "startup que só usa X" — vendemos resultado clínico, não tecnologia
+4. Enterprise prefere neutralidade — "melhor modelo disponível" é mais credível
+5. Sensi.ai (nosso benchmark) não menciona modelo e capturou 80% do mercado US
+
+---
+
 ## 11. Referências rápidas
 
 | Documento | Para quê |

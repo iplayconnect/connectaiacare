@@ -20,7 +20,7 @@ Plataforma de cuidado integrado com IA para idosos e pacientes crônicos em suas
 
 | Parceiro | Aporta |
 |----------|--------|
-| **ConnectaIA** | Camada de IA em produção (Sofia Multi-Agent, Grok Voice, Evolution, LLMRouter) |
+| **ConnectaIA** | Camada de IA em produção (orquestração de agentes, voz conversacional natural, integração WhatsApp, roteador de LLMs de última geração) |
 | **Tecnosenior** | IoT ambiente + SPAs + central humana 24h + expertise geriátrica |
 | **MedMonitor** | Dispositivos clínicos homologados + plataforma de aferição |
 | **Amparo** | Atenção primária digital + base de pacientes crônicos |
@@ -32,7 +32,7 @@ Plataforma de cuidado integrado com IA para idosos e pacientes crônicos em suas
 3. IA analisa relato à luz do histórico clínico e condições.
 4. Classifica: **ROTINA · ATENÇÃO · URGENTE · CRÍTICO**.
 5. Notifica equipe médica no painel web em tempo real.
-6. Se crítico: **Sofia Voz liga** para familiar com tom humano e acolhedor.
+6. Se crítico: **agente de voz natural liga** para familiar com tom humano e acolhedor.
 
 **Tempo total: < 45 segundos.**
 
@@ -40,18 +40,22 @@ Plataforma de cuidado integrado com IA para idosos e pacientes crônicos em suas
 
 - WhatsApp-first (zero fricção de adoção).
 - CFM-compliant (IA apoia, médico decide).
-- FHIR R4 nativo (integra qualquer hospital).
-- Auditoria imutável via hash-chain + OpenTimestamps.
+- HL7 FHIR R4 nativo (integra qualquer hospital).
+- Auditoria imutável criptográfica com ancoragem pública.
 - Motor de interações medicamentosas automático.
 - Biometria de voz (identifica cuidador em aparelho compartilhado).
 - Roadmap de adesivos wearables para monitoramento contínuo 24/7.
 
 ## Benchmark
 
-EUA: Hippocratic AI (US$ 500M), Current Health (Best Buy), Biofourmis.
-China: Tsinghua AI Hospital, Ping An Good Doctor (400M+ usuários).
-Europa: Ada Health, Corti, Nabla.
-**Brasil: ConnectaIACare pode ser o primeiro player integrado.**
+**Sensi.ai (EUA)**: 80% das principais redes de home care dos EUA — monitoramento de idosos por áudio 24/7. ROI documentado com clientes: +88% clientela, +50% receita, +85% horas faturáveis.
+**Hippocratic AI (EUA)**: ~US$ 500M de funding — LLM vertical saúde para cuidado pós-alta.
+**Current Health (EUA)**: adquirida pela Best Buy Health — hospital-at-home.
+**Anthropic Claude for Healthcare (jan/2026)**: substrato de IA com conectores HIPAA + FHIR + integração Apple Health. Valida o vertical.
+**China**: Tsinghua AI Hospital, Ping An Good Doctor (400M+ usuários).
+**Europa**: Ada Health, Corti, Nabla.
+
+**Brasil**: nenhum player integra casa + IoT + IA + prontuário + cuidador em português nativo. **ConnectaIACare pode ser o primeiro.**
 
 ## Modelo comercial
 

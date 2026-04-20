@@ -52,21 +52,25 @@ Três camadas integradas:
 
 | Região | Quem | O que |
 |--------|------|-------|
-| **EUA** | Hippocratic AI (US$ 500M NVIDIA/a16z) | LLM vertical saúde para cuidado pós-alta |
-| **EUA** | Current Health (comprada Best Buy Health) | Hospital-at-home com wearables + plataforma |
+| **EUA** | **Sensi.ai** — 80% das principais redes de home care dos EUA | Monitoramento de idosos via áudio passivo 24/7. ROI documentado: +88% clientela, +50% receita, +85% horas faturáveis |
+| **EUA** | Hippocratic AI (~US$ 500M de funding) | LLM vertical saúde para cuidado pós-alta |
+| **EUA** | Current Health (adquirida pela Best Buy Health) | Hospital-at-home com wearables + plataforma |
 | **EUA** | Biofourmis | RPM + digital therapeutics com FDA approval |
+| **EUA** | Anthropic — lançou **Claude for Healthcare** em jan/2026 | Substrato de IA com conectores HIPAA + Agent Skills para FHIR + integração Apple Health / Android Health Connect — **valida mercado e fornece infra pronta** |
 | **China** | Tsinghua AI Hospital | 14 médicos virtuais de IA em hospital-piloto |
 | **China** | Ping An Good Doctor | 400M+ usuários em plataforma verticalizada |
 | **Europa** | Ada Health, Corti, Nabla | Triagem, emergência, documentação clínica |
 
-**Brasil: nenhum player integra casa + IoT + IA + prontuário + cuidador. Janela de 2-3 anos para liderar.**
+**Brasil**: nenhum player integra casa + IoT + IA + prontuário + cuidador em português nativo com parceiros locais. **Janela de 2-3 anos para liderar** antes que players globais localizem.
+
+**Leitura desse quadro**: o mercado global está validado. O maior fabricante de modelos de IA do mundo investiu em healthcare vertical. Sensi.ai prova que o modelo B2B para home care converte e escala. Nossa tese não é especulativa — é replicar com diferenciais locais.
 
 ---
 
 ## Slide 5 — A equipe certa, no momento certo
 
 ### ConnectaIA
-Infraestrutura de IA vertical em saúde em produção. Multi-tenant, Sofia Multi-Agent, voz bidirecional com Grok, integração WhatsApp via Evolution API, LLMRouter Anthropic, biometria de voz, MCP para integrações externas. **Já roda 24/7 em clientes pagantes.**
+Infraestrutura de IA vertical em saúde em produção. Multi-tenant, orquestração de agentes especializados, voz bidirecional conversacional natural, integração nativa com WhatsApp, roteador de modelos de raciocínio de última geração, biometria de voz de produção, conectores padronizados para integrações externas. **Já roda 24/7 em clientes pagantes.**
 
 ### Tecnosenior
 10+ anos em tele-assistência geriátrica. SPAs e residências com sensores instalados. Central humana 24h. **Parceria existente com ConnectaIA (SOS + Queda).**
@@ -86,21 +90,22 @@ Atenção primária digital em escala. Monitoramento de pacientes crônicos.
 ```
 Cuidador grava áudio WhatsApp
             ↓
-Deepgram transcreve (pt-BR)
+Transcrição neural em pt-BR clinicamente correto
             ↓
-Claude extrai paciente + sintomas + medicações
+Extração estruturada: paciente + sintomas + medicações
             ↓
-Sistema identifica paciente na base (fuzzy matching)
+Identificação do paciente na base (fuzzy matching por nome)
             ↓
-WhatsApp envia foto + nome para confirmação
+WhatsApp responde com foto + nome para confirmação
             ↓
 Cuidador confirma SIM
             ↓
-Claude Opus analisa relato + histórico + condições
+Motor de raciocínio clínico analisa o relato contextualizado
+com histórico do paciente + condições conhecidas + medicações
             ↓
 Classifica: ROTINA | ATENÇÃO | URGENTE | CRÍTICO
             ↓
-Se urgente/crítico: Sofia Voz liga para o familiar
+Se urgente/crítico: ligação proativa de voz natural ao familiar
             ↓
 Equipe médica recebe no painel web em tempo real
 ```
@@ -111,13 +116,13 @@ Equipe médica recebe no painel web em tempo real
 
 ## Slide 7 — Diferenciais
 
-1. **IA vertical em saúde em português** — não é ChatGPT genérico, é modelo treinado com protocolos geriátricos.
+1. **IA vertical em saúde em português clinicamente correto** — adaptada para protocolos geriátricos e terminologia médica brasileira, não IA genérica.
 2. **WhatsApp-first** — zero fricção de adoção. Ninguém precisa instalar app.
 3. **Compliance CFM 2.314/2022** — IA apoia, médico decide. Juridicamente defensável.
-4. **Hash-chain + OpenTimestamps** — auditoria imutável sem as dores do blockchain pleno.
+4. **Auditoria imutável de próxima geração** — cadeia criptográfica com ancoragem pública, sem os problemas de blockchain pleno para LGPD.
 5. **Motor de interações medicamentosas** — cruza prescrição com relatos e alerta automaticamente.
-6. **Sofia Voz 24h** — ligação natural com familiares e equipe, tom geriátrico.
-7. **FHIR R4 nativo** — qualquer hospital do mundo integra sem custo de transformação.
+6. **Agente de voz conversacional 24h** — ligação natural com familiares e equipe, tom geriátrico.
+7. **HL7 FHIR R4 nativo** — qualquer hospital do mundo integra sem custo de transformação.
 8. **Biometria de voz** — identifica cuidador mesmo com aparelho compartilhado.
 
 ---
