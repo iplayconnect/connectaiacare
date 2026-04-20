@@ -274,7 +274,7 @@ class EldercarePipeline:
             "UPDATE aia_health_reports SET care_event_id = %s WHERE id = %s",
             (str(event["id"]), report_id),
         )
-        self.reports.set_patient_candidate(report_id, patient["id"], match_score=1.0)
+        self.reports.set_patient_candidate(report_id, patient["id"], 1.0)
         self.reports.confirm_patient(report_id)
 
         # Registra no histórico do evento
