@@ -28,10 +28,11 @@ python-multipart==0.0.12
 aiofiles==24.1.0
 
 # Voice biometrics (Resemblyzer + pgvector)
-# setuptools: Python 3.12 removeu pkg_resources do stdlib implícito;
-# webrtcvad (dep indireta do resemblyzer) ainda depende dele. Sem esta linha:
-# ModuleNotFoundError: No module named 'pkg_resources' ao carregar VoiceEncoder.
-setuptools>=75.0.0
+# setuptools: Python 3.12 removeu pkg_resources do stdlib implícito.
+# webrtcvad (dep indireta do resemblyzer) ainda depende de `import pkg_resources`.
+# ATENÇÃO: setuptools >=80 REMOVEU pkg_resources do pacote — pinamos <80.
+# Ver https://github.com/pypa/setuptools/issues/4935
+setuptools>=75.0.0,<80
 resemblyzer==0.1.4
 scipy==1.14.1
 torch==2.4.1
