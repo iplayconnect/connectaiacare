@@ -17,6 +17,7 @@ from src.prompts.clinical_analysis import SYSTEM_PROMPT as CLINICAL_SYSTEM
 from src.prompts.patient_extraction import SYSTEM_PROMPT as EXTRACTION_SYSTEM
 from src.services.llm import MODEL_DEEP, MODEL_FAST, get_llm
 from src.services.report_service import get_report_service
+from src.services.vital_signs_service import get_vital_signs_service
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -101,6 +102,16 @@ class AnalysisService:
                 }
             )
 
+        # Buscar sinais vitais das últimas 24h (MedMonitor-ready)
+        # Integração ADR-014: LLM cruza sintomas do relato com vitais objetivos.
+        try:
+            vitals_text = get_vital_signs_service().format_for_prompt(
+                patient_id=str(patient.get("id")), hours=24
+            )
+        except Exception as exc:
+            logger.warning("vitals_fetch_failed", error=str(exc))
+            vitals_text = "Indisponível no momento."
+
         # Payload em formato de tags XML — alinha com regras invioláveis do prompt
         # que separa informação (dentro das tags) de instruções (do sistema).
         # Ver SECURITY.md §4 (Prompt Injection).
@@ -114,6 +125,9 @@ class AnalysisService:
             "<patient_record>\n"
             f"{json.dumps(patient_context, ensure_ascii=False, indent=2)}\n"
             "</patient_record>\n\n"
+            "<vital_signs_last_24h>\n"
+            f"{vitals_text}\n"
+            "</vital_signs_last_24h>\n\n"
             "<recent_history>\n"
             f"{json.dumps(history_compact, ensure_ascii=False, indent=2)}\n"
             "</recent_history>\n"

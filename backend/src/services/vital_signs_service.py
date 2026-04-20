@@ -238,6 +238,140 @@ class VitalSignsService:
         return "routine"
 
 
+    # ──────────────────────────────────────────────────────────────
+    # Formato para prompt clínico (cruzamento sintoma × vital)
+    # ──────────────────────────────────────────────────────────────
+
+    def format_for_prompt(self, patient_id: str, hours: int = 24) -> str:
+        """Retorna sumário compacto dos vitais recentes, pronto pra injetar no
+        prompt clínico.
+
+        Formato otimizado para o LLM cruzar com sintomas do relato. Inclui:
+        - Última medição de cada tipo nas últimas N horas
+        - Trend vs média dos últimos 7 dias (+- absoluto e direção)
+        - Status clinicamente relevante
+        - Contador de alertas nas últimas 24h
+
+        Se não houver medições nas últimas N horas, retorna string indicando
+        (para o LLM não inferir dados que não existem).
+        """
+        since = datetime.now(timezone.utc) - timedelta(hours=hours)
+
+        # Pega última de cada tipo, mas só se estiver dentro da janela
+        recent_rows = self.db.fetch_all(
+            """
+            SELECT DISTINCT ON (vital_type)
+                vital_type, value_numeric, value_secondary, unit, status,
+                measured_at, source
+            FROM aia_health_vital_signs
+            WHERE patient_id = %s
+              AND measured_at >= %s
+            ORDER BY vital_type, measured_at DESC
+            """,
+            (patient_id, since),
+        )
+
+        if not recent_rows:
+            return (
+                "Nenhuma medição de sinal vital nas últimas "
+                f"{hours}h para este paciente."
+            )
+
+        # Baseline dos últimos 7 dias (excluindo último dia para comparação)
+        baseline_rows = self.db.fetch_all(
+            """
+            SELECT vital_type, AVG(value_numeric) AS avg_val,
+                   AVG(value_secondary) AS avg_sec
+            FROM aia_health_vital_signs
+            WHERE patient_id = %s
+              AND measured_at >= NOW() - INTERVAL '7 days'
+              AND measured_at < NOW() - INTERVAL '1 day'
+            GROUP BY vital_type
+            """,
+            (patient_id,),
+        )
+        baselines = {r["vital_type"]: r for r in baseline_rows}
+
+        # Alerts count
+        alerts_row = self.db.fetch_one(
+            """
+            SELECT COUNT(*) AS n
+            FROM aia_health_vital_signs
+            WHERE patient_id = %s
+              AND measured_at >= NOW() - INTERVAL '24 hours'
+              AND status IN ('urgent', 'critical')
+            """,
+            (patient_id,),
+        )
+        alerts_24h = (alerts_row or {}).get("n", 0)
+
+        # Montar linhas human-readable por tipo
+        lines: list[str] = []
+        priority_order = [
+            "blood_pressure_composite",
+            "heart_rate",
+            "oxygen_saturation",
+            "temperature",
+            "blood_glucose",
+            "respiratory_rate",
+            "weight",
+        ]
+        by_type = {r["vital_type"]: r for r in recent_rows}
+
+        for vt in priority_order:
+            r = by_type.get(vt)
+            if not r:
+                continue
+            label = VITAL_LABELS_PT.get(vt, vt)
+            val = r["value_numeric"]
+            sec = r["value_secondary"]
+            unit = r["unit"]
+            status = r["status"]
+            measured = r["measured_at"]
+
+            value_str = (
+                f"{float(val):.0f}/{float(sec):.0f} {unit}"
+                if sec is not None and vt == "blood_pressure_composite"
+                else f"{float(val):.1f} {unit}".rstrip("0").rstrip(".") + f" {unit}"
+                if "." not in str(val)
+                else f"{float(val):.2f} {unit}"
+            )
+            # Limpeza: pra inteiros não mostrar decimal
+            if unit in {"mmHg", "bpm", "percent", "mg/dl", "rpm"}:
+                if sec is not None and vt == "blood_pressure_composite":
+                    value_str = f"{int(float(val))}/{int(float(sec))} {unit}"
+                else:
+                    value_str = f"{int(float(val))} {unit}"
+            elif unit in {"kg"}:
+                value_str = f"{float(val):.2f} {unit}"
+            elif unit in {"celsius"}:
+                value_str = f"{float(val):.1f}°C"
+
+            # Trend vs baseline
+            trend_str = ""
+            base = baselines.get(vt)
+            if base and base.get("avg_val") is not None:
+                avg = float(base["avg_val"])
+                cur = float(val)
+                delta = cur - avg
+                if abs(delta) >= 0.05 * avg:
+                    arrow = "↗" if delta > 0 else "↘"
+                    trend_str = f", {arrow} {'+' if delta>0 else ''}{delta:.1f} vs média 7d ({avg:.1f})"
+                else:
+                    trend_str = ", estável"
+
+            # Formato final da linha
+            measured_at_str = (
+                measured.strftime("%d/%m %H:%M") if hasattr(measured, "strftime") else str(measured)
+            )
+            lines.append(f"- {label}: {value_str} ({status}{trend_str}) — {measured_at_str}")
+
+        # Sumário final
+        summary = "\n".join(lines)
+        summary += f"\n\nAlertas em vitais nas últimas 24h: {alerts_24h}"
+        return summary
+
+
 _instance: VitalSignsService | None = None
 
 
