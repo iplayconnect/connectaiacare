@@ -1,3 +1,18 @@
+# ConnectaIACare — stack de produção (co-habitada na Hostinger com isolamento lógico)
+#
+# Arquitetura de redes (ADR-015):
+#   - infra_proxy (EXTERNAL): rede compartilhada com Traefik da Hostinger. Só `api`
+#     e `frontend` se pluga nela → recebem tráfego público HTTPS via Traefik.
+#   - connectaiacare_internal (BRIDGE local): postgres, redis, api e frontend.
+#     É a rede PRIVADA da ConnectaIACare. O PG e o Redis NÃO são acessíveis por
+#     nenhum outro container do ConnectaIA SaaS porque só existem aqui dentro.
+#
+# Isolamento de dados (LGPD — dado sensível de saúde):
+#   - Container postgres DEDICADO (não reusa `infra-postgres-1` do SaaS)
+#   - Volume próprio (`connectaiacare_pg_data`)
+#   - Credenciais próprias (via .env)
+#   - Backup independente (documentado no runbook)
+
 services:
   postgres:
     image: pgvector/pgvector:pg16
@@ -10,10 +25,10 @@ services:
     volumes:
       - connectaiacare_pg_data:/var/lib/postgresql/data
       - ./backend/migrations:/docker-entrypoint-initdb.d
-    ports:
-      - "5433:5432"
+    # Porta NÃO exposta no host em produção — acesso só via rede interna.
+    # Para acesso de emergência, usar `docker exec` ou túnel SSH ad-hoc.
     networks:
-      - connectaiacare_net
+      - connectaiacare_internal
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d connectaiacare"]
       interval: 10s
@@ -27,10 +42,9 @@ services:
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
       - connectaiacare_redis_data:/data
-    ports:
-      - "6380:6379"
+    # Porta NÃO exposta no host em produção.
     networks:
-      - connectaiacare_net
+      - connectaiacare_internal
 
   api:
     build:
@@ -48,16 +62,23 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
-    ports:
-      - "5055:5055"
+    # Porta NÃO exposta no host — Traefik alcança via rede `infra_proxy`.
     networks:
-      - connectaiacare_net
+      - connectaiacare_internal  # Acessa PG e Redis
+      - infra_proxy              # Traefik alcança por aqui
     labels:
       traefik.enable: "true"
+      traefik.docker.network: "infra_proxy"
       traefik.http.routers.connectaiacare-api.rule: "Host(`demo.connectaia.com.br`)"
       traefik.http.routers.connectaiacare-api.entrypoints: "websecure"
       traefik.http.routers.connectaiacare-api.tls.certresolver: "letsencrypt"
       traefik.http.services.connectaiacare-api.loadbalancer.server.port: "5055"
+      # Redirect HTTP → HTTPS
+      traefik.http.routers.connectaiacare-api-http.rule: "Host(`demo.connectaia.com.br`)"
+      traefik.http.routers.connectaiacare-api-http.entrypoints: "web"
+      traefik.http.routers.connectaiacare-api-http.middlewares: "connectaiacare-https-redirect"
+      traefik.http.middlewares.connectaiacare-https-redirect.redirectscheme.scheme: "https"
+      traefik.http.middlewares.connectaiacare-https-redirect.redirectscheme.permanent: "true"
 
   frontend:
     build:
@@ -66,27 +87,39 @@ services:
     container_name: connectaiacare-frontend
     restart: unless-stopped
     environment:
-      # Browser (Client Components) — hostname público ou localhost em dev
+      # Browser (Client Components): hostname público
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-https://demo.connectaia.com.br}
-      # Server Components (SSR dentro do container) — usa service name Docker
+      # Server Components (SSR dentro do container): service name Docker
       INTERNAL_API_URL: http://api:5055
     depends_on:
       - api
-    ports:
-      - "3030:3000"
     networks:
-      - connectaiacare_net
+      - connectaiacare_internal  # Alcança a api pela rede interna (SSR)
+      - infra_proxy              # Traefik alcança por aqui
     labels:
       traefik.enable: "true"
+      traefik.docker.network: "infra_proxy"
       traefik.http.routers.connectaiacare-web.rule: "Host(`care.connectaia.com.br`)"
       traefik.http.routers.connectaiacare-web.entrypoints: "websecure"
       traefik.http.routers.connectaiacare-web.tls.certresolver: "letsencrypt"
       traefik.http.services.connectaiacare-web.loadbalancer.server.port: "3000"
+      # Redirect HTTP → HTTPS
+      traefik.http.routers.connectaiacare-web-http.rule: "Host(`care.connectaia.com.br`)"
+      traefik.http.routers.connectaiacare-web-http.entrypoints: "web"
+      traefik.http.routers.connectaiacare-web-http.middlewares: "connectaiacare-web-https-redirect"
+      traefik.http.middlewares.connectaiacare-web-https-redirect.redirectscheme.scheme: "https"
+      traefik.http.middlewares.connectaiacare-web-https-redirect.redirectscheme.permanent: "true"
 
 volumes:
   connectaiacare_pg_data:
   connectaiacare_redis_data:
 
 networks:
-  connectaiacare_net:
+  # Rede PRIVADA da ConnectaIACare (isolamento LGPD).
+  # Nenhum outro container do host enxerga PG ou Redis.
+  connectaiacare_internal:
     driver: bridge
+  # Rede PÚBLICA compartilhada com Traefik (pré-existente na VPS).
+  # Só `api` e `frontend` se pluga — PG/Redis ficam fora.
+  infra_proxy:
+    external: true
