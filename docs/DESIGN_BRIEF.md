@@ -132,6 +132,99 @@ Ver `frontend/tailwind.config.ts` e `frontend/src/app/globals.css`. Resumo:
 19. **Gestão de consentimentos LGPD** — histórico de consent log por paciente, exportação (Art. 18 direitos do titular).
 20. **Dashboard de saúde da plataforma** — métricas operacionais: latência pipeline, custo de IA por tenant, uptime.
 
+## 5.1. Sinais vitais (MedMonitor) — especificação detalhada
+
+Requisito adicionado 2026-04-20: o **Prontuário longitudinal** (P1 #4) deve exibir sinais vitais de acordo com a integração com MedMonitor (parceiro técnico que provê dispositivos clínicos homologados).
+
+### Parâmetros suportados
+
+| Parâmetro | Unidade | LOINC | Faixa idoso (routine) | Frequência típica | Origem |
+|-----------|---------|-------|----------------------|-------------------|--------|
+| **Pressão arterial** (sistólica/diastólica) | mmHg | 85354-9 / 8462-4 | 110-140 / 60-90 | 2-3x/dia | Manual, MedMonitor |
+| **Frequência cardíaca** | bpm | 8867-4 | 55-90 (idoso em βblock: 50-70) | Contínua ou pontual | Manual, MedMonitor, wearable |
+| **Temperatura** | °C | 8310-5 | 36.0-37.5 (idoso tem baseline ~0.5°C menor) | 1-3x/dia | Manual, MedMonitor |
+| **Saturação O₂ (SpO₂)** | % | 59408-5 | 94-100 (DPOC crônico baseline 88-92) | Pontual ou contínua | Oxímetro MedMonitor, wearable |
+| **Glicemia capilar** | mg/dL | 2339-0 | 70-180 (diabéticos: alvo mais flex) | 1-4x/dia (diabéticos) | Glicosímetro MedMonitor |
+| **Frequência respiratória** | rpm | 9279-1 | 12-20 (>24 sinal IC/pneumonia) | Raro em home care | Manual, wearable |
+| **Peso** | kg | 29463-7 | Alerta por delta (>2kg/semana) | 1-2x/semana | Balança MedMonitor, manual |
+
+### Status de cada medição (mesma taxonomia do sistema)
+
+- `routine` — dentro da faixa ideal
+- `attention` — borderline, merece observação (ex: PA 145/92)
+- `urgent` — fora da faixa clinicamente relevante
+- `critical` — valor de emergência (ex: PA >180/110 = crise hipertensiva; SpO₂ <85)
+
+Ranges adaptam-se por paciente: tabela `aia_health_vital_ranges` permite definir thresholds customizados (ex: paciente com DPOC crônico pode ter `routine_min` de SpO₂ em 88% em vez de 94%). Se não há range paciente-específico, usa-se o **range populacional default para idosos** (já populado pela migration 004, baseado em SBH/SBD).
+
+### Design de visualização no Prontuário longitudinal
+
+**Seção "Sinais Vitais" no topo do prontuário**, abaixo do header do paciente:
+
+#### Header cards — Última leitura de cada parâmetro (4-6 cards em linha)
+
+Cada card:
+```
+┌───────────────────────────┐
+│  🩺  PA                    │  ← ícone + label curto
+│                            │
+│  128 / 82  mmHg           │  ← valor tabular, grande
+│                            │
+│  ● routine                 │  ← status dot + label
+│  hoje · 08:12  ↗ +4        │  ← timestamp + trend vs média 7d
+└───────────────────────────┘
+```
+
+Estados visuais:
+- `routine`: card normal, dot verde
+- `attention`: borda âmbar
+- `urgent`: borda laranja + glow discreto
+- `critical`: borda vermelha + **pulse-glow** (se não acknowledged)
+
+Ícones (Lucide):
+- PA: `Activity` ou `HeartPulse`
+- FC: `Heart`
+- Temperatura: `Thermometer`
+- SpO₂: `Wind` ou custom "O₂"
+- Glicemia: `Droplet`
+- Peso: `Scale`
+
+#### Timeline longitudinal (gráfico) — abaixo dos header cards
+
+Para cada parâmetro, um mini-chart de 7 dias (30/90 selecionáveis):
+- Tipo: **sparkline** ou área line
+- Cor: escala cyan → teal do nosso design (linha principal)
+- Bandas: zona verde (routine), amarelo (attention), laranja/vermelho (urgent/critical) em background semi-transparente
+- Interatividade: hover mostra valor + timestamp + status
+
+Biblioteca recomendada: **Recharts** (já disponível via `package.json` se adicionarmos) ou **Visx** se preferir mais controle. Não adicionar ApexCharts (pesado).
+
+#### Detalhe expandido (click no card)
+
+Ao clicar num header card, abrir painel lateral ou modal com:
+- Gráfico maior (30/90 dias)
+- Tabela de todas as medições do tipo, ordenada por data desc, com flag em linhas out-of-range
+- Botão "exportar" (CSV / FHIR Observation JSON) — feature futura
+- Notas da enfermagem associadas à medição (campo `notes`)
+
+### Integração com resto do prontuário
+
+Os sinais vitais devem **integrar-se com a timeline de relatos**:
+- Se um áudio do cuidador menciona "pressão 160/100", a IA deve poder cruzar com medição MedMonitor mais recente e gerar alerta se divergirem significativamente
+- Gráficos de PA e peso ao lado da timeline de relatos ajudam médico a ver correlação temporal ("depois do relato de dispneia no dia 3, pressão subiu dia 4")
+
+### Endpoints backend já disponíveis
+
+- `GET /api/patients/{id}/vitals/summary` — sumário pro header cards (última de cada tipo + trend)
+- `GET /api/patients/{id}/vitals?type=blood_pressure_composite&days=7` — série temporal pra gráfico
+- `GET /api/patients/{id}/vitals?days=30` — todas medições dos últimos 30 dias
+
+### Mock data disponível para design
+
+A migration 004 já seed 7 dias × 8 pacientes × ~1200 medições totais, com valores realistas por condição clínica do paciente (hipertensão → PA elevada baseline; diabéticos → glicemia varia 70-250; DPOC → SpO₂ 88-94). Claude Design pode usar esses dados pra prototipação real.
+
+---
+
 ## 6. Princípios de UX específicos para saúde
 
 1. **Sinal > barulho** — médico vê 50+ pacientes por semana; não sobrecarregar com decoração. Cada elemento na tela ganha seu lugar justificando valor clínico.

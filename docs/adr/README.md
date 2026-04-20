@@ -26,6 +26,7 @@ Seguir: `NNN-kebab-case-title.md` (zero-padded, kebab-case).
 | [011](011-locale-aware-architecture-para-latam-europa.md) | Arquitetura locale-aware para LATAM + Europa | Accepted | 2026-04-19 |
 | [012](012-telemed-hibrido-livekit-fork-aplicacao.md) | Tele-consulta híbrida — reuso LiveKit + fork da camada médica | Accepted | 2026-04-19 |
 | [013](013-instancia-evolution-dedicada-chip-proprio.md) | Instância Evolution dedicada com chip próprio (supersedes ADR-006) | Accepted | 2026-04-20 |
+| [014](014-integracao-medmonitor-sinais-vitais.md) | Integração MedMonitor + modelo de dados de sinais vitais | Accepted (estrutura) / Proposed (integração real) | 2026-04-20 |
 
 ## Como contribuir
 

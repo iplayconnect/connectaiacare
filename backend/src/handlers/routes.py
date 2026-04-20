@@ -143,6 +143,40 @@ def voice_delete_enrollment(caregiver_id: str):
     return jsonify(result), 200 if result.get("success") else 400
 
 
+# ---------- Vital Signs (MedMonitor-ready) ----------
+@bp.get("/api/patients/<patient_id>/vitals")
+def list_vitals(patient_id: str):
+    """Lista sinais vitais de um paciente.
+
+    Query params:
+        type: filtro por tipo (blood_pressure_composite, heart_rate, etc.)
+        days: janela em dias (default 7)
+    """
+    from datetime import datetime, timedelta, timezone
+
+    from src.services.vital_signs_service import get_vital_signs_service
+
+    vital_type = request.args.get("type")
+    try:
+        days = max(1, min(int(request.args.get("days", 7)), 90))
+    except ValueError:
+        days = 7
+
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    svc = get_vital_signs_service()
+    rows = svc.list_by_patient(patient_id, vital_type=vital_type, since=since, limit=1000)
+    return jsonify({"vitals": rows, "days": days})
+
+
+@bp.get("/api/patients/<patient_id>/vitals/summary")
+def vitals_summary(patient_id: str):
+    """Sumário para prontuário: última medição por tipo + trend + contadores."""
+    from src.services.vital_signs_service import get_vital_signs_service
+
+    svc = get_vital_signs_service()
+    return jsonify(svc.summary_for_prontuario(patient_id))
+
+
 @bp.get("/api/dashboard/summary")
 def dashboard_summary():
     """Resumo para dashboard: contadores por classificação + alertas ativos."""

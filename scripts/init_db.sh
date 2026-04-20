@@ -32,6 +32,10 @@ echo "==> Rodando migration 003 (voice biometrics + pgvector)..."
 psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" \
     -f "$BACKEND_DIR/migrations/003_voice_biometrics.sql"
 
+echo "==> Rodando migration 004 (vital signs + mock 7d)..."
+psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" \
+    -f "$BACKEND_DIR/migrations/004_vital_signs.sql"
+
 echo "==> Verificando..."
 psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -c \
     "SELECT full_name, nickname, care_unit, room_number FROM aia_health_patients ORDER BY full_name;"

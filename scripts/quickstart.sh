@@ -28,6 +28,7 @@ docker compose exec -T postgres psql -U postgres -d connectaiacare -c "SELECT 1 
     docker compose exec -T postgres psql -U postgres -d connectaiacare < backend/migrations/001_initial_schema.sql
     docker compose exec -T postgres psql -U postgres -d connectaiacare < backend/migrations/002_mock_patients.sql
     docker compose exec -T postgres psql -U postgres -d connectaiacare < backend/migrations/003_voice_biometrics.sql
+    docker compose exec -T postgres psql -U postgres -d connectaiacare < backend/migrations/004_vital_signs.sql
 }
 
 echo "==> Testando API..."

@@ -60,7 +60,9 @@ for f in backend/app.py \
          backend/migrations/001_initial_schema.sql \
          backend/migrations/002_mock_patients.sql \
          backend/migrations/003_voice_biometrics.sql \
+         backend/migrations/004_vital_signs.sql \
          backend/src/services/voice_biometrics_service.py \
+         backend/src/services/vital_signs_service.py \
          backend/src/handlers/pipeline.py \
          backend/src/handlers/routes.py \
          backend/src/services/evolution.py \
