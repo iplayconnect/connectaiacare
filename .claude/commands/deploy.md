@@ -34,7 +34,7 @@ Passos:
 
 6. **Validar o deploy**:
    - `docker compose logs --tail 30 api` — sem erros
-   - `curl https://demo.connectaiacare.com/health` — retorna `{"status":"ok"}`
+   - `curl https://demo.connectaia.com.br/health` — retorna `{"status":"ok"}`
    - Se houver alguma classification urgent/critical recente, confirmar que foi processada
 
 7. **Reporte ao usuário**:

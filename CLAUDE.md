@@ -27,10 +27,10 @@ Plataforma de cuidado integrado com IA para **idosos e pacientes crônicos**, fo
 - **Biometria de voz**: Resemblyzer 256-dim embeddings + pgvector
 - **Infra**: Docker Compose em VPS Hostinger (compartilha nó com ConnectaIA)
 
-**Domínios** (em configuração):
-- `connectaiacare.com` → landing futura
-- `demo.connectaiacare.com` → API backend (webhook + REST)
-- `app.connectaiacare.com` → frontend dashboard médico
+**Domínios** (ADR-013 — usamos subdomínios do `connectaia.com.br` até formalização JV):
+- `demo.connectaia.com.br` → API backend (webhook WhatsApp + REST)
+- `care.connectaia.com.br` → frontend dashboard médico
+- Futuro (pós-JV): migrar para domínio dedicado via novo par de A-records
 
 ---
 
@@ -365,7 +365,7 @@ Ao iniciar nova sessão Claude Code neste projeto:
 
 | Item | Prazo | Detalhe |
 |------|-------|---------|
-| **Registro de domínio** `connectaiacare.com` | Seg 20/04 | Alexandre registra, DNS Cloudflare depois |
+| **Cloudflare A-records** em `connectaia.com.br` | Seg 20/04 | `demo.` e `care.` → 72.60.242.245 |
 | **Criação repo GitHub** `iplayconnect/connectaiacare` | ✅ Feito | Push inicial já aplicado |
 | **Preenchimento .env com chaves reais** | Seg 20/04 | ANTHROPIC, DEEPGRAM, EVOLUTION (já temos), SOFIA_VOICE |
 | **Setup VPS Hostinger** | Seg-Ter 20-21/04 | `scripts/setup-vps.sh` |

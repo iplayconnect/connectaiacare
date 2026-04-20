@@ -74,7 +74,7 @@ npm run dev     # serve em http://localhost:3000
 
 Para Evolution API conseguir chamar o webhook, precisamos de uma URL pública.
 
-**Em produção** (VPS com Traefik): `https://demo.connectaiacare.com/webhook/whatsapp`
+**Em produção** (VPS com Traefik): `https://demo.connectaia.com.br/webhook/whatsapp`
 
 **Em dev local**: usar ngrok ou cloudflared
 ```bash
@@ -93,7 +93,7 @@ curl -X PUT https://evolution.connectaia.com.br/webhook/set/v6 \
   -H "apikey: 5C979F27-8AF5-4546-86E5-55197FF72F1D" \
   -H "Content-Type: application/json" \
   -d '{
-    "url": "https://demo.connectaiacare.com/webhook/whatsapp",
+    "url": "https://demo.connectaia.com.br/webhook/whatsapp",
     "enabled": true,
     "events": ["MESSAGES_UPSERT"]
   }'
@@ -187,15 +187,14 @@ frontend/
 
 ## Deploy (VPS Hostinger, compartilhando infra com ConnectaIA)
 
-1. Registrar `connectaiacare.com` (Alexandre).
-2. Apontar Cloudflare `demo.connectaiacare.com` → `72.60.242.245` (Hostinger).
-3. `git clone iplayconnect/connectaiacare` na VPS em `/root/connectaiacare`.
-4. `cp backend/.env.example backend/.env` e preencher chaves reais.
-5. `docker compose up -d --build` (cria postgres, redis, api, frontend).
-6. Traefik (já rodando para ConnectaIA) vai rotear automaticamente pelos labels.
-7. Rodar migrations: `docker compose exec -T postgres psql -U postgres -d connectaiacare < backend/migrations/001_initial_schema.sql` e depois `002`.
-8. Reconfigurar webhook V6 para apontar para `https://demo.connectaiacare.com/webhook/whatsapp`.
-9. Teste: enviar áudio para V6.
+1. Cloudflare DNS no `connectaia.com.br`: A-records `demo.connectaia.com.br` e `care.connectaia.com.br` → `72.60.242.245` (Proxy ativo).
+2. `git clone iplayconnect/connectaiacare` na VPS em `/root/connectaiacare`.
+3. `cp backend/.env.example backend/.env` e preencher chaves reais.
+4. `docker compose up -d --build` (cria postgres, redis, api, frontend).
+5. Traefik (já rodando para ConnectaIA) vai rotear automaticamente pelos labels (`demo.connectaia.com.br` → api, `care.connectaia.com.br` → frontend).
+6. Rodar migrations: `docker compose exec -T postgres psql -U postgres -d connectaiacare < backend/migrations/001_initial_schema.sql` e depois `002` e `003`.
+7. Criar instância `connectaiacare` no Evolution + conectar chip `+55 51 99454-8043` (ver `docs/DEPLOY.md`).
+8. Teste: enviar áudio para `+55 51 99454-8043`.
 
 ---
 

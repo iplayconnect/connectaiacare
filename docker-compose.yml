@@ -54,7 +54,7 @@ services:
       - connectaiacare_net
     labels:
       traefik.enable: "true"
-      traefik.http.routers.connectaiacare-api.rule: "Host(`demo.connectaiacare.com`)"
+      traefik.http.routers.connectaiacare-api.rule: "Host(`demo.connectaia.com.br`)"
       traefik.http.routers.connectaiacare-api.entrypoints: "websecure"
       traefik.http.routers.connectaiacare-api.tls.certresolver: "letsencrypt"
       traefik.http.services.connectaiacare-api.loadbalancer.server.port: "5055"
@@ -67,7 +67,7 @@ services:
     restart: unless-stopped
     environment:
       # Browser (Client Components) — hostname público ou localhost em dev
-      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:5055}
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-https://demo.connectaia.com.br}
       # Server Components (SSR dentro do container) — usa service name Docker
       INTERNAL_API_URL: http://api:5055
     depends_on:
@@ -78,7 +78,7 @@ services:
       - connectaiacare_net
     labels:
       traefik.enable: "true"
-      traefik.http.routers.connectaiacare-web.rule: "Host(`app.connectaiacare.com`)"
+      traefik.http.routers.connectaiacare-web.rule: "Host(`care.connectaia.com.br`)"
       traefik.http.routers.connectaiacare-web.entrypoints: "websecure"
       traefik.http.routers.connectaiacare-web.tls.certresolver: "letsencrypt"
       traefik.http.services.connectaiacare-web.loadbalancer.server.port: "3000"

@@ -299,8 +299,8 @@ O código em estado MVP está **razoavelmente seguro para ambiente de desenvolvi
 - **Fix**:
   ```python
   app.config["TRUSTED_HOSTS"] = [
-      "demo.connectaiacare.com",
-      "app.connectaiacare.com",
+      "demo.connectaia.com.br",
+      "care.connectaia.com.br",
       "localhost",
   ]
   ```

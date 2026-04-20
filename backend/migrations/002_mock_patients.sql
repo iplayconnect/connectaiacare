@@ -12,9 +12,13 @@ TRUNCATE aia_health_conversation_sessions CASCADE;
 -- =====================================================
 -- Cuidadora demo
 -- =====================================================
+-- Nota: `phone` é o número DO CUIDADOR (remetente), não da instância Evolution.
+-- Para a demo real, atualize este placeholder com o número que vai efetivamente
+-- enviar áudios no WhatsApp (seu celular ou de quem vai encenar o cuidador).
+-- Formato E.164 sem + (ex: 5511987654321).
 INSERT INTO aia_health_caregivers (full_name, cpf, phone, role, shift, active)
 VALUES
-    ('Joana Oliveira', '123.456.789-00', '5551989592617', 'cuidadora', 'noturno', TRUE);
+    ('Joana Oliveira', '123.456.789-00', '5551999999999', 'cuidadora', 'noturno', TRUE);
 
 -- =====================================================
 -- Pacientes fictícios — 8 idosos com perfis clínicos realistas

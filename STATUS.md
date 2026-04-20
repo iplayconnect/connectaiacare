@@ -129,11 +129,11 @@ Isso **não é uma consulta por vídeo com dados ao lado** — é um **copiloto 
 ## 🎯 O que falta (próximos 4 dias)
 
 ### Segunda (20/04) — manhã
-- [ ] **Alexandre**: registrar domínio `connectaiacare.com`
-- [ ] **Alexandre**: criar repo `iplayconnect/connectaiacare` no GitHub
-- [ ] **Alexandre**: Cloudflare DNS apontando `demo.connectaiacare.com` → VPS Hostinger
-- [ ] `git init` local + primeiro commit + push para GitHub
-- [ ] `docker compose up -d` em dev local para teste end-to-end
+- [ ] **Alexandre**: Cloudflare DNS do `connectaia.com.br`: adicionar A-records `demo.connectaia.com.br` e `care.connectaia.com.br` → `72.60.242.245` (VPS Hostinger). Proxy Cloudflare ativo.
+- [ ] **Alexandre**: criar instância Evolution `connectaiacare` com chip `+55 51 99454-8043` e escanear QR code (ver comandos em `docs/DEPLOY.md`)
+- [x] **Alexandre**: criou repo `iplayconnect/connectaiacare` no GitHub
+- [x] Docker compose rodando em dev local
+- [ ] SSH VPS: `git clone` + `cp backend/.env.example backend/.env` + preencher chaves + `bash scripts/setup-vps.sh`
 
 ### Segunda (20/04) — tarde
 - [ ] Rodar primeiros áudios de teste pelo WhatsApp (V6)
@@ -144,7 +144,7 @@ Isso **não é uma consulta por vídeo com dados ao lado** — é um **copiloto 
 ### Terça (21/04)
 - [ ] Deploy em VPS Hostinger (container paralelo ao ConnectaIA)
 - [ ] Configurar Traefik para roteamento HTTPS
-- [ ] Reconfigurar webhook V6 no Evolution para apontar para `demo.connectaiacare.com`
+- [ ] Reconfigurar webhook V6 no Evolution para apontar para `demo.connectaia.com.br`
 - [ ] Testes end-to-end em prod
 - [ ] Integrar Sofia Voice real (validar credenciais e chamada)
 - [ ] Gravar backup em vídeo do fluxo completo

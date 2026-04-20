@@ -18,13 +18,14 @@ Seguir: `NNN-kebab-case-title.md` (zero-padded, kebab-case).
 | [003](003-postgres-compartilhado-database-separado.md) | Postgres mesmo host, database separado | Accepted | 2026-04-19 |
 | [004](004-pgvector-em-vez-de-vector-db-dedicado.md) | pgvector em vez de Qdrant/Pinecone | Accepted | 2026-04-19 |
 | [005](005-resemblyzer-em-vez-de-pyannote.md) | Resemblyzer para biometria de voz | Accepted | 2026-04-19 |
-| [006](006-reaproveitar-evolution-instancia-v6.md) | Evolution API compartilhado, instância V6 dedicada | Accepted | 2026-04-19 |
+| [006](006-reaproveitar-evolution-instancia-v6.md) | Evolution API compartilhado, instância V6 dedicada | ⚠️ Superseded by [013](013-instancia-evolution-dedicada-chip-proprio.md) | 2026-04-19 |
 | [007](007-sofia-voz-como-servico-externo.md) | Sofia Voz consumida como microsserviço | Accepted | 2026-04-19 |
 | [008](008-hash-chain-opentimestamps-em-vez-de-blockchain.md) | Hash-chain + OpenTimestamps (não blockchain pleno) | Accepted | 2026-04-19 |
 | [009](009-nextjs-14-app-router-com-ssr.md) | Next.js 14 com App Router + SSR | Accepted | 2026-04-19 |
 | [010](010-multi-tenant-desde-o-dia-1.md) | Multi-tenant desde o dia 1 | Accepted | 2026-04-19 |
 | [011](011-locale-aware-architecture-para-latam-europa.md) | Arquitetura locale-aware para LATAM + Europa | Accepted | 2026-04-19 |
 | [012](012-telemed-hibrido-livekit-fork-aplicacao.md) | Tele-consulta híbrida — reuso LiveKit + fork da camada médica | Accepted | 2026-04-19 |
+| [013](013-instancia-evolution-dedicada-chip-proprio.md) | Instância Evolution dedicada com chip próprio (supersedes ADR-006) | Accepted | 2026-04-20 |
 
 ## Como contribuir
 

@@ -9,7 +9,7 @@ Atualizado: 2026-04-19
 ```
                           ┌──────────────────────────┐
                           │   Cloudflare (DNS/CDN)   │
-                          │  connectaiacare.com      │
+                          │  *.connectaia.com.br     │
                           └────────────┬─────────────┘
                                        │  TLS 1.3
                                        ▼
@@ -22,7 +22,7 @@ Atualizado: 2026-04-19
               ┌────────────────────┘       └────────────────────┐
               ▼                                                 ▼
    ┌─────────────────────────┐                   ┌─────────────────────────┐
-   │ demo.connectaiacare.com │                   │ app.connectaiacare.com  │
+   │ demo.connectaia.com.br │                   │ care.connectaia.com.br  │
    │ → connectaiacare-api    │                   │ → connectaiacare-front  │
    │   :5055 (Flask/Gunicorn)│                   │   :3000 (Next.js)       │
    └───────────┬─────────────┘                   └────────────┬────────────┘
@@ -86,7 +86,7 @@ Implementação: `connectaiacare-postgres` container próprio em `connectaiacare
 
 ### D6. WhatsApp Evolution compartilhado, instância V6 dedicada
 **Por quê**: Evolution API é caro de subir novo container (hardware e setup). A instância V6 já está conectada e pode ser direcionada via webhook.
-**Implementação**: mesma API Evolution, webhook da V6 aponta para `demo.connectaiacare.com/webhook/whatsapp`. Outras instâncias (V5, etc.) continuam no CRM.
+**Implementação**: mesma API Evolution, webhook da V6 aponta para `demo.connectaia.com.br/webhook/whatsapp`. Outras instâncias (V5, etc.) continuam no CRM.
 **Trade-off**: se Evolution cair, os dois produtos caem. Aceito para MVP; futuramente Evolution dedicado ou EvoManager.
 
 ### D7. Sofia Voz via API (não clone de código)
@@ -115,7 +115,7 @@ Implementação: `connectaiacare-postgres` container próprio em `connectaiacare
 - **Memória**: ~500MB base + ~400MB quando Resemblyzer carrega
 - **CPU**: 1-2 cores em uso médio, picos em análise IA
 - **Porta interna**: 5055
-- **Exposta externamente**: via Traefik em `demo.connectaiacare.com`
+- **Exposta externamente**: via Traefik em `demo.connectaia.com.br`
 - **Healthcheck**: `GET /health` a cada 30s
 - **Reinício**: `unless-stopped`
 
@@ -124,7 +124,7 @@ Implementação: `connectaiacare-postgres` container próprio em `connectaiacare
 - **Base runtime**: `node:20-alpine`, rodando como user `nextjs` (UID 1001)
 - **Memória**: ~200MB
 - **Porta interna**: 3000
-- **Exposta externamente**: via Traefik em `app.connectaiacare.com`
+- **Exposta externamente**: via Traefik em `care.connectaia.com.br`
 
 ### connectaiacare-postgres (pgvector/pgvector:pg16)
 - **Porta exposta host**: 5433 (para desenvolvimento/debug; em produção tirar do host)
@@ -143,13 +143,14 @@ Implementação: `connectaiacare-postgres` container próprio em `connectaiacare
 
 ## 4. DNS e certificados
 
-### Cloudflare Records (a configurar)
+### Cloudflare Records (no domínio `connectaia.com.br`, a configurar)
 | Tipo | Nome | Destino | Proxy |
 |------|------|---------|-------|
-| A | `connectaiacare.com` | 72.60.242.245 | ✅ Cloudflare |
-| A | `app.connectaiacare.com` | 72.60.242.245 | ✅ |
-| A | `demo.connectaiacare.com` | 72.60.242.245 | ✅ |
-| CNAME | `www.connectaiacare.com` | `connectaiacare.com` | ✅ |
+| A | `demo.connectaia.com.br` | 72.60.242.245 | ✅ Cloudflare |
+| A | `care.connectaia.com.br` | 72.60.242.245 | ✅ |
+
+Quando ConnectaIACare formalizar como empresa separada (JV), migrar para
+domínio próprio (ex: `connectaiacare.com.br`) via novo par de A-records.
 
 ### TLS
 - Traefik gera via Let's Encrypt (já usado para ConnectaIA)
@@ -236,12 +237,12 @@ find /backups/ -mtime +7 -delete
 | Ambiente | Status | URL |
 |----------|--------|-----|
 | **Local dev** | ✅ quickstart.sh | `http://localhost:5055` + `:3030` |
-| **Demo/Prod** | Configurando | `demo.connectaiacare.com` + `app.connectaiacare.com` |
+| **Demo/Prod** | Configurando | `demo.connectaia.com.br` + `care.connectaia.com.br` |
 
 ### Roadmap
 | Ambiente | Quando | URL |
 |----------|--------|-----|
-| **Staging** | Pós-MVP | `staging.connectaiacare.com` (VPS Contabo como na ConnectaIA) |
+| **Staging** | Pós-MVP | `staging-care.connectaia.com.br` (VPS Contabo como na ConnectaIA) |
 | **CI/CD** | P2 | GitHub Actions rodando testes + deploy auto |
 
 ---

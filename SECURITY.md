@@ -195,7 +195,7 @@ def list_patients():
 **CORS estrito**:
 ```python
 origins = [
-    "https://app.connectaiacare.com",  # produção
+    "https://care.connectaia.com.br",  # produção (frontend dashboard)
     # em dev adicionar localhost:3000 apenas se ENV=development
 ]
 CORS(app, resources={r"/api/*": {"origins": origins}}, supports_credentials=True)

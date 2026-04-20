@@ -9,14 +9,14 @@
 ## Preparação antes da reunião
 
 ### Equipamento
-- [ ] Laptop com dashboard aberto em `https://demo.connectaiacare.com` (ou localhost:3030)
+- [ ] Laptop com dashboard aberto em `https://demo.connectaia.com.br` (ou localhost:3030)
 - [ ] Celular com WhatsApp instalado enviando para o número **555189592617** (instância V6)
 - [ ] Segundo celular (opcional) para receber ligação proativa da Sofia Voz — representando "o familiar"
 - [ ] Internet estável; backup: hotspot do celular
 - [ ] Áudio do laptop funcionando para demonstração ao vivo
 
 ### Pré-demo (30 min antes)
-- [ ] Verificar backend rodando: `curl https://demo.connectaiacare.com/health`
+- [ ] Verificar backend rodando: `curl https://demo.connectaia.com.br/health`
 - [ ] Limpar relatos antigos se desejar demo limpa: `DELETE FROM aia_health_reports WHERE tenant_id='connectaiacare_demo';`
 - [ ] Testar envio de áudio via WhatsApp e fluxo end-to-end 1x
 - [ ] Fotos dos 8 pacientes carregando no dashboard

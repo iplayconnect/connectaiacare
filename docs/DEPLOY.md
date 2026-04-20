@@ -55,23 +55,15 @@
    ```
    Isso sobe containers, roda migrations, valida health.
 
-5. DNS (Cloudflare):
-   - `A` record: `connectaiacare.com` → `72.60.242.245`
-   - `A` record: `app.connectaiacare.com` → `72.60.242.245`
-   - `A` record: `demo.connectaiacare.com` → `72.60.242.245`
-   - `CNAME`: `www.connectaiacare.com` → `connectaiacare.com`
+5. DNS (Cloudflare no domínio `connectaia.com.br`):
+   - `A` record: `demo.connectaia.com.br` → `72.60.242.245` (Proxy ativo)
+   - `A` record: `care.connectaia.com.br` → `72.60.242.245` (Proxy ativo)
 
 6. Traefik (labels já estão no `docker-compose.yml`) cuida de SSL via Let's Encrypt automaticamente.
 
-7. Repontar webhook V6 no Evolution:
-   ```bash
-   curl -X PUT https://evolution.connectaia.com.br/webhook/set/v6 \
-     -H "apikey: 5C979F27-8AF5-4546-86E5-55197FF72F1D" \
-     -H "Content-Type: application/json" \
-     -d '{"url":"https://demo.connectaiacare.com/webhook/whatsapp","enabled":true,"events":["MESSAGES_UPSERT"]}'
-   ```
+7. Criar instância dedicada `connectaiacare` no Evolution e conectar chip (ver seção "Instância Evolution API — referência rápida" abaixo).
 
-8. Validar end-to-end: enviar áudio pelo WhatsApp para **555189592617**.
+8. Validar end-to-end: enviar áudio pelo WhatsApp para **+55 51 99454-8043**.
 
 ---
 
@@ -184,34 +176,68 @@ jobs:
 
 ---
 
-## Webhooks do Evolution — referência rápida
+## Instância Evolution API — referência rápida
 
-### Ver config atual da v6
-```bash
-curl -X GET https://evolution.connectaia.com.br/webhook/find/v6 \
-  -H "apikey: 5C979F27-8AF5-4546-86E5-55197FF72F1D"
-```
+**Decisão arquitetural**: ver `docs/adr/013-instancia-evolution-dedicada.md`.
+ConnectaIACare tem **instância dedicada** `connectaiacare` com chip próprio
+(`5551994548043`). Não reusamos V6 do CRM — isolamento total.
 
-### Repontar para ConnectaIACare
+### Criar a instância (one-time, via painel Evolution ou API)
+
 ```bash
-curl -X PUT https://evolution.connectaia.com.br/webhook/set/v6 \
-  -H "apikey: 5C979F27-8AF5-4546-86E5-55197FF72F1D" \
+# Substitua <API_KEY> pela chave master do Evolution
+curl -X POST https://evolution.connectaia.com.br/instance/create \
+  -H "apikey: <API_KEY>" \
   -H "Content-Type: application/json" \
   -d '{
-    "url": "https://demo.connectaiacare.com/webhook/whatsapp",
+    "instanceName": "connectaiacare",
+    "qrcode": true,
+    "integration": "WHATSAPP-BAILEYS",
+    "webhook": {
+      "url": "https://demo.connectaia.com.br/webhook/whatsapp",
+      "enabled": true,
+      "events": ["MESSAGES_UPSERT"]
+    }
+  }'
+```
+
+Depois escanear o QR code no WhatsApp do chip `+55 51 99454-8043`.
+
+### Ver config atual da instância
+
+```bash
+curl -X GET https://evolution.connectaia.com.br/webhook/find/connectaiacare \
+  -H "apikey: <API_KEY>"
+```
+
+### Atualizar webhook (se domínio mudar no futuro)
+
+```bash
+curl -X PUT https://evolution.connectaia.com.br/webhook/set/connectaiacare \
+  -H "apikey: <API_KEY>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://demo.connectaia.com.br/webhook/whatsapp",
     "enabled": true,
     "events": ["MESSAGES_UPSERT"]
   }'
 ```
 
-### Reverter para ConnectaIA (CRM original)
+### Status da conexão (verificar se o chip está conectado)
+
 ```bash
-curl -X PUT https://evolution.connectaia.com.br/webhook/set/v6 \
-  -H "apikey: 5C979F27-8AF5-4546-86E5-55197FF72F1D" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "url": "https://app.connectaia.com.br/webhook",
-    "enabled": true,
-    "events": ["MESSAGES_UPSERT"]
-  }'
+curl -X GET https://evolution.connectaia.com.br/instance/connectionState/connectaiacare \
+  -H "apikey: <API_KEY>"
+```
+
+### Logout / reconectar (se precisar trocar de chip)
+
+```bash
+# Desconectar
+curl -X DELETE https://evolution.connectaia.com.br/instance/logout/connectaiacare \
+  -H "apikey: <API_KEY>"
+
+# Reconectar (gera QR novo)
+curl -X GET https://evolution.connectaia.com.br/instance/connect/connectaiacare \
+  -H "apikey: <API_KEY>"
 ```

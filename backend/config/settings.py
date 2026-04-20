@@ -84,7 +84,7 @@ class Settings:
             if not self.allowed_origins:
                 errors.append(
                     "ALLOWED_ORIGINS deve ser uma lista explícita de origens em produção "
-                    "(ex: 'https://app.connectaiacare.com,https://demo.connectaiacare.com')."
+                    "(ex: 'https://care.connectaia.com.br,https://demo.connectaia.com.br')."
                 )
             elif "*" in self.allowed_origins:
                 errors.append(
