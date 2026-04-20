@@ -33,7 +33,15 @@ class Settings:
     evolution_instance: str = os.getenv("EVOLUTION_INSTANCE", "v6")
     evolution_webhook_secret: str = os.getenv("EVOLUTION_WEBHOOK_SECRET", "")
 
+    # LLM provider: "anthropic" (default) | "gemini"
+    llm_provider: str = os.getenv("LLM_PROVIDER", "anthropic").lower()
     anthropic_api_key: str = os.getenv("ANTHROPIC_API_KEY", "")
+    # Gemini aceita tanto GOOGLE_API_KEY quanto GEMINI_API_KEY (convenção da comunidade)
+    google_api_key: str = (
+        os.getenv("GOOGLE_API_KEY")
+        or os.getenv("GEMINI_API_KEY")
+        or ""
+    )
     deepgram_api_key: str = os.getenv("DEEPGRAM_API_KEY", "")
 
     sofia_voice_url: str = os.getenv("SOFIA_VOICE_API_URL", "")
@@ -92,8 +100,14 @@ class Settings:
                     "CORS autenticado e superfície de ataque expandida)."
                 )
 
-            if not self.anthropic_api_key:
-                errors.append("ANTHROPIC_API_KEY obrigatório em produção.")
+            # Validar key do provider LLM ativo
+            if self.llm_provider == "anthropic" and not self.anthropic_api_key:
+                errors.append("ANTHROPIC_API_KEY obrigatório em produção (LLM_PROVIDER=anthropic).")
+            elif self.llm_provider == "gemini" and not self.google_api_key:
+                errors.append("GOOGLE_API_KEY obrigatório em produção (LLM_PROVIDER=gemini).")
+            elif self.llm_provider not in ("anthropic", "gemini"):
+                errors.append(f"LLM_PROVIDER='{self.llm_provider}' inválido. Use 'anthropic' ou 'gemini'.")
+
             if not self.deepgram_api_key:
                 errors.append("DEEPGRAM_API_KEY obrigatório em produção.")
             if not self.evolution_api_key:

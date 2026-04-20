@@ -138,7 +138,7 @@ class AnalysisService:
                 system=CLINICAL_SYSTEM,
                 user=user_payload,
                 model=MODEL_DEEP,
-                max_tokens=2048,
+                max_tokens=4096,  # aumentado para suportar thinking tokens de modelos reasoning
                 temperature=0.1,
             )
         except Exception as exc:

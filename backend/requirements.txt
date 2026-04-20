@@ -9,6 +9,7 @@ SQLAlchemy==2.0.35
 alembic==1.13.3
 
 anthropic==0.40.0
+google-generativeai==0.8.3
 deepgram-sdk==3.7.0
 openai==1.54.0
 
