@@ -103,7 +103,7 @@ class CareEventService:
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             })
 
-        row = self.db.fetch_one(
+        row = self.db.insert_returning(
             """
             INSERT INTO aia_health_care_events (
                 tenant_id, patient_id, caregiver_phone, caregiver_id,
@@ -398,7 +398,7 @@ class CareEventService:
         channel: str = "whatsapp",
     ) -> str:
         """Agenda um check-in proativo. Retorna ID do checkin."""
-        row = self.db.fetch_one(
+        row = self.db.insert_returning(
             """
             INSERT INTO aia_health_care_event_checkins (
                 event_id, tenant_id, kind, scheduled_for, channel, status
@@ -497,7 +497,7 @@ class CareEventService:
         message_content: str | None = None,
         external_ref: str | None = None,
     ) -> str:
-        row = self.db.fetch_one(
+        row = self.db.insert_returning(
             """
             INSERT INTO aia_health_escalation_log (
                 event_id, tenant_id, target_role, target_name, target_phone,

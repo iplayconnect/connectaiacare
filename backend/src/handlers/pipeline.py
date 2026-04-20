@@ -588,7 +588,7 @@ class EldercarePipeline:
         full_name = f"{person.get('first_name','').strip()} {person.get('last_name','').strip()}".strip()
 
         # Espelha no DB local
-        row = self.db.fetch_one(
+        row = self.db.insert_returning(
             """
             INSERT INTO aia_health_patients
                 (tenant_id, external_id, full_name, nickname, birth_date, gender,
