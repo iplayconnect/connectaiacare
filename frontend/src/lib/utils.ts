@@ -51,3 +51,17 @@ export const CLASSIFICATION_COLORS: Record<string, string> = {
   urgent: "badge-urgent",
   critical: "badge-critical",
 };
+
+export function classificationTone(classification?: string | null): string {
+  switch (classification) {
+    case "critical":
+      return "text-classification-critical";
+    case "urgent":
+      return "text-classification-urgent";
+    case "attention":
+      return "text-classification-attention";
+    case "routine":
+    default:
+      return "text-classification-routine";
+  }
+}

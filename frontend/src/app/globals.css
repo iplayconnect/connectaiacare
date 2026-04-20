@@ -2,52 +2,303 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ═══════════════════════════════════════════════════════════════════════
+   ConnectaIACare Design System — Modern Glass Health 2026
+   Base: design tokens do ConnectaIA adaptados para contexto de saúde.
+   Identidade: cyan elétrico → teal (cuidado/vida) em vez de cyan → purple.
+   ═══════════════════════════════════════════════════════════════════════ */
+
 @layer base {
   :root {
+    /* Light mode fallback (pouco usado; projeto roda em dark) */
     --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
+    --foreground: 222 47% 11%;
     --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
-    --primary: 221.2 83.2% 53.3%;
-    --primary-foreground: 210 40% 98%;
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 214.3 31.8% 91.4%;
-    --radius: 0.5rem;
+    --card-foreground: 222 47% 11%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+    --primary: 187 100% 42%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 220 14% 96%;
+    --secondary-foreground: 222 47% 11%;
+    --muted: 220 14% 96%;
+    --muted-foreground: 215 16% 46%;
+    --accent: 220 14% 96%;
+    --accent-foreground: 222 47% 11%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 220 13% 91%;
+    --input: 220 13% 91%;
+    --ring: 187 100% 42%;
+    --radius: 0.75rem;
   }
 
   .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-    --card: 222.2 84% 4.9%;
-    --card-foreground: 210 40% 98%;
-    --primary: 217.2 91.2% 59.8%;
-    --primary-foreground: 222.2 47.4% 11.2%;
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 217.2 32.6% 17.5%;
+    /* ═══ Dark mode — Modern Glass Health 2026 ═══ */
+    --background: 225 80% 7%;
+    --foreground: 214 32% 91%;
+    --card: 222 47% 9%;
+    --card-foreground: 214 32% 91%;
+    --popover: 222 47% 9%;
+    --popover-foreground: 214 32% 91%;
+    --primary: 187 100% 60%;
+    --primary-foreground: 220 60% 6%;
+    --secondary: 222 30% 14%;
+    --secondary-foreground: 214 32% 91%;
+    --muted: 222 30% 14%;
+    --muted-foreground: 215 16% 57%;
+    --accent: 222 30% 14%;
+    --accent-foreground: 214 32% 91%;
+    --destructive: 0 63% 40%;
+    --destructive-foreground: 214 32% 91%;
+    --border: 220 20% 16%;
+    --input: 222 30% 12%;
+    --ring: 187 100% 60%;
   }
 }
 
 @layer base {
-  * { @apply border-border; }
-  body { @apply bg-background text-foreground; font-feature-settings: "rlig" 1, "calt" 1; }
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "rlig" 1, "calt" 1, "tnum" 1;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Background gradient em dark mode — deep space com toque teal */
+  .dark body,
+  .dark {
+    background:
+      radial-gradient(ellipse at top, rgba(49, 225, 255, 0.04) 0%, transparent 50%),
+      radial-gradient(ellipse at bottom right, rgba(20, 184, 166, 0.03) 0%, transparent 50%),
+      linear-gradient(160deg, #050b1f 0%, #0a1028 35%, #0d1f2b 70%, #081018 100%);
+    background-attachment: fixed;
+    min-height: 100vh;
+  }
+
+  /* Scrollbar customizada */
+  .dark ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  .dark ::-webkit-scrollbar-track {
+    background: rgba(15, 23, 42, 0.3);
+  }
+  .dark ::-webkit-scrollbar-thumb {
+    background: rgba(49, 225, 255, 0.15);
+    border-radius: 8px;
+  }
+  .dark ::-webkit-scrollbar-thumb:hover {
+    background: rgba(49, 225, 255, 0.3);
+  }
 }
 
-/* Classificação badges */
-.badge-routine { @apply bg-emerald-100 text-emerald-800 border-emerald-300; }
-.badge-attention { @apply bg-amber-100 text-amber-800 border-amber-300; }
-.badge-urgent { @apply bg-orange-100 text-orange-800 border-orange-300; }
-.badge-critical { @apply bg-red-100 text-red-800 border-red-300 animate-pulse; }
+/* ═══════════════════════════════════════════════════════════════════════
+   Utility classes — glass, neon, classification
+   ═══════════════════════════════════════════════════════════════════════ */
+
+@layer components {
+  /* ── Glass card (dashboards, KPIs, modais) ── */
+  .glass-card {
+    background: rgba(15, 23, 42, 0.72);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(49, 225, 255, 0.10);
+    box-shadow:
+      0 4px 24px rgba(0, 0, 0, 0.30),
+      inset 0 1px 0 rgba(255, 255, 255, 0.03);
+    transition: border-color 200ms ease, box-shadow 200ms ease, transform 200ms ease;
+  }
+
+  .glass-card:hover {
+    border-color: rgba(49, 225, 255, 0.22);
+    box-shadow:
+      0 4px 24px rgba(0, 0, 0, 0.30),
+      0 0 24px rgba(49, 225, 255, 0.10),
+      inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  }
+
+  /* ── Solid card (listas longas, sem blur para performance) ── */
+  .solid-card {
+    background: rgba(15, 23, 42, 0.85);
+    border: 1px solid rgba(148, 163, 184, 0.10);
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.25);
+    transition: border-color 150ms ease, background 150ms ease;
+  }
+
+  .solid-card:hover {
+    border-color: rgba(49, 225, 255, 0.18);
+    background: rgba(15, 23, 42, 0.92);
+  }
+
+  /* ── Header / Sidebar glass ── */
+  .glass-header {
+    background: rgba(8, 12, 28, 0.78);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    border-bottom: 1px solid rgba(148, 163, 184, 0.08);
+  }
+
+  /* ── Acento gradiente — cyan → teal (saúde) ── */
+  .accent-gradient {
+    background: linear-gradient(135deg, #31e1ff 0%, #14b8a6 100%);
+  }
+
+  .accent-gradient-text {
+    background: linear-gradient(135deg, #31e1ff 0%, #14b8a6 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .accent-gradient-border {
+    position: relative;
+  }
+  .accent-gradient-border::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    padding: 1px;
+    border-radius: inherit;
+    background: linear-gradient(135deg, #31e1ff 0%, #14b8a6 100%);
+    -webkit-mask: linear-gradient(#000, #000) content-box, linear-gradient(#000, #000);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    pointer-events: none;
+  }
+
+  /* ── Status dots ── */
+  .status-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 999px;
+  }
+  .status-dot-active {
+    background: #31e1ff;
+    box-shadow: 0 0 8px rgba(49, 225, 255, 0.55);
+  }
+  .status-dot-success {
+    background: #34d399;
+    box-shadow: 0 0 8px rgba(52, 211, 153, 0.55);
+  }
+  .status-dot-warning {
+    background: #fbbf24;
+    box-shadow: 0 0 8px rgba(251, 191, 36, 0.55);
+  }
+  .status-dot-danger {
+    background: #f87171;
+    box-shadow: 0 0 8px rgba(248, 113, 113, 0.55);
+  }
+
+  /* ── Glows ── */
+  .glow-cyan {
+    box-shadow: 0 0 24px rgba(49, 225, 255, 0.18);
+  }
+  .glow-teal {
+    box-shadow: 0 0 24px rgba(20, 184, 166, 0.20);
+  }
+  .glow-critical {
+    box-shadow: 0 0 24px rgba(239, 68, 68, 0.35);
+  }
+
+  .glow-cyan-text {
+    text-shadow: 0 0 14px rgba(49, 225, 255, 0.40);
+  }
+
+  /* ── Classification badges ── */
+  .badge-classification {
+    @apply inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs font-semibold tracking-wide uppercase;
+  }
+
+  .badge-routine {
+    background: rgba(52, 211, 153, 0.10);
+    border-color: rgba(52, 211, 153, 0.35);
+    color: #34d399;
+  }
+
+  .badge-attention {
+    background: rgba(251, 191, 36, 0.10);
+    border-color: rgba(251, 191, 36, 0.35);
+    color: #fbbf24;
+  }
+
+  .badge-urgent {
+    background: rgba(251, 146, 60, 0.10);
+    border-color: rgba(251, 146, 60, 0.40);
+    color: #fb923c;
+    box-shadow: 0 0 14px rgba(251, 146, 60, 0.15);
+  }
+
+  .badge-critical {
+    background: rgba(239, 68, 68, 0.12);
+    border-color: rgba(239, 68, 68, 0.45);
+    color: #fca5a5;
+    box-shadow: 0 0 14px rgba(239, 68, 68, 0.25);
+    animation: pulse-glow 2s ease-in-out infinite;
+  }
+
+  /* ── Divider com gradiente ── */
+  .gradient-divider {
+    height: 1px;
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      rgba(49, 225, 255, 0.3) 50%,
+      transparent 100%
+    );
+  }
+
+  /* ── Shimmer em loading states ── */
+  .shimmer {
+    background: linear-gradient(
+      90deg,
+      rgba(15, 23, 42, 0.4) 0%,
+      rgba(49, 225, 255, 0.08) 50%,
+      rgba(15, 23, 42, 0.4) 100%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 3s linear infinite;
+  }
+
+  /* ── Tabular numbers (KPIs) ── */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+/* ── Animations ── */
+@keyframes pulse-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 10px rgba(239, 68, 68, 0.30);
+  }
+  50% {
+    box-shadow: 0 0 24px rgba(239, 68, 68, 0.65);
+  }
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ── Reduce motion para acessibilidade ── */
+@media (prefers-reduced-motion: reduce) {
+  .badge-critical,
+  .animate-pulse-glow,
+  .shimmer {
+    animation: none;
+  }
+  * {
+    transition-duration: 0.01ms !important;
+  }
+}
