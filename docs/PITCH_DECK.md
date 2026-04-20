@@ -116,14 +116,16 @@ Equipe médica recebe no painel web em tempo real
 
 ## Slide 7 — Diferenciais
 
-1. **IA vertical em saúde em português clinicamente correto** — adaptada para protocolos geriátricos e terminologia médica brasileira, não IA genérica.
-2. **WhatsApp-first** — zero fricção de adoção. Ninguém precisa instalar app.
-3. **Compliance CFM 2.314/2022** — IA apoia, médico decide. Juridicamente defensável.
-4. **Auditoria imutável de próxima geração** — cadeia criptográfica com ancoragem pública, sem os problemas de blockchain pleno para LGPD.
-5. **Motor de interações medicamentosas** — cruza prescrição com relatos e alerta automaticamente.
-6. **Agente de voz conversacional 24h** — ligação natural com familiares e equipe, tom geriátrico.
-7. **HL7 FHIR R4 nativo** — qualquer hospital do mundo integra sem custo de transformação.
-8. **Biometria de voz** — identifica cuidador mesmo com aparelho compartilhado.
+1. **Arquitetura agêntica por design** — não é um chatbot médico, é um ecossistema onde múltiplos agentes especializados colaboram invisivelmente por baixo de cada interação: triagem, raciocínio clínico com consulta a ferramentas (vitais, medicações, histórico), comunicação adaptativa, compliance automático. O cuidador só manda um áudio — a plataforma orquestra o resto.
+2. **IA vertical em saúde em português clinicamente correto** — adaptada para protocolos geriátricos e terminologia médica brasileira, não IA genérica.
+3. **WhatsApp-first** — zero fricção de adoção. Ninguém precisa instalar app.
+4. **Compliance CFM 2.314/2022** — IA apoia, médico decide. Juridicamente defensável.
+5. **Auditoria imutável de próxima geração** — cadeia criptográfica com ancoragem pública, sem os problemas de blockchain pleno para LGPD.
+6. **Motor de interações medicamentosas** — cruza prescrição com relatos e alerta automaticamente.
+7. **Agente de voz conversacional 24h** — ligação natural com familiares e equipe, tom geriátrico.
+8. **HL7 FHIR R4 nativo** — qualquer hospital do mundo integra sem custo de transformação.
+9. **Biometria de voz** — identifica cuidador mesmo com aparelho compartilhado.
+10. **Cruzamento sintoma × vital × histórico** — IA cruza relato subjetivo do cuidador com sinais vitais objetivos (MedMonitor) e histórico longitudinal para gerar alertas que nenhum concorrente global faz hoje.
 
 ---
 
