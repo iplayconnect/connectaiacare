@@ -85,7 +85,7 @@ class EmbeddingService:
     def _embed_gemini(self, text: str) -> list[float]:
         genai = self._ensure_client()
         result = genai.embed_content(
-            model="models/text-embedding-004",
+            model="models/embedding-001",
             content=text,
             task_type="retrieval_document",  # otimiza pra busca de similaridade
         )
@@ -125,7 +125,7 @@ class EmbeddingService:
             if self.provider == "gemini":
                 genai = self._ensure_client()
                 result = genai.embed_content(
-                    model="models/text-embedding-004",
+                    model="models/embedding-001",
                     content=text.strip()[:8000],
                     task_type="retrieval_query",
                 )

@@ -160,7 +160,7 @@ class EscalationService:
                 tenant_id=tenant_id,
                 kind="post_escalation",
                 scheduled_for=scheduled_for,
-                channel="internal",
+                channel="whatsapp",  # canal do dispatch final que roda ao t+wait
             )
             logger.info(
                 "family_escalation_scheduled",
