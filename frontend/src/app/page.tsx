@@ -94,39 +94,67 @@ export default async function DashboardPage() {
         )}
       </div>
 
-      {/* KPIs */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
-        <KPICard
-          icon={<AlertTriangle className="h-5 w-5" />}
-          iconBg="bg-classification-critical/10 text-classification-critical border-classification-critical/30"
-          label="Críticos"
-          value={critical}
-          hint="acionamento imediato"
-          highlight={critical > 0}
-        />
-        <KPICard
-          icon={<Zap className="h-5 w-5" />}
-          iconBg="bg-classification-urgent/10 text-classification-urgent border-classification-urgent/30"
-          label="Urgentes"
-          value={urgent}
-          hint="próximas horas"
-          highlight={urgent > 0}
-        />
-        <KPICard
-          icon={<Activity className="h-5 w-5" />}
-          iconBg="bg-classification-attention/10 text-classification-attention border-classification-attention/30"
-          label="Atenção"
-          value={attention}
-          hint="observar no plantão"
-        />
-        <KPICard
-          icon={<PhoneCall className="h-5 w-5" />}
-          iconBg="bg-accent-cyan/10 text-accent-cyan border-accent-cyan/30"
-          label="Escalando"
-          value={escalating}
-          hint="cascata em execução"
-          highlight={escalating > 0}
-        />
+      {/* KPIs — 2 grupos: classificação clínica (3 cards) + estado operacional (1 card) */}
+      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,3fr)_minmax(0,1fr)] gap-4">
+        {/* Grupo 1 — Classificação clínica (total = eventos distintos) */}
+        <div>
+          <div className="flex items-baseline justify-between mb-2 px-1">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.15em] text-muted-foreground">
+              Por classificação clínica
+            </span>
+            <span className="text-[11px] text-muted-foreground tabular">
+              {total} {total === 1 ? "evento" : "eventos"}
+            </span>
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            <KPICard
+              icon={<AlertTriangle className="h-5 w-5" />}
+              iconBg="bg-classification-critical/10 text-classification-critical border-classification-critical/30"
+              label="Críticos"
+              value={critical}
+              hint="acionamento imediato"
+              highlight={critical > 0}
+            />
+            <KPICard
+              icon={<Zap className="h-5 w-5" />}
+              iconBg="bg-classification-urgent/10 text-classification-urgent border-classification-urgent/30"
+              label="Urgentes"
+              value={urgent}
+              hint="próximas horas"
+              highlight={urgent > 0}
+            />
+            <KPICard
+              icon={<Activity className="h-5 w-5" />}
+              iconBg="bg-classification-attention/10 text-classification-attention border-classification-attention/30"
+              label="Atenção"
+              value={attention}
+              hint="observar no plantão"
+            />
+          </div>
+        </div>
+
+        {/* Grupo 2 — Estado operacional (faceta dos eventos acima, não soma) */}
+        <div>
+          <div className="flex items-baseline justify-between mb-2 px-1">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.15em] text-muted-foreground">
+              Estado operacional
+            </span>
+            <span
+              className="text-[11px] text-muted-foreground/70"
+              title="Subconjunto dos eventos acima — não soma"
+            >
+              faceta
+            </span>
+          </div>
+          <KPICard
+            icon={<PhoneCall className="h-5 w-5" />}
+            iconBg="bg-accent-cyan/10 text-accent-cyan border-accent-cyan/30"
+            label="Escalando"
+            value={escalating}
+            hint="cascata em execução"
+            highlight={escalating > 0}
+          />
+        </div>
       </div>
 
       {/* Live feed de eventos ativos — client component com polling */}
