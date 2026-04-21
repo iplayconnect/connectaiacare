@@ -291,6 +291,27 @@
   }
 }
 
+/* Entrada de item novo no feed — deslizamento sutil + highlight breve */
+@keyframes slide-in-fade {
+  0% {
+    opacity: 0;
+    transform: translateX(-12px);
+    background-color: rgba(49, 225, 255, 0.08);
+  }
+  40% {
+    opacity: 1;
+    transform: translateX(0);
+    background-color: rgba(49, 225, 255, 0.08);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
+.animate-slide-in-fade {
+  animation: slide-in-fade 3.5s ease-out;
+}
+
 /* ── Reduce motion para acessibilidade ── */
 @media (prefers-reduced-motion: reduce) {
   .badge-critical,

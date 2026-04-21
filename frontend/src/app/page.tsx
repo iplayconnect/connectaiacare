@@ -1,49 +1,16 @@
-import Image from "next/image";
-import Link from "next/link";
 import {
   Activity,
   AlertTriangle,
-  ArrowUpRight,
-  Clock,
-  HeartPulse,
   PhoneCall,
   Sparkles,
-  Users,
   Zap,
 } from "lucide-react";
 
-import { ClassificationBadge } from "@/components/classification-badge";
-import { api, type CareEventSummary, type EventStatus } from "@/lib/api";
-import {
-  CLASSIFICATION_LABELS,
-  classificationTone,
-  timeAgo,
-} from "@/lib/utils";
+import { LiveEventsFeed } from "@/components/live-events-feed";
+import { api, type CareEventSummary } from "@/lib/api";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
-
-const STATUS_LABEL: Record<EventStatus, string> = {
-  analyzing: "Analisando",
-  awaiting_ack: "Aguardando ciência",
-  pattern_analyzed: "Padrão analisado",
-  escalating: "Escalando",
-  awaiting_status_update: "Aguardando retorno",
-  resolved: "Resolvido",
-  expired: "Expirado",
-};
-
-const STATUS_DOT: Record<EventStatus, string> = {
-  analyzing: "bg-accent-cyan animate-pulse-soft",
-  awaiting_ack: "bg-accent-teal animate-pulse-soft",
-  pattern_analyzed: "bg-accent-teal",
-  escalating: "bg-classification-urgent animate-pulse-glow",
-  awaiting_status_update: "bg-classification-attention animate-pulse-soft",
-  resolved: "bg-classification-routine",
-  expired: "bg-muted-foreground",
-};
-
-const RANK: Record<string, number> = { critical: 0, urgent: 1, attention: 2, routine: 3 };
 
 export default async function DashboardPage() {
   let events: CareEventSummary[] = [];
@@ -65,14 +32,6 @@ export default async function DashboardPage() {
       </div>
     );
   }
-
-  // Ordena por classificação (critical → routine) e mais recente primeiro
-  events.sort((a, b) => {
-    const ra = RANK[a.classification || "routine"] ?? 9;
-    const rb = RANK[b.classification || "routine"] ?? 9;
-    if (ra !== rb) return ra - rb;
-    return (b.opened_at || "").localeCompare(a.opened_at || "");
-  });
 
   const byClass = events.reduce<Record<string, number>>((acc, e) => {
     const c = e.classification || "routine";
@@ -170,142 +129,9 @@ export default async function DashboardPage() {
         />
       </div>
 
-      {/* Live feed de eventos ativos */}
-      <section className="glass-card rounded-2xl overflow-hidden">
-        <div className="p-6 border-b border-white/[0.05] flex items-center justify-between">
-          <div>
-            <h2 className="text-lg font-semibold">Eventos ativos</h2>
-            <p className="text-xs text-muted-foreground">
-              Priorizados por classificação · atualização automática
-            </p>
-          </div>
-          <Link
-            href="/patients"
-            className="text-xs font-medium text-accent-cyan hover:text-accent-teal transition-colors flex items-center gap-1"
-          >
-            Todos os pacientes <ArrowUpRight className="h-3 w-3" />
-          </Link>
-        </div>
-
-        <ul className="divide-y divide-white/[0.04]">
-          {events.length === 0 ? (
-            <EmptyState routineCount={routine} />
-          ) : (
-            events.map((e) => <EventListItem key={e.id} event={e} />)
-          )}
-        </ul>
-      </section>
+      {/* Live feed de eventos ativos — client component com polling */}
+      <LiveEventsFeed initialEvents={events} />
     </div>
-  );
-}
-
-// ----------------------------------------------------------------
-// Componentes internos
-// ----------------------------------------------------------------
-function EventListItem({ event }: { event: CareEventSummary }) {
-  const tone = classificationTone(event.classification);
-  const label = CLASSIFICATION_LABELS[event.classification || "routine"];
-  const status = event.status;
-  const dot = STATUS_DOT[status];
-  const statusLabel = STATUS_LABEL[status];
-  const humanId = event.human_id
-    ? `#${event.human_id.toString().padStart(4, "0")}`
-    : "#----";
-  const patient = event.patient_nickname || event.patient_name || "Paciente";
-
-  return (
-    <li>
-      <Link
-        href={`/eventos/${event.id}`}
-        className="flex items-center gap-4 p-5 hover:bg-white/[0.02] transition-colors group"
-      >
-        {/* Foto */}
-        {event.patient_photo ? (
-          <div className="relative">
-            <Image
-              src={event.patient_photo}
-              alt={patient}
-              width={52}
-              height={52}
-              className="rounded-full object-cover w-13 h-13 ring-1 ring-white/10"
-            />
-            {event.classification === "critical" && (
-              <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-classification-critical border-2 border-background animate-pulse-glow" />
-            )}
-          </div>
-        ) : (
-          <div className="w-13 h-13 rounded-full bg-white/[0.05] border border-white/[0.06] flex items-center justify-center">
-            <Users className="h-5 w-5 text-muted-foreground" />
-          </div>
-        )}
-
-        {/* Conteúdo */}
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-0.5 flex-wrap">
-            <span className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-              {humanId}
-            </span>
-            <h3 className="font-semibold truncate group-hover:text-accent-cyan transition-colors">
-              {patient}
-            </h3>
-            {event.patient_care_unit && (
-              <span className="text-xs uppercase tracking-wider text-muted-foreground hidden md:inline">
-                · {event.patient_care_unit}
-              </span>
-            )}
-          </div>
-          <p className="text-sm text-muted-foreground truncate mb-1.5">
-            {event.summary || "Análise em andamento…"}
-          </p>
-          <div className="flex items-center gap-3 text-[13px] text-muted-foreground/90 flex-wrap">
-            <span className="inline-flex items-center gap-1.5">
-              <span className={`w-1.5 h-1.5 rounded-full ${dot}`} />
-              {statusLabel}
-            </span>
-            <span className="inline-flex items-center gap-1">
-              <Clock className="h-3 w-3" />
-              {timeAgo(event.opened_at)}
-            </span>
-            {event.event_tags && event.event_tags.length > 0 && (
-              <span className="inline-flex items-center gap-1 flex-wrap">
-                {event.event_tags.slice(0, 3).map((t) => (
-                  <span
-                    key={t}
-                    className="px-1.5 py-0.5 rounded bg-white/[0.04] border border-white/[0.05] text-xs"
-                  >
-                    {t}
-                  </span>
-                ))}
-              </span>
-            )}
-          </div>
-        </div>
-
-        {/* Classificação */}
-        <div className="text-right flex flex-col items-end gap-1.5">
-          <ClassificationBadge classification={event.classification} />
-          <span className={`text-xs uppercase tracking-wider font-semibold ${tone}`}>
-            {label}
-          </span>
-        </div>
-      </Link>
-    </li>
-  );
-}
-
-function EmptyState({ routineCount }: { routineCount: number }) {
-  return (
-    <li className="p-12 text-center">
-      <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-white/[0.03] border border-white/[0.06] mb-4">
-        <HeartPulse className="h-6 w-6 text-accent-teal" />
-      </div>
-      <h3 className="font-medium mb-1">Nenhum evento em andamento</h3>
-      <p className="text-sm text-muted-foreground max-w-sm mx-auto">
-        {routineCount > 0
-          ? `${routineCount} evento(s) de rotina já encerrado(s) nas últimas 24h.`
-          : "Quando um cuidador enviar um áudio pelo WhatsApp, o evento aparece aqui em tempo real."}
-      </p>
-    </li>
   );
 }
 
