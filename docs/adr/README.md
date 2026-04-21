@@ -32,6 +32,7 @@ Seguir: `NNN-kebab-case-title.md` (zero-padded, kebab-case).
 | [018](018-care-events-com-ciclo-de-vida.md) | Care Events como objeto de domínio (supersedes ADR-017) | Accepted | 2026-04-20 |
 | [019](019-integracao-medmonitor-totalcare.md) | Integração MedMonitor/TotalCare — ConnectaIACare como plataforma principal | Accepted | 2026-04-20 |
 | [020](020-escalacao-hierarquica-evolution-sofia.md) | Escalação hierárquica — WhatsApp Evolution + Sofia Voice | Accepted | 2026-04-20 |
+| [021](021-iris-framework-agentico-healthcare.md) | **Íris** — Framework agêntico próprio, workflow-first, healthcare-specific | Accepted | 2026-04-21 |
 
 ## Como contribuir
 
