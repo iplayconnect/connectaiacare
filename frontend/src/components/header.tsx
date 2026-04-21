@@ -13,26 +13,26 @@ export function Header() {
             <div className="absolute -inset-0.5 accent-gradient rounded-lg opacity-0 group-hover:opacity-30 blur transition-opacity" />
           </div>
           <div>
-            <h1 className="font-bold text-lg leading-tight tracking-tight">
+            <h1 className="font-bold text-xl leading-tight tracking-tight">
               <span className="accent-gradient-text">ConnectaIA</span>
               <span className="text-foreground">Care</span>
             </h1>
-            <p className="text-xs text-muted-foreground leading-tight uppercase tracking-[0.2em]">
-              Cuidado Integrado · IA
+            <p className="text-[11px] text-muted-foreground leading-tight uppercase tracking-[0.2em] mt-0.5">
+              Cuidado Integrado · Íris
             </p>
           </div>
         </Link>
 
         <nav className="flex items-center gap-1">
-          <NavLink href="/" icon={<Activity className="h-4 w-4" />} label="Dashboard" />
-          <NavLink href="/reports" icon={<FileText className="h-4 w-4" />} label="Relatos" />
-          <NavLink href="/patients" icon={<Users className="h-4 w-4" />} label="Pacientes" />
+          <NavLink href="/" icon={<Activity className="h-[18px] w-[18px]" />} label="Dashboard" />
+          <NavLink href="/reports" icon={<FileText className="h-[18px] w-[18px]" />} label="Relatos" />
+          <NavLink href="/patients" icon={<Users className="h-[18px] w-[18px]" />} label="Pacientes" />
         </nav>
 
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/[0.03] border border-white/[0.06]">
+          <div className="flex items-center gap-2 px-3.5 py-2 rounded-full bg-white/[0.03] border border-white/[0.06]">
             <span className="status-dot status-dot-active" />
-            <span className="text-xs font-medium text-muted-foreground">Sistema ativo</span>
+            <span className="text-sm font-medium text-muted-foreground">Sistema ativo</span>
           </div>
         </div>
       </div>
@@ -52,7 +52,7 @@ function NavLink({
   return (
     <Link
       href={href}
-      className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-white/[0.04] transition-colors"
+      className="flex items-center gap-2 px-3.5 py-2 rounded-lg text-[15px] font-medium text-muted-foreground hover:text-foreground hover:bg-white/[0.04] transition-colors"
     >
       {icon}
       {label}
