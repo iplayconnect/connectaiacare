@@ -2,6 +2,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
+  Activity,
   AlertTriangle,
   ArrowLeft,
   FileText,
@@ -12,20 +13,36 @@ import {
 } from "lucide-react";
 
 import { ClassificationBadge } from "@/components/classification-badge";
-import { api } from "@/lib/api";
-import { calcAge, timeAgo } from "@/lib/utils";
+import { api, type CareEventSummary } from "@/lib/api";
+import { calcAge, formatDateTime, timeAgo } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
-export default async function PatientDetailPage({ params }: { params: { id: string } }) {
+export default async function PatientDetailPage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const { id } = await params;
   let data;
+  let events: CareEventSummary[] = [];
   try {
-    data = await api.getPatient(params.id);
+    [data, events] = await Promise.all([
+      api.getPatient(id),
+      api.listPatientEvents(id, true).catch(() => [] as CareEventSummary[]),
+    ]);
   } catch {
     notFound();
   }
 
   const { patient, reports } = data;
+  const activeEvents = events.filter(
+    (e) => e.status !== "resolved" && e.status !== "expired",
+  );
+  const closedEvents = events.filter(
+    (e) => e.status === "resolved" || e.status === "expired",
+  );
   const age = calcAge(patient.birth_date);
 
   return (
@@ -195,6 +212,81 @@ export default async function PatientDetailPage({ params }: { params: { id: stri
               </div>
             )}
           </div>
+        </section>
+      )}
+
+      {/* Eventos de Cuidado — ativos primeiro, depois encerrados */}
+      {events.length > 0 && (
+        <section className="glass-card rounded-2xl overflow-hidden">
+          <div className="p-6 border-b border-white/[0.05] flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="p-2 rounded-lg bg-accent-cyan/10 border border-accent-cyan/30">
+                <Activity className="h-4 w-4 text-accent-cyan" />
+              </div>
+              <div>
+                <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+                  Eventos de cuidado
+                </h2>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  <span className="tabular font-medium text-foreground">{activeEvents.length}</span>{" "}
+                  ativo(s) · <span className="tabular">{closedEvents.length}</span> encerrado(s)
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <ul className="divide-y divide-white/[0.04]">
+            {events.map((e) => {
+              const human = e.human_id
+                ? `#${e.human_id.toString().padStart(4, "0")}`
+                : "#----";
+              const isClosed = e.status === "resolved" || e.status === "expired";
+              return (
+                <li key={e.id}>
+                  <Link
+                    href={`/eventos/${e.id}`}
+                    className="flex items-center justify-between gap-4 p-5 hover:bg-white/[0.02] transition-colors group"
+                  >
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-0.5 flex-wrap">
+                        <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+                          {human}
+                        </span>
+                        {e.event_type && (
+                          <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                            · {e.event_type}
+                          </span>
+                        )}
+                        {isClosed && e.closed_reason && (
+                          <span className="text-[10px] uppercase tracking-wider text-classification-routine/80">
+                            · {e.closed_reason}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-sm font-medium truncate group-hover:text-accent-cyan transition-colors">
+                        {e.summary || "Em análise…"}
+                      </p>
+                      <div className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-muted-foreground mt-1">
+                        <span>
+                          aberto {formatDateTime(e.opened_at)}
+                        </span>
+                        {e.resolved_at && (
+                          <>
+                            <span>·</span>
+                            <span>
+                              fechado {timeAgo(e.resolved_at)}
+                            </span>
+                          </>
+                        )}
+                        {!isClosed && <span>· em andamento</span>}
+                      </div>
+                    </div>
+                    <ClassificationBadge classification={e.classification} />
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
         </section>
       )}
 
