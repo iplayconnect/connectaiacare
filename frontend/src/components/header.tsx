@@ -17,7 +17,7 @@ export function Header() {
               <span className="accent-gradient-text">ConnectaIA</span>
               <span className="text-foreground">Care</span>
             </h1>
-            <p className="text-[10px] text-muted-foreground leading-tight uppercase tracking-[0.2em]">
+            <p className="text-xs text-muted-foreground leading-tight uppercase tracking-[0.2em]">
               Cuidado Integrado · IA
             </p>
           </div>

@@ -176,7 +176,7 @@ export default async function EventDetailPage({
         {/* Event tags */}
         {event.event_tags && event.event_tags.length > 0 && (
           <div className="mt-4 flex items-center gap-2 flex-wrap">
-            <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+            <span className="text-xs uppercase tracking-wider text-muted-foreground">
               Tags:
             </span>
             {event.event_tags.map((t) => (
@@ -234,7 +234,7 @@ export default async function EventDetailPage({
                           </div>
                         )}
                       </div>
-                      <time className="text-[10px] uppercase tracking-wider text-muted-foreground whitespace-nowrap tabular">
+                      <time className="text-xs uppercase tracking-wider text-muted-foreground whitespace-nowrap tabular">
                         {formatDateTime(item.t)}
                       </time>
                     </div>
@@ -258,7 +258,7 @@ export default async function EventDetailPage({
                     className="solid-card rounded-lg p-3 text-sm"
                   >
                     <div className="flex items-center justify-between mb-1">
-                      <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                      <span className="text-xs uppercase tracking-wider text-muted-foreground">
                         {formatDateTime(r.received_at)}
                         {r.audio_duration_seconds &&
                           ` · ${r.audio_duration_seconds.toFixed(0)}s`}
@@ -302,11 +302,11 @@ export default async function EventDetailPage({
                       </span>
                       <EscalationStatusBadge status={e.status} />
                     </div>
-                    <div className="text-[11px] text-muted-foreground">
+                    <div className="text-[13px] text-muted-foreground">
                       {e.target_name || e.target_phone} · {e.channel}
                     </div>
                     {e.sent_at && (
-                      <div className="text-[10px] text-muted-foreground/70 mt-0.5">
+                      <div className="text-xs text-muted-foreground/70 mt-0.5">
                         enviado {timeAgo(e.sent_at)}
                       </div>
                     )}
@@ -339,7 +339,7 @@ export default async function EventDetailPage({
                       </span>
                       <CheckinStatusBadge status={c.status} />
                     </div>
-                    <div className="text-[10px] text-muted-foreground">
+                    <div className="text-xs text-muted-foreground">
                       {c.sent_at
                         ? `enviado ${timeAgo(c.sent_at)}`
                         : `agendado para ${formatDateTime(c.scheduled_for)}`}
@@ -360,7 +360,7 @@ export default async function EventDetailPage({
               <div className="text-xs space-y-2">
                 {patient.conditions && patient.conditions.length > 0 && (
                   <div>
-                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">
+                    <div className="text-xs uppercase tracking-wider text-muted-foreground mb-1">
                       Condições
                     </div>
                     <ul className="space-y-0.5">
@@ -379,7 +379,7 @@ export default async function EventDetailPage({
                 )}
                 {patient.medications && patient.medications.length > 0 && (
                   <div className="pt-2 border-t border-white/[0.04]">
-                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">
+                    <div className="text-xs uppercase tracking-wider text-muted-foreground mb-1">
                       Medicações ({patient.medications.length})
                     </div>
                     <ul className="space-y-0.5">
@@ -419,7 +419,7 @@ function EscalationStatusBadge({ status }: { status: string }) {
   };
   const c = config[status] || { label: status, color: "text-muted-foreground" };
   return (
-    <span className={`text-[10px] uppercase font-semibold tracking-wider ${c.color}`}>
+    <span className={`text-xs uppercase font-semibold tracking-wider ${c.color}`}>
       {c.label}
     </span>
   );
@@ -435,7 +435,7 @@ function CheckinStatusBadge({ status }: { status: string }) {
   };
   const c = config[status] || { label: status, color: "text-muted-foreground" };
   return (
-    <span className={`text-[10px] uppercase font-semibold tracking-wider ${c.color}`}>
+    <span className={`text-xs uppercase font-semibold tracking-wider ${c.color}`}>
       {c.label}
     </span>
   );

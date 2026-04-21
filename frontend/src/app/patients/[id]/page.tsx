@@ -88,7 +88,7 @@ export default async function PatientDetailPage({
             {patient.room_number && (
               <>
                 <span className="mx-2 opacity-40">·</span>
-                <span className="uppercase tracking-wider text-[10px]">Quarto {patient.room_number}</span>
+                <span className="uppercase tracking-wider text-xs">Quarto {patient.room_number}</span>
               </>
             )}
             {patient.care_unit && (
@@ -99,7 +99,7 @@ export default async function PatientDetailPage({
             )}
           </p>
           {patient.care_level && (
-            <span className="inline-block mt-3 text-[10px] uppercase tracking-[0.15em] px-2.5 py-1 rounded-full bg-accent-purple/10 border border-accent-purple/30 text-accent-purple font-semibold">
+            <span className="inline-block mt-3 text-xs uppercase tracking-[0.15em] px-2.5 py-1 rounded-full bg-accent-purple/10 border border-accent-purple/30 text-accent-purple font-semibold">
               {patient.care_level}
             </span>
           )}
@@ -124,10 +124,10 @@ export default async function PatientDetailPage({
                 <div>
                   <span className="font-medium text-foreground">{c.description}</span>
                   {c.code && (
-                    <span className="text-[11px] text-muted-foreground ml-2 font-mono">({c.code})</span>
+                    <span className="text-[13px] text-muted-foreground ml-2 font-mono">({c.code})</span>
                   )}
                   {c.severity && (
-                    <span className="text-[10px] ml-2 px-1.5 py-0.5 rounded bg-white/[0.04] text-muted-foreground">
+                    <span className="text-xs ml-2 px-1.5 py-0.5 rounded bg-white/[0.04] text-muted-foreground">
                       {c.severity}
                     </span>
                   )}
@@ -148,7 +148,7 @@ export default async function PatientDetailPage({
                 {patient.allergies.map((a) => (
                   <span
                     key={a}
-                    className="text-[11px] px-2 py-0.5 rounded-full bg-classification-critical/10 border border-classification-critical/30 text-classification-critical font-medium"
+                    className="text-[13px] px-2 py-0.5 rounded-full bg-classification-critical/10 border border-classification-critical/30 text-classification-critical font-medium"
                   >
                     {a}
                   </span>
@@ -173,7 +173,7 @@ export default async function PatientDetailPage({
                 <span className="status-dot status-dot-success mt-1.5 flex-shrink-0" />
                 <div className="flex-1">
                   <div className="font-medium text-foreground">{m.name}</div>
-                  <div className="text-[11px] text-muted-foreground mt-0.5">
+                  <div className="text-[13px] text-muted-foreground mt-0.5">
                     {m.schedule} {m.dose && `· ${m.dose}`}
                   </div>
                 </div>
@@ -249,16 +249,16 @@ export default async function PatientDetailPage({
                   >
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-0.5 flex-wrap">
-                        <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+                        <span className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
                           {human}
                         </span>
                         {e.event_type && (
-                          <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                          <span className="text-xs uppercase tracking-wider text-muted-foreground">
                             · {e.event_type}
                           </span>
                         )}
                         {isClosed && e.closed_reason && (
-                          <span className="text-[10px] uppercase tracking-wider text-classification-routine/80">
+                          <span className="text-xs uppercase tracking-wider text-classification-routine/80">
                             · {e.closed_reason}
                           </span>
                         )}
@@ -266,7 +266,7 @@ export default async function PatientDetailPage({
                       <p className="text-sm font-medium truncate group-hover:text-accent-cyan transition-colors">
                         {e.summary || "Em análise…"}
                       </p>
-                      <div className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-muted-foreground mt-1">
+                      <div className="flex items-center gap-2 text-xs uppercase tracking-wider text-muted-foreground mt-1">
                         <span>
                           aberto {formatDateTime(e.opened_at)}
                         </span>
@@ -327,7 +327,7 @@ export default async function PatientDetailPage({
                     <p className="text-sm font-medium truncate group-hover:text-accent-cyan transition-colors">
                       {r.analysis?.summary || r.transcription?.slice(0, 120) || "Processando…"}
                     </p>
-                    <p className="text-[10px] uppercase tracking-wider text-muted-foreground mt-1">
+                    <p className="text-xs uppercase tracking-wider text-muted-foreground mt-1">
                       {timeAgo(r.received_at)}
                     </p>
                   </div>

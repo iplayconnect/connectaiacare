@@ -242,14 +242,14 @@ function EventListItem({ event }: { event: CareEventSummary }) {
         {/* Conteúdo */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-0.5 flex-wrap">
-            <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+            <span className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
               {humanId}
             </span>
             <h3 className="font-semibold truncate group-hover:text-accent-cyan transition-colors">
               {patient}
             </h3>
             {event.patient_care_unit && (
-              <span className="text-[10px] uppercase tracking-wider text-muted-foreground hidden md:inline">
+              <span className="text-xs uppercase tracking-wider text-muted-foreground hidden md:inline">
                 · {event.patient_care_unit}
               </span>
             )}
@@ -257,7 +257,7 @@ function EventListItem({ event }: { event: CareEventSummary }) {
           <p className="text-sm text-muted-foreground truncate mb-1.5">
             {event.summary || "Análise em andamento…"}
           </p>
-          <div className="flex items-center gap-3 text-[11px] text-muted-foreground/90 flex-wrap">
+          <div className="flex items-center gap-3 text-[13px] text-muted-foreground/90 flex-wrap">
             <span className="inline-flex items-center gap-1.5">
               <span className={`w-1.5 h-1.5 rounded-full ${dot}`} />
               {statusLabel}
@@ -271,7 +271,7 @@ function EventListItem({ event }: { event: CareEventSummary }) {
                 {event.event_tags.slice(0, 3).map((t) => (
                   <span
                     key={t}
-                    className="px-1.5 py-0.5 rounded bg-white/[0.04] border border-white/[0.05] text-[10px]"
+                    className="px-1.5 py-0.5 rounded bg-white/[0.04] border border-white/[0.05] text-xs"
                   >
                     {t}
                   </span>
@@ -284,7 +284,7 @@ function EventListItem({ event }: { event: CareEventSummary }) {
         {/* Classificação */}
         <div className="text-right flex flex-col items-end gap-1.5">
           <ClassificationBadge classification={event.classification} />
-          <span className={`text-[10px] uppercase tracking-wider font-semibold ${tone}`}>
+          <span className={`text-xs uppercase tracking-wider font-semibold ${tone}`}>
             {label}
           </span>
         </div>
@@ -333,14 +333,14 @@ function KPICard({
       <div className="flex items-center justify-between mb-3">
         <div className={`p-2 rounded-lg border ${iconBg}`}>{icon}</div>
         {highlight && value > 0 && (
-          <span className="text-[10px] uppercase tracking-wider font-semibold text-classification-urgent animate-pulse-soft">
+          <span className="text-xs uppercase tracking-wider font-semibold text-classification-urgent animate-pulse-soft">
             • ativo
           </span>
         )}
       </div>
       <div className="tabular text-3xl font-bold leading-none mb-1">{value}</div>
       <div className="text-xs font-medium text-muted-foreground">{label}</div>
-      <div className="text-[10px] text-muted-foreground/70 mt-0.5">{hint}</div>
+      <div className="text-xs text-muted-foreground/70 mt-0.5">{hint}</div>
     </div>
   );
 }
