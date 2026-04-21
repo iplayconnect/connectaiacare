@@ -28,7 +28,10 @@ Seguir: `NNN-kebab-case-title.md` (zero-padded, kebab-case).
 | [013](013-instancia-evolution-dedicada-chip-proprio.md) | Instância Evolution dedicada com chip próprio (supersedes ADR-006) | Accepted | 2026-04-20 |
 | [014](014-integracao-medmonitor-sinais-vitais.md) | Integração MedMonitor + modelo de dados de sinais vitais | Accepted (estrutura) / Proposed (integração real) | 2026-04-20 |
 | [015](015-topologia-redes-docker-hostinger.md) | Topologia de redes Docker na Hostinger co-habitada (refina 002+003) | Accepted | 2026-04-20 |
-| [017](017-sessao-conversacional-persistente.md) | Sessão conversacional persistente pós-confirmação de paciente | Accepted | 2026-04-20 |
+| [017](017-sessao-conversacional-persistente.md) | Sessão conversacional persistente pós-confirmação de paciente | ⚠️ Superseded by [018](018-care-events-com-ciclo-de-vida.md) | 2026-04-20 |
+| [018](018-care-events-com-ciclo-de-vida.md) | Care Events como objeto de domínio (supersedes ADR-017) | Accepted | 2026-04-20 |
+| [019](019-integracao-medmonitor-totalcare.md) | Integração MedMonitor/TotalCare — ConnectaIACare como plataforma principal | Accepted | 2026-04-20 |
+| [020](020-escalacao-hierarquica-evolution-sofia.md) | Escalação hierárquica — WhatsApp Evolution + Sofia Voice | Accepted | 2026-04-20 |
 
 ## Como contribuir
 

@@ -1,9 +1,11 @@
 # ADR-017: Sessão conversacional persistente pós-confirmação de paciente
 
 - **Date**: 2026-04-20
-- **Status**: Accepted
+- **Status**: ⚠️ Superseded by [ADR-018](018-care-events-com-ciclo-de-vida.md) no mesmo dia
 - **Deciders**: Alexandre (ConnectaIA)
 - **Tags**: ux, conversational, session, state-machine
+
+> **Nota de obsolescência**: Durante a implementação, percebemos que "sessão conversacional" é um conceito técnico insuficiente — o objeto clínico central precisa ser o **Care Event**, com múltiplas mensagens/relatos agrupados sob ele, ciclo de vida completo, escalação hierárquica e encerramento categorizado. Ver ADR-018 para o modelo adotado. Este ADR permanece como registro do raciocínio intermediário.
 
 ## Context and Problem Statement
 
