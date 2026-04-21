@@ -164,11 +164,16 @@ export default async function EventDetailPage({
             <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">
               Resumo clínico
             </div>
-            <p className="text-sm text-foreground leading-relaxed">{event.summary}</p>
+            <p className="text-base text-foreground leading-relaxed">{event.summary}</p>
             {event.reasoning && (
-              <p className="text-xs text-muted-foreground mt-2 italic leading-relaxed">
-                {event.reasoning}
-              </p>
+              <div className="mt-3 pl-3 border-l-2 border-accent-cyan/40 bg-white/[0.02] rounded-r-md py-2 pr-3">
+                <div className="text-[11px] font-semibold uppercase tracking-wider text-accent-cyan/80 mb-1">
+                  Raciocínio clínico
+                </div>
+                <p className="text-sm text-foreground/85 leading-relaxed">
+                  {event.reasoning}
+                </p>
+              </div>
             )}
           </div>
         )}
