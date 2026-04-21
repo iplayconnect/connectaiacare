@@ -330,19 +330,59 @@ class EldercarePipeline:
             return {"status": "ok", "reason": "no_active_event"}
 
         if len(active_events) > 1:
-            # Texto ambíguo — pergunta qual paciente
-            names = ", ".join(
-                e.get("patient_nickname") or e.get("patient_name") or "paciente"
+            # Primeiro: tenta casar texto com nome de paciente dos eventos ativos
+            matched = self._match_event_by_text_mention(active_events, text_lower)
+            if matched:
+                return self._handle_followup_text(phone, matched, text)
+
+            # Não conseguiu desambiguar — pergunta com opções legíveis
+            options = "\n".join(
+                f"• *{(e.get('patient_nickname') or e.get('patient_name') or 'Paciente ' + str(e.get('human_id') or '?'))}*"
+                f" (evento #{(e.get('human_id') or 0):04d})"
                 for e in active_events[:5]
             )
             self.evo.send_text(
                 phone,
-                f"❓ Você tem eventos ativos para: {names}. Sobre qual você está falando?",
+                f"❓ Você tem mais de um cuidado em andamento:\n\n{options}\n\n"
+                f"Sobre quem é a informação? (pode mencionar o nome ou o apelido)",
             )
             return {"status": "need_clarification", "reason": "multiple_active_events"}
 
         # Single active event → follow-up textual
         return self._handle_followup_text(phone, active_events[0], text)
+
+    def _match_event_by_text_mention(
+        self, active_events: list[dict], text_lower: str,
+    ) -> dict | None:
+        """Procura nome de paciente (full_name/nickname) mencionado no texto.
+
+        Heurística: procura por tokens com >=3 chars do nickname/full_name de cada
+        evento ativo dentro do texto do cuidador. Se um único evento matcha, retorna.
+        Se múltiplos matcham (raro), retorna None pra forçar nova desambiguação.
+        """
+        if not text_lower:
+            return None
+        matches: list[dict] = []
+        for e in active_events:
+            candidates = [
+                (e.get("patient_nickname") or "").lower(),
+                (e.get("patient_name") or "").lower(),
+            ]
+            hit = False
+            for cand in candidates:
+                if not cand:
+                    continue
+                # Partes significativas do nome (ignora preposições e palavras curtas)
+                parts = [p for p in cand.split() if len(p) >= 3 and p not in {"dos", "das", "dona", "seu", "dom"}]
+                if any(p in text_lower for p in parts):
+                    hit = True
+                    break
+            if hit:
+                matches.append(e)
+        if len(matches) == 1:
+            # Carrega detalhes completos do evento (list_active traz só resumo)
+            return self.events.get_by_id(str(matches[0]["id"]))
+        return None
 
     def _handle_confirmation_response(
         self, phone: str, text_lower: str, context: dict,
