@@ -192,9 +192,11 @@ class EldercarePipeline:
             if matched_event:
                 return self._handle_followup_audio(phone, matched_event, report_id, transcription, entities)
 
-        # Se sem nome e há UM evento ativo → assume follow-up daquele
+        # Se sem nome e há UM evento ativo → assume follow-up daquele (carrega completo)
         if not patient_name_in_audio and len(active_events) == 1:
-            return self._handle_followup_audio(phone, active_events[0], report_id, transcription, entities)
+            full_event = self.events.get_by_id(str(active_events[0]["id"]))
+            if full_event:
+                return self._handle_followup_audio(phone, full_event, report_id, transcription, entities)
 
         # Se sem nome e há MÚLTIPLOS eventos ativos → desambigua
         if not patient_name_in_audio and len(active_events) > 1:
@@ -348,8 +350,12 @@ class EldercarePipeline:
             )
             return {"status": "need_clarification", "reason": "multiple_active_events"}
 
-        # Single active event → follow-up textual
-        return self._handle_followup_text(phone, active_events[0], text)
+        # Single active event → follow-up textual (carrega evento completo)
+        full_event = self.events.get_by_id(str(active_events[0]["id"]))
+        if not full_event:
+            self.evo.send_text(phone, "❌ Perdi o contexto. Pode reenviar?")
+            return {"status": "error", "reason": "event_missing"}
+        return self._handle_followup_text(phone, full_event, text)
 
     def _match_event_by_text_mention(
         self, active_events: list[dict], text_lower: str,
