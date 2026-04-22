@@ -5,6 +5,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 
 from config.settings import settings
 from src.handlers.routes import bp as api_bp
+from src.handlers.teleconsulta_routes import bp as teleconsulta_bp
 from src.utils.logger import configure_logging, get_logger
 
 
@@ -42,6 +43,7 @@ def create_app() -> Flask:
     )
 
     app.register_blueprint(api_bp)
+    app.register_blueprint(teleconsulta_bp)
 
     # Headers de segurança em todas as respostas.
     # Ver FINDING-006 do security audit.

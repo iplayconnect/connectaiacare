@@ -141,6 +141,17 @@ class TeleconsultaService:
             "expires_at": expires_at.isoformat(),
         })
 
+        # Cria registro em aia_health_teleconsultations (ADR-023)
+        # Permite rastrear state machine completa + SOAP + prescrição + FHIR
+        teleconsultation_id = self._create_teleconsultation_record(
+            event_id=event_id,
+            patient_id=patient_id,
+            room_name=room_name,
+            room_sid=getattr(room, "sid", None),
+            doctor_name=initiator_name,
+            doctor_role=initiator_role,
+        )
+
         logger.info(
             "teleconsulta_room_created",
             event_id=event_id,
@@ -152,6 +163,7 @@ class TeleconsultaService:
         return {
             "room_name": room_name,
             "room_sid": getattr(room, "sid", None),
+            "teleconsultation_id": teleconsultation_id,
             "doctor_token": doctor_token,
             "patient_token": patient_token,
             "doctor_url": doctor_url,
@@ -200,6 +212,164 @@ class TeleconsultaService:
             WHERE id = %s
             """,
             (self.db.json_adapt(teleconsulta_data), event_id),
+        )
+
+    def _create_teleconsultation_record(
+        self,
+        event_id: str,
+        patient_id: str,
+        room_name: str,
+        room_sid: str | None,
+        doctor_name: str | None,
+        doctor_role: str,
+    ) -> str:
+        """Cria registro em aia_health_teleconsultations (ADR-023).
+
+        Busca persona médica demo (Dra. Ana Silva) no DB.
+        Estado inicial: `scheduling` (médico acabou de clicar iniciar).
+        """
+        # Busca médico (por nome se informado, senão o demo default)
+        doctor_row = None
+        if doctor_name:
+            doctor_row = self.db.fetch_one(
+                "SELECT id, full_name, crm_number FROM aia_health_doctors "
+                "WHERE tenant_id = %s AND full_name = %s AND active = TRUE LIMIT 1",
+                (settings.tenant_id, doctor_name),
+            )
+        if not doctor_row:
+            doctor_row = self.db.fetch_one(
+                "SELECT id, full_name, crm_number FROM aia_health_doctors "
+                "WHERE tenant_id = %s AND is_demo = TRUE AND active = TRUE LIMIT 1",
+                (settings.tenant_id,),
+            )
+
+        row = self.db.insert_returning(
+            """
+            INSERT INTO aia_health_teleconsultations (
+                tenant_id, care_event_id, patient_id, doctor_id,
+                doctor_name_snapshot, doctor_crm_snapshot,
+                state, livekit_room_name, livekit_room_sid, started_at
+            ) VALUES (
+                %s, %s, %s, %s, %s, %s,
+                'scheduling', %s, %s, NOW()
+            )
+            RETURNING id
+            """,
+            (
+                settings.tenant_id,
+                event_id,
+                patient_id,
+                doctor_row["id"] if doctor_row else None,
+                doctor_row["full_name"] if doctor_row else doctor_name,
+                doctor_row["crm_number"] if doctor_row else None,
+                room_name,
+                room_sid,
+            ),
+        )
+        logger.info(
+            "teleconsultation_record_created",
+            teleconsultation_id=str(row["id"]),
+            room_name=room_name,
+        )
+        return str(row["id"])
+
+    # ---------- leitura e atualização de sessão ----------
+    def get_by_id(self, teleconsultation_id: str) -> dict | None:
+        return self.db.fetch_one(
+            """
+            SELECT t.*, p.full_name AS patient_full_name,
+                   p.nickname AS patient_nickname, p.birth_date AS patient_birth_date,
+                   p.gender AS patient_gender, p.care_unit AS patient_care_unit,
+                   p.room_number AS patient_room, p.photo_url AS patient_photo,
+                   p.conditions AS patient_conditions, p.medications AS patient_medications,
+                   p.allergies AS patient_allergies
+            FROM aia_health_teleconsultations t
+            JOIN aia_health_patients p ON p.id = t.patient_id
+            WHERE t.id = %s
+            """,
+            (teleconsultation_id,),
+        )
+
+    def get_by_room_name(self, room_name: str) -> dict | None:
+        row = self.db.fetch_one(
+            "SELECT id FROM aia_health_teleconsultations WHERE livekit_room_name = %s "
+            "ORDER BY created_at DESC LIMIT 1",
+            (room_name,),
+        )
+        return self.get_by_id(str(row["id"])) if row else None
+
+    def get_by_event(self, event_id: str) -> dict | None:
+        row = self.db.fetch_one(
+            "SELECT id FROM aia_health_teleconsultations WHERE care_event_id = %s "
+            "ORDER BY created_at DESC LIMIT 1",
+            (event_id,),
+        )
+        return self.get_by_id(str(row["id"])) if row else None
+
+    def update_state(self, teleconsultation_id: str, new_state: str) -> None:
+        valid = {
+            "scheduling", "pre_check", "consent_recording", "identity_verification",
+            "active", "closing", "documentation", "signed", "closed",
+        }
+        if new_state not in valid:
+            raise ValueError(f"state inválido: {new_state}")
+        self.db.execute(
+            "UPDATE aia_health_teleconsultations SET state = %s, updated_at = NOW() WHERE id = %s",
+            (new_state, teleconsultation_id),
+        )
+
+    def set_transcription(
+        self, teleconsultation_id: str, transcription: str, duration_seconds: int | None = None
+    ) -> None:
+        self.db.execute(
+            """
+            UPDATE aia_health_teleconsultations
+            SET transcription_full = %s,
+                transcription_duration_seconds = %s,
+                updated_at = NOW()
+            WHERE id = %s
+            """,
+            (transcription, duration_seconds, teleconsultation_id),
+        )
+
+    def set_soap(self, teleconsultation_id: str, soap: dict) -> None:
+        self.db.execute(
+            "UPDATE aia_health_teleconsultations SET soap = %s, updated_at = NOW() WHERE id = %s",
+            (self.db.json_adapt(soap), teleconsultation_id),
+        )
+
+    def set_prescription(self, teleconsultation_id: str, prescription: list[dict]) -> None:
+        self.db.execute(
+            "UPDATE aia_health_teleconsultations SET prescription = %s, updated_at = NOW() WHERE id = %s",
+            (self.db.json_adapt(prescription), teleconsultation_id),
+        )
+
+    def set_fhir_bundle(self, teleconsultation_id: str, bundle: dict) -> None:
+        self.db.execute(
+            "UPDATE aia_health_teleconsultations SET fhir_bundle = %s, updated_at = NOW() WHERE id = %s",
+            (self.db.json_adapt(bundle), teleconsultation_id),
+        )
+
+    def mark_signed(
+        self,
+        teleconsultation_id: str,
+        doctor_name: str,
+        doctor_crm: str | None,
+        signature_method: str = "mock",
+    ) -> None:
+        self.db.execute(
+            """
+            UPDATE aia_health_teleconsultations
+            SET state = 'signed',
+                signed_at = NOW(),
+                signed_by_doctor_name = %s,
+                signed_by_doctor_crm = %s,
+                signature_method = %s,
+                ended_at = COALESCE(ended_at, NOW()),
+                updated_at = NOW()
+            WHERE id = %s
+            """,
+            (doctor_name, doctor_crm, signature_method, teleconsultation_id),
         )
 
     # ---------- utilitários de sala em andamento ----------
