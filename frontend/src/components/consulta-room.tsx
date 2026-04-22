@@ -45,10 +45,12 @@ export function ConsultaRoom({
   roomName,
   token,
   role,
+  teleconsultaId,
 }: {
   roomName: string;
   token: string;
   role: "doctor" | "patient";
+  teleconsultaId?: string;
 }) {
   const [connState, setConnState] = useState<ConnectionState>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -193,11 +195,13 @@ export function ConsultaRoom({
   async function endCall() {
     const room = roomRef.current;
     if (room) await room.disconnect();
-    if (role === "doctor") {
-      // TODO: navegar pro editor SOAP na Onda 3
-      window.close();
+
+    if (role === "doctor" && teleconsultaId) {
+      // Médico: navega pro editor SOAP — fluxo pós-consulta
+      window.location.href = `/teleconsulta/${teleconsultaId}/documentacao`;
     } else {
-      window.close();
+      // Paciente: exibe tela de agradecimento ou fecha aba
+      window.location.href = "/consulta/finalizada";
     }
   }
 

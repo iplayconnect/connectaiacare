@@ -127,8 +127,10 @@ class TeleconsultaService:
 
         # URLs completas que frontend usa pra entrar
         # /consulta/[room_name]?token=XXX é a rota do Next que recebe e conecta via livekit-client
+        # tc_id é passado só na URL do médico — ao encerrar, redireciona pro editor SOAP
         front_base = settings.public_base_url.replace("demo.", "care.")
-        doctor_url = f"{front_base}/consulta/{room_name}?role=doctor&token={doctor_token}"
+        # tc_id é criado abaixo; vamos construir URLs depois de ter o id
+        doctor_url_base = f"{front_base}/consulta/{room_name}?role=doctor&token={doctor_token}"
         patient_url = f"{front_base}/consulta/{room_name}?role=patient&token={patient_token}"
 
         # Registra a consulta no care_event (campo context.teleconsulta)
@@ -151,6 +153,9 @@ class TeleconsultaService:
             doctor_name=initiator_name,
             doctor_role=initiator_role,
         )
+
+        # Anexa tc_id na URL do médico pra saber pra onde navegar ao encerrar
+        doctor_url = f"{doctor_url_base}&tc={teleconsultation_id}"
 
         logger.info(
             "teleconsulta_room_created",

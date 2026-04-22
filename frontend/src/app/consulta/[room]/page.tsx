@@ -14,7 +14,7 @@ export default async function ConsultaPage({
   searchParams,
 }: {
   params: Promise<{ room: string }>;
-  searchParams: Promise<{ token?: string; role?: string }>;
+  searchParams: Promise<{ token?: string; role?: string; tc?: string }>;
 }) {
   const { room } = await params;
   const sp = await searchParams;
@@ -25,6 +25,7 @@ export default async function ConsultaPage({
         roomName={room}
         token={sp.token || ""}
         role={(sp.role as "doctor" | "patient") || "patient"}
+        teleconsultaId={sp.tc}
       />
     </Suspense>
   );

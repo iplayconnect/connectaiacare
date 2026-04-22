@@ -288,6 +288,70 @@ export const api = {
       }>;
       active: boolean;
     }>(`/api/events/${eventId}/teleconsulta/participants`),
+
+  // Teleconsulta pós-sala: transcrição, SOAP, prescrição, assinatura
+  getTeleconsulta: (tcId: string) =>
+    request<{ teleconsulta: TeleconsultaRecord }>(`/api/teleconsulta/${tcId}`),
+  saveTranscription: (
+    tcId: string,
+    transcription: string,
+    durationSeconds?: number,
+  ) =>
+    request<{ status: "ok"; chars: number }>(
+      `/api/teleconsulta/${tcId}/transcription`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          transcription,
+          duration_seconds: durationSeconds,
+        }),
+      },
+    ),
+  generateSoap: (tcId: string) =>
+    request<{ status: "ok"; soap: SoapDocument }>(
+      `/api/teleconsulta/${tcId}/soap/generate`,
+      { method: "POST", body: JSON.stringify({}) },
+    ),
+  getSoap: (tcId: string) =>
+    request<{
+      soap: SoapDocument;
+      prescription: PrescriptionItem[];
+      signed_at: string | null;
+      state: string;
+    }>(`/api/teleconsulta/${tcId}/soap`),
+  updateSoap: (tcId: string, soap: SoapDocument) =>
+    request<{ status: "ok" }>(`/api/teleconsulta/${tcId}/soap`, {
+      method: "PUT",
+      body: JSON.stringify({ soap }),
+    }),
+  addPrescription: (tcId: string, item: PrescriptionInput) =>
+    request<{
+      status: "ok";
+      prescription_item: PrescriptionItem;
+      validation: PrescriptionValidation;
+    }>(`/api/teleconsulta/${tcId}/prescription`, {
+      method: "POST",
+      body: JSON.stringify(item),
+    }),
+  signTeleconsulta: (
+    tcId: string,
+    payload?: { doctor_name?: string; doctor_crm?: string; closure_notes?: string },
+  ) =>
+    request<{
+      status: "signed";
+      teleconsulta_id: string;
+      fhir_bundle_id: string;
+      signature_method: string;
+      medmonitor_sync: {
+        attempted: boolean;
+        created: boolean;
+        note_id?: number;
+        error?: string;
+      };
+    }>(`/api/teleconsulta/${tcId}/sign`, {
+      method: "POST",
+      body: JSON.stringify(payload || {}),
+    }),
 };
 
 // ============================================================
@@ -303,4 +367,121 @@ export interface TeleconsultaStartResponse {
   patient_url: string;
   ws_url: string;
   expires_at: string;
+}
+
+// ---------- Tipos pós-sala (SOAP + Prescrição + Assinatura) -------------
+export interface SoapDocument {
+  subjective: {
+    chief_complaint?: string;
+    history_of_present_illness?: string;
+    review_of_systems?: Record<string, string>;
+    patient_quotes?: string[];
+  };
+  objective: {
+    vital_signs_reported_in_consult?: string;
+    physical_exam_findings?: string;
+    lab_results_mentioned?: string | null;
+  };
+  assessment: {
+    primary_hypothesis?: {
+      description?: string;
+      icd10?: string;
+      confidence?: string;
+    } | null;
+    differential_diagnoses?: Array<{
+      description: string;
+      icd10?: string;
+      reasoning?: string;
+    }>;
+    active_problems_confirmed?: string[];
+    new_problems_identified?: string[];
+    clinical_reasoning?: string;
+  };
+  plan: {
+    medications?: {
+      continued?: string[];
+      adjusted?: string[];
+      started?: string[];
+      suspended?: string[];
+    };
+    non_pharmacological?: string[];
+    diagnostic_tests_requested?: string[];
+    referrals?: string[];
+    return_follow_up?: {
+      when?: string;
+      modality?: string;
+      trigger_signs?: string[];
+    };
+    patient_education?: string;
+  };
+  scribe_confidence?: {
+    overall?: "low" | "medium" | "high";
+    notes_for_doctor?: string;
+  };
+  _error?: string;
+}
+
+export interface PrescriptionInput {
+  medication: string;
+  dose?: string;
+  schedule?: string;
+  duration?: string;
+  indication?: string;
+}
+
+export interface PrescriptionValidation {
+  validation_status: "approved" | "approved_with_warnings" | "rejected";
+  severity: "none" | "low" | "moderate" | "high" | "critical";
+  issues?: Array<{
+    type: "interaction" | "allergy" | "dose" | "contraindication" | "beers_criteria";
+    severity: "low" | "moderate" | "high" | "critical";
+    description: string;
+    involved_medications?: string[];
+    recommendation?: string;
+    reasoning?: string;
+  }>;
+  beers_match?: {
+    is_potentially_inappropriate?: boolean;
+    category?: string;
+    justification?: string;
+  };
+  dose_assessment?: {
+    within_usual_range?: boolean;
+    geriatric_adjustment_note?: string;
+  };
+  overall_recommendation?: string;
+  _error?: string;
+}
+
+export interface PrescriptionItem extends PrescriptionInput {
+  id: string;
+  added_at: string;
+  validation?: PrescriptionValidation;
+}
+
+export interface TeleconsultaRecord {
+  id: string;
+  care_event_id: string | null;
+  room_name: string;
+  state: string;
+  started_at: string | null;
+  ended_at: string | null;
+  signed_at: string | null;
+  patient_id: string;
+  patient_full_name: string;
+  patient_nickname: string | null;
+  patient_birth_date: string | null;
+  patient_gender: string | null;
+  patient_care_level: string | null;
+  patient_conditions: Array<{ code?: string; description: string; severity?: string }> | null;
+  patient_medications: Array<{ name: string; schedule: string; dose?: string }> | null;
+  patient_allergies: string[] | null;
+  doctor_id: string | null;
+  doctor_name_snapshot: string | null;
+  doctor_crm_snapshot: string | null;
+  transcription_full: string | null;
+  transcription_duration_seconds: number | null;
+  soap: SoapDocument | null;
+  prescription: PrescriptionItem[] | null;
+  fhir_bundle: Record<string, unknown> | null;
 }
