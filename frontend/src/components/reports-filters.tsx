@@ -1,7 +1,8 @@
 "use client";
 
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useTransition } from "react";
+import { createPortal } from "react-dom";
 import { Search, X, SlidersHorizontal, ChevronDown, Check } from "lucide-react";
 
 // ═══════════════════════════════════════════════════════════════
@@ -155,7 +156,7 @@ export function ReportsFilters({
       </div>
 
       {/* Filtro: Classificação (multi) */}
-      <div className="relative" ref={classifRef}>
+      <div ref={classifRef}>
         <button
           onClick={() => setClassifOpen((v) => !v)}
           className={`
@@ -184,39 +185,42 @@ export function ReportsFilters({
           />
         </button>
 
-        {classifOpen && (
-          <div className="absolute top-full mt-1.5 right-0 min-w-[200px] glass-card rounded-lg p-1 z-50 shadow-xl border border-white/[0.08]">
-            {CLASSIFICATIONS.map((c) => {
-              const active = classifications.includes(c.value);
-              return (
-                <button
-                  key={c.value}
-                  onClick={() => toggleClassif(c.value)}
-                  className={`
-                    w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-sm text-left
-                    transition-colors
-                    ${
-                      active
-                        ? "bg-white/[0.05] text-foreground"
-                        : "text-muted-foreground hover:bg-white/[0.03] hover:text-foreground"
-                    }
-                  `}
-                >
-                  <span
-                    className={`w-2.5 h-2.5 rounded-sm bg-${c.color}`}
-                    style={{ backgroundColor: `hsl(var(--${c.color}))` }}
-                  />
-                  <span className="flex-1">{c.label}</span>
-                  {active && <Check className="h-3.5 w-3.5 text-accent-cyan" />}
-                </button>
-              );
-            })}
-          </div>
-        )}
+        <FloatingMenu
+          open={classifOpen}
+          anchorRef={classifRef}
+          minWidth={200}
+          align="right"
+        >
+          {CLASSIFICATIONS.map((c) => {
+            const active = classifications.includes(c.value);
+            return (
+              <button
+                key={c.value}
+                onClick={() => toggleClassif(c.value)}
+                className={`
+                  w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-sm text-left
+                  transition-colors
+                  ${
+                    active
+                      ? "bg-white/[0.05] text-foreground"
+                      : "text-muted-foreground hover:bg-white/[0.03] hover:text-foreground"
+                  }
+                `}
+              >
+                <span
+                  className={`w-2.5 h-2.5 rounded-sm`}
+                  style={{ backgroundColor: `hsl(var(--${c.color}))` }}
+                />
+                <span className="flex-1">{c.label}</span>
+                {active && <Check className="h-3.5 w-3.5 text-accent-cyan" />}
+              </button>
+            );
+          })}
+        </FloatingMenu>
       </div>
 
       {/* Filtro: Período */}
-      <div className="relative" ref={daysRef}>
+      <div ref={daysRef}>
         <button
           onClick={() => setDaysOpen((v) => !v)}
           className={`
@@ -235,35 +239,38 @@ export function ReportsFilters({
           />
         </button>
 
-        {daysOpen && (
-          <div className="absolute top-full mt-1.5 right-0 min-w-[180px] glass-card rounded-lg p-1 z-50 shadow-xl border border-white/[0.08]">
-            {DAYS_OPTIONS.map((o) => (
-              <button
-                key={o.value}
-                onClick={() => {
-                  setDays(o.value);
-                  setDaysOpen(false);
-                }}
-                className={`
-                  w-full flex items-center justify-between px-2.5 py-1.5 rounded-md text-sm
-                  transition-colors
-                  ${
-                    days === o.value
-                      ? "bg-white/[0.05] text-accent-cyan"
-                      : "text-muted-foreground hover:bg-white/[0.03] hover:text-foreground"
-                  }
-                `}
-              >
-                {o.label}
-                {days === o.value && <Check className="h-3.5 w-3.5" />}
-              </button>
-            ))}
-          </div>
-        )}
+        <FloatingMenu
+          open={daysOpen}
+          anchorRef={daysRef}
+          minWidth={180}
+          align="right"
+        >
+          {DAYS_OPTIONS.map((o) => (
+            <button
+              key={o.value}
+              onClick={() => {
+                setDays(o.value);
+                setDaysOpen(false);
+              }}
+              className={`
+                w-full flex items-center justify-between px-2.5 py-1.5 rounded-md text-sm
+                transition-colors
+                ${
+                  days === o.value
+                    ? "bg-white/[0.05] text-accent-cyan"
+                    : "text-muted-foreground hover:bg-white/[0.03] hover:text-foreground"
+                }
+              `}
+            >
+              {o.label}
+              {days === o.value && <Check className="h-3.5 w-3.5" />}
+            </button>
+          ))}
+        </FloatingMenu>
       </div>
 
       {/* Divisor */}
-      <div className="w-px h-6 bg-white/[0.06] mx-1" />
+      <div className="hidden md:block w-px h-6 bg-white/[0.06] mx-1" />
 
       {/* Contador + clear */}
       <div className="flex items-center gap-2 text-xs">
@@ -291,5 +298,75 @@ export function ReportsFilters({
         )}
       </div>
     </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// FloatingMenu — dropdown via React Portal
+// Escapa do stacking context criado por backdrop-filter dos glass-cards
+// Posicionado via getBoundingClientRect do anchor; reposiciona no scroll/resize
+// ═══════════════════════════════════════════════════════════════
+function FloatingMenu({
+  open,
+  anchorRef,
+  minWidth = 180,
+  align = "right",
+  children,
+}: {
+  open: boolean;
+  anchorRef: React.RefObject<HTMLDivElement | null>;
+  minWidth?: number;
+  align?: "left" | "right";
+  children: React.ReactNode;
+}) {
+  const [mounted, setMounted] = useState(false);
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+
+  useEffect(() => setMounted(true), []);
+
+  useLayoutEffect(() => {
+    if (!open || !anchorRef.current) {
+      setPos(null);
+      return;
+    }
+
+    function compute() {
+      const anchor = anchorRef.current;
+      if (!anchor) return;
+      const rect = anchor.getBoundingClientRect();
+      const top = rect.bottom + 6;
+      const menuWidth = Math.max(minWidth, rect.width);
+      const left =
+        align === "right"
+          ? Math.max(8, rect.right - menuWidth)
+          : rect.left;
+      setPos({ top, left });
+    }
+
+    compute();
+    window.addEventListener("scroll", compute, true);
+    window.addEventListener("resize", compute);
+    return () => {
+      window.removeEventListener("scroll", compute, true);
+      window.removeEventListener("resize", compute);
+    };
+  }, [open, anchorRef, minWidth, align]);
+
+  if (!open || !mounted || !pos) return null;
+
+  return createPortal(
+    <div
+      style={{
+        position: "fixed",
+        top: pos.top,
+        left: pos.left,
+        minWidth,
+        zIndex: 9999,
+      }}
+      className="glass-card rounded-lg p-1 shadow-2xl border border-white/[0.1] animate-fade-up"
+    >
+      {children}
+    </div>,
+    document.body,
   );
 }
