@@ -293,10 +293,51 @@ class EldercarePipeline:
             transcription, entities, patient, history,
             conversation_history=conversation_history,
         )
+
+        # Detecção de resposta a status_update: se o cuidador confirma que
+        # está tudo bem (classificação rotina, sem alertas, sem sintomas novos)
+        # E o evento estava aguardando retorno ("awaiting_status_update"),
+        # encerra automaticamente como "sem_intercorrencia". Corrige bug em
+        # que respostas positivas mantinham o evento aberto para sempre.
+        if self._is_reassurance_response(event, analysis, transcription):
+            self._mark_checkin_response(event, transcription, analysis.get("classification"))
+            self.events.resolve(
+                str(event["id"]),
+                closed_by=f"caregiver:{phone}",
+                closed_reason="sem_intercorrencia",
+                closure_notes=(
+                    f"Cuidador confirmou melhora/ausência de intercorrência. "
+                    f"Relato: {transcription[:280]}"
+                ),
+            )
+            self.reports.save_analysis(
+                report_id, analysis, analysis.get("classification", "routine"),
+                bool(analysis.get("needs_medical_attention")),
+            )
+            self.evo.send_text(
+                phone,
+                f"✅ Que bom saber. Encerrei o acompanhamento do evento #{event['human_id']:04d}. "
+                "Se algo mudar, é só me enviar outro áudio que reabro na hora.",
+            )
+            return {
+                "status": "resolved_by_reassurance",
+                "event_id": str(event["id"]),
+                "report_id": str(report_id),
+                "classification": analysis.get("classification"),
+                "closed_reason": "sem_intercorrencia",
+            }
+
+        # Caso contrário: tratamento normal (atualiza evento, classifica, segue ciclo)
         self._finalize_analysis(
             event=event, patient=patient, report_id=report_id,
             transcription=transcription, analysis=analysis, is_followup=True,
         )
+        # Em follow-up não voltamos pra awaiting_ack — se estava em
+        # awaiting_status_update e o cuidador trouxe info nova, mantemos o
+        # ciclo aberto pra Atente revisar. _finalize_analysis já fez o trabalho
+        # de update_classification + send_analysis_summary.
+        # Marca que o checkin recebeu resposta (mesmo que não resolvida).
+        self._mark_checkin_response(event, transcription, analysis.get("classification"))
         return {
             "status": "analyzed_followup",
             "event_id": str(event["id"]),
@@ -681,6 +722,107 @@ class EldercarePipeline:
                 # Carrega dados completos do evento (list_active traz campos resumidos)
                 return self.events.get_by_id(str(e["id"]))
         return None
+
+    # ==================================================================
+    # HELPERS — resposta a status_update (encerramento por reasseguramento)
+    # ==================================================================
+    # Palavras-chave que sinalizam melhora/ausência de intercorrência.
+    # Usadas em combinação com classificação clínica "routine" pra fechar
+    # o evento automaticamente quando o cuidador retorna dizendo que está OK.
+    REASSURANCE_TERMS = (
+        "tudo ok", "tudo bem", "tudo certo", "tudo certinho", "tudo bom",
+        "está bem", "esta bem", "está ok", "esta ok", "está bom", "esta bom",
+        "melhorou", "melhorando", "dormindo bem", "passou", "já passou",
+        "ja passou", "não preciso", "nao preciso", "sem problema",
+        "falso alarme", "alarme falso", "foi só susto", "foi so susto",
+        "estabilizou", "estável", "estavel", "normalizou", "voltou ao normal",
+        "está normal", "esta normal", "se acalmou", "acalmou",
+        "reagiu bem", "comeu bem", "bebeu água", "tomou remédio",
+        "tomou o remedio", "aceitou o remédio",
+    )
+
+    def _is_reassurance_response(
+        self, event: dict, analysis: dict, transcription: str,
+    ) -> bool:
+        """Decide se um follow-up é resposta positiva a check-in de status.
+
+        Critérios (todos verdadeiros):
+          1. Evento está `awaiting_status_update` — ou seja, acabamos de
+             perguntar "como está?" e o cuidador está respondendo.
+          2. Classificação da análise veio como `routine` (mais baixa).
+          3. Nenhum alerta gerado + needs_medical_attention = False.
+          4. Transcrição contém termo de reasseguramento OU a análise
+             explicitamente marcou `resolves_event: True`.
+
+        Ser conservador: se houver QUALQUER sinal de piora, não fecha.
+        """
+        status = event.get("status")
+        if status != STATUS_AWAITING_STATUS_UPDATE:
+            return False
+
+        classification = (analysis.get("classification") or "").lower()
+        if classification != "routine":
+            return False
+
+        if analysis.get("needs_medical_attention"):
+            return False
+
+        alerts = analysis.get("alerts") or []
+        # Alertas de nível "alto"/"critico" bloqueiam fechamento automático
+        blocking = [a for a in alerts if (a.get("level") or "").lower() in ("alto", "critico", "crítico", "high", "critical")]
+        if blocking:
+            return False
+
+        # LLM pode explicitamente sinalizar
+        if analysis.get("resolves_event") is True:
+            return True
+
+        # Heurística lexical — barata, funciona pro MVP/demo
+        text_lower = (transcription or "").lower()
+        if any(term in text_lower for term in self.REASSURANCE_TERMS):
+            return True
+
+        return False
+
+    def _mark_checkin_response(
+        self, event: dict, response_text: str, classification: str | None,
+    ) -> None:
+        """Marca o check-in `status_update` pendente como respondido.
+
+        Evita que o scheduler fique ressentando o mesmo check-in porque o
+        DB acredita que o cuidador nunca respondeu. Idempotente: pega o
+        mais recente com status `sent` e sem `response_received_at`.
+        """
+        try:
+            self.db.execute(
+                """
+                UPDATE aia_health_care_event_checkins
+                SET response_received_at = NOW(),
+                    response_text = %s,
+                    response_classification = %s,
+                    status = 'responded'
+                WHERE id = (
+                    SELECT id FROM aia_health_care_event_checkins
+                    WHERE event_id = %s
+                      AND kind IN ('status_update', 'closure_check', 'pattern_analysis')
+                      AND status IN ('sent', 'scheduled')
+                      AND response_received_at IS NULL
+                    ORDER BY scheduled_for DESC
+                    LIMIT 1
+                )
+                """,
+                (
+                    (response_text or "")[:500],
+                    classification,
+                    str(event["id"]),
+                ),
+            )
+        except Exception as exc:
+            logger.warning(
+                "mark_checkin_response_failed",
+                event_id=str(event.get("id")),
+                error=str(exc),
+            )
 
     # ==================================================================
     # HELPERS
