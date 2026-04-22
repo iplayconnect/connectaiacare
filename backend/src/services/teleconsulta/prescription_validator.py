@@ -125,7 +125,9 @@ class PrescriptionValidator:
                 system="Você é um farmacologista clínico geriátrico rigoroso e conservador.",
                 user=user_payload,
                 model=MODEL_DEEP,
-                max_tokens=2048,
+                # 2048 truncava JSON quando havia múltiplos issues com descrições
+                # médicas longas (detectado em prod com Domperidona + Parkinson).
+                max_tokens=4096,
                 temperature=0.1,
             )
         except Exception as exc:

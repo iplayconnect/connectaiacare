@@ -346,11 +346,26 @@ def _create_patient_portal_and_notify(
     notificado manualmente depois.
     """
     from src.services.patient_portal_service import get_patient_portal_service
+    from src.services.postgres import get_postgres
 
     result: dict = {"created": False}
+
+    # caregiver_phone não está na tabela teleconsultations; está no care_event
     phone = tc.get("caregiver_phone")
+    if not phone and tc.get("care_event_id"):
+        try:
+            row = get_postgres().fetch_one(
+                "SELECT caregiver_phone FROM aia_health_care_events WHERE id = %s",
+                (str(tc["care_event_id"]),),
+            )
+            if row:
+                phone = row.get("caregiver_phone")
+        except Exception as exc:
+            logger.warning("fetch_caregiver_phone_failed", error=str(exc))
+
     if not phone:
         result["reason"] = "no_caregiver_phone"
+        logger.warning("patient_portal_no_phone", tc_id=tc_id)
         return result
 
     try:
