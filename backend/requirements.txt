@@ -40,3 +40,7 @@ pgvector==0.3.6
 
 structlog==24.4.0
 rich==13.9.2
+
+# Teleconsulta via LiveKit (ADR-012 — reuso LiveKit da Hostinger)
+# SDK gera JWT tokens + cria rooms via API. Web clients usam livekit-client (npm).
+livekit-api==0.8.2

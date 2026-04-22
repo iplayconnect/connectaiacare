@@ -84,6 +84,125 @@ def get_report(report_id: str):
     return jsonify({"report": report})
 
 
+# ==============================================================
+# Teleconsulta via LiveKit (ADR-012, módulo novo 2026-04-22)
+# ==============================================================
+@bp.post("/api/events/<event_id>/teleconsulta/start")
+def start_teleconsultation(event_id: str):
+    """Inicia sala LiveKit para teleconsulta, associada ao care_event.
+
+    Body JSON (opcional):
+        { "initiator_name": "Dr. Mauricio", "initiator_role": "doctor" }
+
+    Retorna URLs + tokens prontos para:
+      - Profissional entrar na sala (doctor_url)
+      - Paciente/familiar entrar na sala (patient_url, pode ser enviado via WhatsApp)
+    """
+    import asyncio
+    from src.services.care_event_service import get_care_event_service
+    from src.services.patient_service import get_patient_service
+    from src.services.teleconsulta_service import get_teleconsulta_service
+
+    svc = get_teleconsulta_service()
+    if not svc.enabled:
+        return jsonify({
+            "status": "error",
+            "reason": "teleconsulta_not_configured",
+            "message": "LIVEKIT_API_KEY/SECRET não configurados no ambiente."
+        }), 503
+
+    event = get_care_event_service().get_by_id(event_id)
+    if not event:
+        return jsonify({"status": "error", "reason": "event_not_found"}), 404
+
+    patient = get_patient_service().get_by_id(str(event["patient_id"]))
+    if not patient:
+        return jsonify({"status": "error", "reason": "patient_not_found"}), 404
+
+    body = request.get_json(silent=True) or {}
+    initiator_role = body.get("initiator_role", "doctor")
+    initiator_name = body.get("initiator_name")
+
+    try:
+        result = asyncio.run(
+            svc.create_consultation_room(
+                event_id=event_id,
+                human_id=event.get("human_id"),
+                patient_id=str(event["patient_id"]),
+                patient_name=patient.get("nickname") or patient.get("full_name") or "Paciente",
+                initiator_role=initiator_role,
+                initiator_name=initiator_name,
+            )
+        )
+    except Exception as exc:
+        logger.error("teleconsulta_start_failed", event_id=event_id, error=str(exc))
+        return jsonify({"status": "error", "reason": "livekit_error", "detail": str(exc)}), 500
+
+    return jsonify({"status": "ok", **result})
+
+
+@bp.post("/api/events/<event_id>/teleconsulta/end")
+def end_teleconsultation(event_id: str):
+    """Encerra a sala LiveKit da teleconsulta."""
+    import asyncio
+    from src.services.care_event_service import get_care_event_service
+    from src.services.teleconsulta_service import get_teleconsulta_service
+
+    event = get_care_event_service().get_by_id(event_id)
+    if not event:
+        return jsonify({"status": "error", "reason": "event_not_found"}), 404
+
+    tele_data = (event.get("context") or {}).get("teleconsulta") or {}
+    room_name = tele_data.get("room_name")
+    if not room_name:
+        return jsonify({"status": "error", "reason": "no_active_consultation"}), 400
+
+    body = request.get_json(silent=True) or {}
+    notes = body.get("closure_notes")
+
+    try:
+        asyncio.run(
+            get_teleconsulta_service().end_consultation(
+                event_id=event_id, room_name=room_name, closure_notes=notes
+            )
+        )
+    except Exception as exc:
+        logger.warning("teleconsulta_end_failed", event_id=event_id, error=str(exc))
+
+    return jsonify({"status": "ended", "room_name": room_name})
+
+
+@bp.get("/api/events/<event_id>/teleconsulta/participants")
+def list_teleconsultation_participants(event_id: str):
+    """Lista participantes atuais da sala (polling do dashboard do médico)."""
+    import asyncio
+    from src.services.care_event_service import get_care_event_service
+    from src.services.teleconsulta_service import get_teleconsulta_service
+
+    event = get_care_event_service().get_by_id(event_id)
+    if not event:
+        return jsonify({"status": "error", "reason": "event_not_found"}), 404
+
+    tele_data = (event.get("context") or {}).get("teleconsulta") or {}
+    room_name = tele_data.get("room_name")
+    if not room_name:
+        return jsonify({"participants": [], "active": False})
+
+    try:
+        participants = asyncio.run(
+            get_teleconsulta_service().list_participants(room_name)
+        )
+    except Exception as exc:
+        logger.warning("teleconsulta_list_participants_failed", error=str(exc))
+        participants = []
+
+    return jsonify({
+        "room_name": room_name,
+        "participants": participants,
+        "active": len(participants) > 0,
+    })
+
+
 # ---------- Voice Biometrics ----------
 @bp.post("/api/voice/enroll")
 def voice_enroll():

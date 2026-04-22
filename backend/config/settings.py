@@ -47,6 +47,16 @@ class Settings:
     sofia_voice_url: str = os.getenv("SOFIA_VOICE_API_URL", "")
     sofia_voice_key: str = os.getenv("SOFIA_VOICE_API_KEY", "")
 
+    # LiveKit (ADR-012 teleconsulta híbrida)
+    # Compartilha infra LiveKit da Hostinger temporariamente (key dedicada
+    # `connectaiacare`, secret próprio). Quando migrarmos pra VPS dedicada,
+    # subimos container LiveKit próprio. WebSocket público via Traefik:
+    # wss://meet.connectaia.com.br
+    livekit_url: str = os.getenv("LIVEKIT_URL", "http://livekit:7880")
+    livekit_ws_url: str = os.getenv("LIVEKIT_WS_URL", "wss://meet.connectaia.com.br")
+    livekit_api_key: str = os.getenv("LIVEKIT_API_KEY", "")
+    livekit_api_secret: str = os.getenv("LIVEKIT_API_SECRET", "")
+
     # MedMonitor / TotalCare API (ADR-019)
     # Base URL: https://<tenant>.contactto.care/agent
     # Fornecido pela Tecnosenior em 2026-04-20 (tenant vf-totalcare).
