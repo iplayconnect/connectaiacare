@@ -303,7 +303,7 @@ export function TeleconsultaDocumentation({
           onChange={(e) => setTranscription(e.target.value)}
           rows={8}
           placeholder="Ex: Paciente relata dor no joelho há 3 dias, piora ao caminhar. Nega trauma. Exame: edema leve, sem sinais flogísticos. Conduta: paracetamol 750mg de 8/8h por 5 dias, compressa morna, retorno em 7 dias se não melhorar..."
-          className="w-full rounded-lg bg-black/30 border border-white/[0.06] px-3 py-2 text-sm font-mono leading-relaxed placeholder:text-muted-foreground/40 focus:outline-none focus:border-accent-cyan/40 disabled:opacity-60"
+          className="w-full rounded-lg bg-black/30 border border-white/[0.06] px-3 py-2 text-[13px] font-mono leading-relaxed placeholder:text-foreground/40 focus:outline-none focus:border-accent-cyan/40 disabled:opacity-60"
         />
         <div className="flex items-center justify-between mt-3 gap-2 flex-wrap">
           <div className="text-[11px] text-muted-foreground">
@@ -499,7 +499,7 @@ function PatientBriefCard({ tc }: { tc: TeleconsultaRecord | null }) {
     <div className="glass-card rounded-xl p-4 border border-white/[0.06] mb-6">
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
         <div>
-          <div className="text-[10px] uppercase tracking-[0.15em] text-muted-foreground mb-1.5">
+          <div className="text-[11px] uppercase tracking-[0.12em] text-accent-cyan/80 font-semibold mb-1.5">
             Condições ativas
           </div>
           {conditions.length === 0 ? (
@@ -518,7 +518,7 @@ function PatientBriefCard({ tc }: { tc: TeleconsultaRecord | null }) {
           )}
         </div>
         <div>
-          <div className="text-[10px] uppercase tracking-[0.15em] text-muted-foreground mb-1.5">
+          <div className="text-[11px] uppercase tracking-[0.12em] text-accent-cyan/80 font-semibold mb-1.5">
             Medicações em uso
           </div>
           {meds.length === 0 ? (
@@ -536,7 +536,7 @@ function PatientBriefCard({ tc }: { tc: TeleconsultaRecord | null }) {
           )}
         </div>
         <div>
-          <div className="text-[10px] uppercase tracking-[0.15em] text-muted-foreground mb-1.5 flex items-center gap-1">
+          <div className="text-[11px] uppercase tracking-[0.12em] text-accent-cyan/80 font-semibold mb-1.5 flex items-center gap-1">
             Alergias
             {allergies.length > 0 && (
               <AlertTriangle className="h-3 w-3 text-classification-critical" />
@@ -588,7 +588,7 @@ function Section({
             {badge}
           </div>
           {description && (
-            <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
+            <p className="text-[13px] text-foreground/75 mt-1 leading-relaxed">
               {description}
             </p>
           )}

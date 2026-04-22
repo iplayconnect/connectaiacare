@@ -89,7 +89,7 @@ export function SoapEditor({
         {soap.subjective.patient_quotes &&
           soap.subjective.patient_quotes.length > 0 && (
             <div>
-              <div className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground mb-1.5">
+              <div className="text-[11px] uppercase tracking-[0.1em] text-accent-cyan/80 font-semibold mb-1.5">
                 Citações do paciente
               </div>
               <div className="space-y-1">
@@ -142,7 +142,7 @@ export function SoapEditor({
       {/* A — Avaliação */}
       <SoapBlock letter="A" title="Avaliação" tint="violet">
         <div>
-          <div className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground mb-1.5">
+          <div className="text-[11px] uppercase tracking-[0.1em] text-accent-cyan/80 font-semibold mb-1.5">
             Hipótese diagnóstica principal
           </div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
@@ -189,7 +189,7 @@ export function SoapEditor({
         {soap.assessment.differential_diagnoses &&
           soap.assessment.differential_diagnoses.length > 0 && (
             <div>
-              <div className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground mb-1.5">
+              <div className="text-[11px] uppercase tracking-[0.1em] text-accent-cyan/80 font-semibold mb-1.5">
                 Diagnósticos diferenciais
               </div>
               <ul className="space-y-1">
@@ -222,7 +222,7 @@ export function SoapEditor({
         {soap.assessment.active_problems_confirmed &&
           soap.assessment.active_problems_confirmed.length > 0 && (
             <div>
-              <div className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground mb-1.5">
+              <div className="text-[11px] uppercase tracking-[0.1em] text-accent-cyan/80 font-semibold mb-1.5">
                 Problemas ativos confirmados
               </div>
               <div className="flex flex-wrap gap-1">
@@ -280,7 +280,7 @@ export function SoapEditor({
         />
 
         <div>
-          <div className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground mb-1.5">
+          <div className="text-[11px] uppercase tracking-[0.1em] text-accent-cyan/80 font-semibold mb-1.5">
             Retorno / Seguimento
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
@@ -316,7 +316,7 @@ export function SoapEditor({
           {soap.plan.return_follow_up?.trigger_signs &&
             soap.plan.return_follow_up.trigger_signs.length > 0 && (
               <div className="mt-2">
-                <div className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground mb-1">
+                <div className="text-[11px] uppercase tracking-[0.1em] text-accent-cyan/80 font-semibold mb-1">
                   Sinais de alerta para retorno imediato
                 </div>
                 <div className="flex flex-wrap gap-1">
@@ -428,7 +428,7 @@ function Field({
 }) {
   return (
     <div>
-      <label className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground mb-1.5 block">
+      <label className="text-[11px] uppercase tracking-[0.1em] text-accent-cyan/80 font-semibold mb-1.5 block">
         {label}
       </label>
       <input
@@ -459,7 +459,7 @@ function TextArea({
 }) {
   return (
     <div>
-      <label className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground mb-1.5 block">
+      <label className="text-[11px] uppercase tracking-[0.1em] text-accent-cyan/80 font-semibold mb-1.5 block">
         {label}
       </label>
       <textarea
@@ -498,7 +498,7 @@ function StringList({
 
   return (
     <div>
-      <label className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground mb-1.5 block">
+      <label className="text-[11px] uppercase tracking-[0.1em] text-accent-cyan/80 font-semibold mb-1.5 block">
         {label}
       </label>
       {items.length > 0 && (
@@ -574,7 +574,7 @@ function MedicationPlan({
 
   return (
     <div>
-      <div className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground mb-1.5">
+      <div className="text-[11px] uppercase tracking-[0.1em] text-accent-cyan/80 font-semibold mb-1.5">
         Medicações — revisão e ajuste
       </div>
       {hasAny ? (

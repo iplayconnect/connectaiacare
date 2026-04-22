@@ -111,10 +111,10 @@ export function SignCelebration({
             <Sparkles className="h-4 w-4 text-accent-cyan" />
             Prontuário assinado
           </h2>
-          <p className="text-sm text-muted-foreground leading-relaxed">
-            A teleconsulta com <span className="text-foreground font-medium">{patientName}</span> foi
+          <p className="text-[14px] text-foreground/85 leading-relaxed">
+            A teleconsulta com <span className="text-foreground font-semibold">{patientName}</span> foi
             assinada eletronicamente por{" "}
-            <span className="text-foreground font-medium">{doctorName}</span>.
+            <span className="text-foreground font-semibold">{doctorName}</span>.
           </p>
         </div>
 
@@ -190,8 +190,8 @@ function ConfirmStep({
         <Check className="h-2.5 w-2.5 text-classification-routine" strokeWidth={3.5} />
       </div>
       <div>
-        <div className="text-xs font-medium">{label}</div>
-        <div className="text-[11px] text-muted-foreground leading-relaxed">
+        <div className="text-[13px] font-semibold text-foreground">{label}</div>
+        <div className="text-[12px] text-foreground/75 leading-relaxed">
           {children}
         </div>
       </div>

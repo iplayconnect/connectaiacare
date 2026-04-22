@@ -119,10 +119,10 @@ export function PrescriptionModal({
               <Pill className="h-5 w-5 text-accent-cyan" />
             </div>
             <div>
-              <h2 className="text-base font-semibold">
+              <h2 className="text-[17px] font-semibold">
                 {phase === "result" ? "Validação da prescrição" : "Nova prescrição"}
               </h2>
-              <p className="text-[11px] text-muted-foreground mt-0.5">
+              <p className="text-[12px] text-foreground/75 mt-1 leading-relaxed">
                 {phase === "result"
                   ? "Resultado da análise IA (Beers + interações + alergias)"
                   : "Será validada contra Critérios de Beers + medicações atuais + alergias"}
@@ -144,7 +144,7 @@ export function PrescriptionModal({
           <div className="space-y-3">
             {/* Quick picks */}
             <div>
-              <div className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground mb-1.5">
+              <div className="text-[11px] uppercase tracking-[0.1em] text-accent-cyan/80 font-semibold mb-1.5">
                 Sugestões frequentes
               </div>
               <div className="flex flex-wrap gap-1.5">
@@ -220,19 +220,19 @@ export function PrescriptionModal({
 
             {/* Contexto rápido */}
             {(patientAllergies.length > 0 || patientMedications.length > 0) && (
-              <div className="rounded-md bg-white/[0.02] border border-white/[0.05] p-2.5 text-[11px] leading-relaxed">
+              <div className="rounded-md bg-white/[0.02] border border-white/[0.05] p-3 text-[12px] leading-relaxed">
                 {patientAllergies.length > 0 && (
-                  <div className="mb-1">
-                    <span className="text-muted-foreground">Alergias: </span>
-                    <span className="text-classification-critical">
+                  <div className="mb-1.5">
+                    <span className="text-foreground/70 font-medium">Alergias: </span>
+                    <span className="text-classification-critical font-semibold">
                       {patientAllergies.join(", ")}
                     </span>
                   </div>
                 )}
                 {patientMedications.length > 0 && (
                   <div>
-                    <span className="text-muted-foreground">Em uso: </span>
-                    <span className="text-foreground/80">
+                    <span className="text-foreground/70 font-medium">Em uso: </span>
+                    <span className="text-foreground/90">
                       {patientMedications.slice(0, 8).join(", ")}
                       {patientMedications.length > 8 &&
                         ` (+${patientMedications.length - 8})`}
@@ -299,7 +299,7 @@ function FormField({
 }) {
   return (
     <div>
-      <label className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground mb-1 block">
+      <label className="text-[11px] uppercase tracking-[0.1em] text-accent-cyan/80 font-semibold mb-1 block">
         {label}
       </label>
       {children}
