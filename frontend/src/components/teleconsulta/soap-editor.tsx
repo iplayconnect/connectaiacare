@@ -6,6 +6,42 @@ import { Check, Loader2, Save, Sparkles } from "lucide-react";
 import type { SoapDocument } from "@/lib/api";
 
 // ═══════════════════════════════════════════════════════════════
+// toDisplayString — converte qualquer coisa que o LLM retornou num
+// item de lista pra string exibível. O SOAP writer (Claude Opus) às
+// vezes entrega strings, às vezes objetos estruturados como
+// { medication, change, dose, schedule, ... }. React Error #31
+// quebra se passarmos objeto direto.
+// ═══════════════════════════════════════════════════════════════
+function toDisplayString(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (Array.isArray(value)) return value.map(toDisplayString).filter(Boolean).join(", ");
+  if (typeof value === "object") {
+    const obj = value as Record<string, unknown>;
+    // Campos comuns em itens de medicação/plano gerados pelo LLM
+    const parts: string[] = [];
+    const primary =
+      obj.medication || obj.name || obj.drug || obj.description || obj.text || obj.item;
+    if (primary) parts.push(String(primary));
+    if (obj.dose) parts.push(String(obj.dose));
+    if (obj.schedule) parts.push(String(obj.schedule));
+    if (obj.frequency) parts.push(String(obj.frequency));
+    if (obj.duration) parts.push(String(obj.duration));
+    if (obj.change || obj.action) parts.push(`→ ${String(obj.change || obj.action)}`);
+    if (obj.reason || obj.rationale) parts.push(`(${String(obj.reason || obj.rationale)})`);
+    if (parts.length > 0) return parts.join(" · ");
+    // Último recurso — stringify compacto
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return "[item]";
+    }
+  }
+  return String(value);
+}
+
+// ═══════════════════════════════════════════════════════════════
 // SOAP Editor — 4 seções (Subjetivo / Objetivo / Avaliação / Plano)
 // Campos críticos são editáveis inline. O médico SEMPRE revisa
 // antes de assinar — nada é auto-committed.
@@ -98,7 +134,7 @@ export function SoapEditor({
                     key={i}
                     className="text-xs italic text-muted-foreground border-l-2 border-accent-cyan/40 pl-2.5 py-0.5"
                   >
-                    &ldquo;{q}&rdquo;
+                    &ldquo;{toDisplayString(q)}&rdquo;
                   </div>
                 ))}
               </div>
@@ -231,7 +267,7 @@ export function SoapEditor({
                     key={i}
                     className="text-[11px] px-2 py-0.5 rounded-full bg-accent-cyan/10 border border-accent-cyan/25 text-accent-cyan"
                   >
-                    {p}
+                    {toDisplayString(p)}
                   </span>
                 ))}
               </div>
@@ -325,7 +361,7 @@ export function SoapEditor({
                       key={i}
                       className="text-[11px] px-2 py-0.5 rounded-full bg-classification-attention/10 border border-classification-attention/25 text-classification-attention"
                     >
-                      ⚠ {s}
+                      ⚠ {toDisplayString(s)}
                     </span>
                   ))}
                 </div>
@@ -509,7 +545,7 @@ function StringList({
               className="flex items-start gap-2 text-sm bg-white/[0.02] border border-white/[0.05] rounded-md px-2.5 py-1.5"
             >
               <span className="text-muted-foreground mt-0.5">•</span>
-              <span className="flex-1">{item}</span>
+              <span className="flex-1">{toDisplayString(item)}</span>
               {!disabled && (
                 <button
                   onClick={() => onChange(items.filter((_, idx) => idx !== i))}
@@ -589,7 +625,7 @@ function MedicationPlan({
                 </div>
                 <ul className="space-y-0.5 text-xs">
                   {items.map((m, i) => (
-                    <li key={i}>• {m}</li>
+                    <li key={i}>• {toDisplayString(m)}</li>
                   ))}
                 </ul>
               </div>
