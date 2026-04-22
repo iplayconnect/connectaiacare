@@ -321,13 +321,90 @@ def sign_teleconsulta(tc_id: str):
     # Transiciona pra closed (estado final)
     svc.update_state(tc_id, "closed")
 
+    # Gera PIN do portal do paciente + envia WhatsApp
+    portal_result = _create_patient_portal_and_notify(tc_id, tc, patient_obj, doctor_name)
+
     return jsonify({
         "status": "signed",
         "teleconsulta_id": tc_id,
         "fhir_bundle_id": bundle.get("id"),
         "signature_method": "mock",
         "medmonitor_sync": sync_result,
+        "patient_portal": portal_result,
     })
+
+
+def _create_patient_portal_and_notify(
+    tc_id: str,
+    tc: dict,
+    patient_obj: dict,
+    doctor_name: str,
+) -> dict:
+    """Gera PIN 24h + envia WhatsApp pro cuidador com link do portal.
+
+    Não-fatal: erro aqui não quebra o sign. O paciente sempre pode ser
+    notificado manualmente depois.
+    """
+    from src.services.patient_portal_service import get_patient_portal_service
+
+    result: dict = {"created": False}
+    phone = tc.get("caregiver_phone")
+    if not phone:
+        result["reason"] = "no_caregiver_phone"
+        return result
+
+    try:
+        pin, record = get_patient_portal_service().create_access(
+            teleconsultation_id=tc_id,
+            tenant_id=tc.get("tenant_id") or "connectaiacare_demo",
+            recipient_phone=phone,
+        )
+        result["created"] = True
+        result["expires_at"] = (
+            record["expires_at"].isoformat() if hasattr(record["expires_at"], "isoformat") else str(record["expires_at"])
+        )
+
+        # Envia WhatsApp com link + PIN
+        _send_portal_whatsapp(tc_id, phone, pin, patient_obj, doctor_name)
+        result["whatsapp_sent"] = True
+    except Exception as exc:
+        logger.warning("patient_portal_create_failed", tc_id=tc_id, error=str(exc))
+        result["error"] = str(exc)
+    return result
+
+
+def _send_portal_whatsapp(
+    tc_id: str, phone: str, pin: str, patient: dict, doctor_name: str,
+) -> None:
+    """Envia mensagem WhatsApp com link do portal + PIN."""
+    from src.services.evolution import get_evolution
+
+    patient_ref = (
+        patient.get("nickname") or patient.get("first_name")
+        or (patient.get("full_name") or "").split()[0] or "paciente"
+    )
+
+    # URL do portal - configurável por env
+    import os
+    portal_base = os.getenv("PATIENT_PORTAL_URL", "https://care.connectaia.com.br/meu")
+    link = f"{portal_base}/{tc_id}"
+
+    text = (
+        f"👩‍⚕️ *Teleconsulta ConnectaIACare*\n\n"
+        f"A teleconsulta de *{patient_ref}* com *{doctor_name}* foi finalizada.\n\n"
+        f"📄 O prontuário completo, a receita médica e informações sobre onde "
+        f"encontrar os medicamentos com melhor preço estão disponíveis pelas próximas *24 horas*.\n\n"
+        f"🔗 *Acesse:* {link}\n\n"
+        f"🔑 *Seu código de acesso:*\n*{pin[:3]} {pin[3:]}*\n\n"
+        f"_Este código é pessoal. Não compartilhe com terceiros._\n\n"
+        f"Qualquer dúvida, entre em contato com a central. Cuide bem!"
+    )
+    try:
+        get_evolution().send_text(phone, text)
+        logger.info("patient_portal_whatsapp_sent", tc_id=tc_id, phone_prefix=phone[:4])
+    except Exception as exc:
+        logger.warning("patient_portal_whatsapp_failed", tc_id=tc_id, error=str(exc))
+        raise
 
 
 # ============================================================
