@@ -51,13 +51,18 @@ export function ReportsFilters({
   const daysRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
 
-  // Fecha dropdowns ao clicar fora
+  // Fecha dropdowns ao clicar fora — ignora cliques dentro de FloatingMenus
+  // (portal no body, fora dos refs dos âncoras)
   useEffect(() => {
     function onClick(e: MouseEvent) {
-      if (classifRef.current && !classifRef.current.contains(e.target as Node)) {
+      const target = e.target as HTMLElement | null;
+      // Se o click foi num portal de menu nosso, deixa o handler do item lidar
+      if (target?.closest('[data-filter-menu="true"]')) return;
+
+      if (classifRef.current && !classifRef.current.contains(target)) {
         setClassifOpen(false);
       }
-      if (daysRef.current && !daysRef.current.contains(e.target as Node)) {
+      if (daysRef.current && !daysRef.current.contains(target)) {
         setDaysOpen(false);
       }
     }
@@ -356,6 +361,7 @@ function FloatingMenu({
 
   return createPortal(
     <div
+      data-filter-menu="true"
       style={{
         position: "fixed",
         top: pos.top,
