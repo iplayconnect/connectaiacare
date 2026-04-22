@@ -259,9 +259,9 @@ function TeleconsultaReadyModal({
         </div>
 
         {/* Paciente */}
-        <div className="mb-4 p-4 rounded-xl border border-white/[0.06] bg-white/[0.02]">
+        <div className="mb-5 p-4 rounded-xl border border-white/[0.06] bg-white/[0.02]">
           <div className="text-[10px] uppercase tracking-[0.15em] text-muted-foreground mb-2">
-            Link do paciente
+            Link do paciente · WhatsApp
           </div>
           <div className="text-sm font-medium mb-1">{patientName}</div>
           <div className="text-[11px] text-muted-foreground mb-3 break-all font-mono bg-black/20 p-2 rounded">
@@ -269,53 +269,27 @@ function TeleconsultaReadyModal({
               ? result.patient_url.slice(0, 80) + "..."
               : result.patient_url}
           </div>
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              onClick={copyPatientLink}
-              className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-white/[0.05] border border-white/[0.08] text-xs font-medium hover:bg-white/[0.08] transition-colors justify-center"
-            >
-              {copiedPatient ? (
-                <>
-                  <Check className="h-3.5 w-3.5 text-classification-routine" />
-                  Copiado!
-                </>
-              ) : (
-                <>
-                  <Share2 className="h-3.5 w-3.5" />
-                  Copiar para WhatsApp
-                </>
-              )}
-            </button>
-            <a
-              href={result.patient_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-accent-teal/10 border border-accent-teal/30 text-accent-teal text-xs font-medium hover:bg-accent-teal/15 transition-colors justify-center"
-              title="Abre o lado do paciente — útil pra simular consulta sozinho"
-            >
-              <TestTube2 className="h-3.5 w-3.5" />
-              Abrir como paciente
-            </a>
-          </div>
+          <button
+            onClick={copyPatientLink}
+            className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-white/[0.05] border border-white/[0.08] text-xs font-medium hover:bg-white/[0.08] transition-colors w-full justify-center"
+          >
+            {copiedPatient ? (
+              <>
+                <Check className="h-3.5 w-3.5 text-classification-routine" />
+                Copiado!
+              </>
+            ) : (
+              <>
+                <Share2 className="h-3.5 w-3.5" />
+                Copiar link
+              </>
+            )}
+          </button>
         </div>
 
-        {/* Dica de teste */}
-        <div className="mb-4 p-3 rounded-lg bg-accent-cyan/[0.04] border border-accent-cyan/15">
-          <div className="flex items-start gap-2 text-[11px] leading-relaxed">
-            <TestTube2 className="h-3.5 w-3.5 text-accent-cyan mt-0.5 flex-shrink-0" />
-            <div>
-              <div className="font-medium text-accent-cyan mb-0.5">Modo teste sozinho</div>
-              <div className="text-muted-foreground">
-                Clica em <span className="text-foreground font-medium">Abrir minha sala</span> (vira médico numa aba)
-                e depois em <span className="text-foreground font-medium">Abrir como paciente</span> (vira paciente em outra aba).
-                Em produção, você copia o link e envia via WhatsApp.
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <p className="text-[10px] text-muted-foreground italic mb-4 leading-relaxed">
-          Link expira em 2h. Sala destruída após 5min sem participantes.
+        <p className="text-[11px] text-muted-foreground italic mb-4 leading-relaxed">
+          Envie o link ao paciente/familiar pelo WhatsApp. Expira em 2h ·
+          sala destruída após 5min sem participantes.
         </p>
 
         <div className="flex items-center justify-end">
