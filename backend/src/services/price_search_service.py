@@ -59,6 +59,13 @@ EXTRACTION_PROMPT = """Você é um extrator que recebe HTML/texto scrapeado de u
 
 Tarefa: identifique UP TO 5 ofertas do medicamento buscado. Ignore genéricos demais, similares com nome muito diferente e resultados irrelevantes (anúncios, produtos de outra categoria).
 
+ATENÇÃO: o texto pode estar em formato markdown/texto misto com navegação, menus, e muitas imagens SVG do site. Busque padrões como:
+- Nomes de produtos (Domperidona 10mg, Dramin B6, Motilium, etc.)
+- Preços em reais (R$ 12,90 · R$15.90 · 34,50 reais)
+- Nomes de farmácia (Drogasil, Droga Raia, Panvel, Drogaria São Paulo, Pague Menos, Drogão, etc.)
+- Caixas/blisters (30 comprimidos, 20 cápsulas)
+- Genérico/similar/referência
+
 Para cada oferta que você identificar, extraia:
 - `name`: nome comercial + dose (ex: "Losartana Potássica 50mg 30 comprimidos")
 - `price_brl`: preço em reais (número decimal, ex: 12.90). Se não encontrar, null.
@@ -142,23 +149,37 @@ class PriceSearchService:
     # ═══════════════════════════════════════════════════════════════════
 
     def _scrape_url(self, url: str) -> dict | None:
-        try:
-            resp = self._client.post(
-                f"{SCRAPER_URL}/scrape/preview",
-                headers={"X-Internal-Secret": SCRAPER_SECRET, "Content-Type": "application/json"},
-                json={"url": url, "follow_links": False, "max_pages": 1, "level": "light"},
-                timeout=SCRAPER_TIMEOUT,
-            )
-            if resp.status_code != 200:
-                logger.warning("scraper_non200", url=url, status=resp.status_code)
-                return None
-            data = resp.json()
-            if data.get("status") != "ok":
-                return None
-            return data.get("preview") or {}
-        except Exception as exc:
-            logger.warning("scraper_failed", url=url, error=str(exc))
-            return None
+        """Tenta em 2 níveis: light (rápido, HTTP puro) → advanced (Chromium).
+
+        CliqueFarma/ConsultaRemedios são SPAs com JS pesado. Modo light não
+        renderiza resultados dinâmicos; advanced usa headless Chromium e
+        entrega 7k+ chars de conteúdo útil.
+        """
+        # Tenta modo light primeiro (rápido). Se vier vazio, sobe pra advanced.
+        for level in ("light", "advanced"):
+            try:
+                resp = self._client.post(
+                    f"{SCRAPER_URL}/scrape/preview",
+                    headers={"X-Internal-Secret": SCRAPER_SECRET, "Content-Type": "application/json"},
+                    json={"url": url, "follow_links": False, "max_pages": 1, "level": level},
+                    timeout=45.0 if level == "advanced" else SCRAPER_TIMEOUT,
+                )
+                if resp.status_code != 200:
+                    logger.warning("scraper_non200", url=url, status=resp.status_code, level=level)
+                    continue
+                data = resp.json()
+                if data.get("status") != "ok":
+                    continue
+                preview = data.get("preview") or {}
+                char_count = preview.get("char_count", 0)
+                if char_count < 500:
+                    logger.info("scraper_low_content", url=url, level=level, chars=char_count)
+                    continue  # Tenta próximo nível
+                logger.info("scraper_ok", url=url, level=level, chars=char_count)
+                return preview
+            except Exception as exc:
+                logger.warning("scraper_failed", url=url, level=level, error=str(exc))
+        return None
 
     def _extract_offers(self, scraped_text: str, medication: str) -> dict[str, Any]:
         try:
