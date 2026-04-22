@@ -16,6 +16,7 @@ import {
 
 import { ClassificationBadge } from "@/components/classification-badge";
 import { CloseEventButton } from "@/components/close-event-button";
+import { StartTeleconsultaButton } from "@/components/start-teleconsulta-button";
 import { api, type CareEventDetail, type EventStatus } from "@/lib/api";
 import {
   CLASSIFICATION_LABELS,
@@ -89,7 +90,13 @@ export default async function EventDetailPage({
         </Link>
 
         {!isResolved && (
-          <CloseEventButton eventId={event.id} humanId={event.human_id} />
+          <div className="flex items-center gap-2 flex-wrap">
+            <StartTeleconsultaButton
+              eventId={event.id}
+              patientName={patient?.nickname || patient?.full_name || "Paciente"}
+            />
+            <CloseEventButton eventId={event.id} humanId={event.human_id} />
+          </div>
         )}
       </div>
 

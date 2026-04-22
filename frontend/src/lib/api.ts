@@ -262,4 +262,45 @@ export const api = {
     request<CareEventSummary[]>(
       `/api/patients/${patientId}/events?include_closed=${includeClosed}`,
     ),
+
+  // Teleconsulta (ADR-023)
+  startTeleconsulta: (
+    eventId: string,
+    payload: { initiator_name?: string; initiator_role?: string },
+  ) =>
+    request<TeleconsultaStartResponse>(
+      `/api/events/${eventId}/teleconsulta/start`,
+      { method: "POST", body: JSON.stringify(payload) },
+    ),
+  endTeleconsulta: (eventId: string, closureNotes?: string) =>
+    request<{ status: string; room_name: string }>(
+      `/api/events/${eventId}/teleconsulta/end`,
+      { method: "POST", body: JSON.stringify({ closure_notes: closureNotes }) },
+    ),
+  listTeleconsultaParticipants: (eventId: string) =>
+    request<{
+      room_name: string;
+      participants: Array<{
+        identity: string;
+        name: string;
+        joined_at: number;
+        state: string;
+      }>;
+      active: boolean;
+    }>(`/api/events/${eventId}/teleconsulta/participants`),
 };
+
+// ============================================================
+// Teleconsulta (ADR-023)
+// ============================================================
+export interface TeleconsultaStartResponse {
+  status: "ok";
+  room_name: string;
+  room_sid: string | null;
+  doctor_token: string;
+  patient_token: string;
+  doctor_url: string;
+  patient_url: string;
+  ws_url: string;
+  expires_at: string;
+}
