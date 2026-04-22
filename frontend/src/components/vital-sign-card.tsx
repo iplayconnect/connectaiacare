@@ -137,8 +137,11 @@ export function VitalSignCard({ vital }: { vital: VitalSeries }) {
                 }}
                 labelStyle={{ color: "hsl(215,16%,57%)" }}
                 itemStyle={{ color: col.line }}
-                formatter={(v: number) => [formatNumber(v) + " " + vital.unit, vital.label]}
-                labelFormatter={(t: string) => formatDate(t)}
+                formatter={(value) => [
+                  formatNumber(Number(value)) + " " + vital.unit,
+                  vital.label,
+                ]}
+                labelFormatter={(t) => formatDate(String(t))}
               />
               <Area
                 type="monotone"
