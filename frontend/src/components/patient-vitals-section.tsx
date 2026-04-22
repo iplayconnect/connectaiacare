@@ -13,13 +13,25 @@ import { VitalSignCard, type VitalSeries } from "@/components/vital-sign-card";
 type VitalRaw = {
   id: string;
   vital_type: string;
-  value_numeric: number | null;
-  value_secondary: number | null;
+  // Backend retorna Decimal como STRING ("70.00") — convertemos ao parse.
+  value_numeric: number | string | null;
+  value_secondary: number | string | null;
   unit: string;
   status: string;
   source: string;
-  measured_at: string;
+  measured_at: string; // RFC 2822 do Flask ("Wed, 22 Apr 2026 22:04:24 GMT")
 };
+
+function num(v: number | string | null | undefined): number | null {
+  if (v === null || v === undefined || v === "") return null;
+  const n = typeof v === "number" ? v : parseFloat(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function tsMs(iso: string): number {
+  const t = new Date(iso).getTime();
+  return Number.isFinite(t) ? t : 0;
+}
 
 type WindowDays = 7 | 30 | 90;
 
@@ -131,14 +143,15 @@ export function PatientVitalsSection({ patientId }: { patientId: string }) {
           byType[v.vital_type].push(v);
         });
 
-        // Sort asc dentro de cada tipo pro sparkline ir da esquerda→direita
+        // Sort asc cronológico (por timestamp, não string — RFC 2822 ordena
+        // pelo dia da semana primeiro, que é errado).
         Object.values(byType).forEach((arr) => {
-          arr.sort((a, b) => a.measured_at.localeCompare(b.measured_at));
+          arr.sort((a, b) => tsMs(a.measured_at) - tsMs(b.measured_at));
         });
 
-        // Pega última sync: medição mais recente entre todas
-        const allSorted = [...vitals].sort((a, b) =>
-          b.measured_at.localeCompare(a.measured_at),
+        // Última sync: medição mais recente entre todas
+        const allSorted = [...vitals].sort(
+          (a, b) => tsMs(b.measured_at) - tsMs(a.measured_at),
         );
         if (allSorted.length > 0) {
           setLastSync(new Date(allSorted[0].measured_at));
@@ -150,28 +163,34 @@ export function PatientVitalsSection({ patientId }: { patientId: string }) {
           const rows = byType[type] || [];
           const last = rows[rows.length - 1] || null;
 
-          const current = last?.value_numeric ?? null;
-          const secondary = last?.value_secondary ?? null;
+          // psycopg2 Decimal vem como string ("70.00") — num() converte.
+          const current = num(last?.value_numeric);
+          const secondary = num(last?.value_secondary);
 
-          // Calcular status do valor atual
+          // Status do valor atual
           let status: VitalSeries["status"] = "ok";
           if (current !== null) {
             status = meta.normalRange(current, secondary);
           }
 
-          // Tendência vs média 7d
+          // Tendência vs média da janela
           let trend: VitalSeries["trend"] = "stable";
           let trendLabel: string | undefined;
-          if (rows.length >= 3 && current !== null) {
-            const values = rows.map((r) => r.value_numeric ?? 0);
-            const avg = values.reduce((a, b) => a + b, 0) / values.length;
-            const diff = current - avg;
-            const pct = (diff / avg) * 100;
-            if (Math.abs(pct) >= 5) {
-              trend = pct > 0 ? "up" : "down";
-              trendLabel = `${pct > 0 ? "+" : ""}${pct.toFixed(1)}% vs média ${window}d`;
-            } else {
-              trendLabel = "estável";
+          const numericValues = rows
+            .map((r) => num(r.value_numeric))
+            .filter((v): v is number => v !== null);
+
+          if (numericValues.length >= 3 && current !== null) {
+            const avg =
+              numericValues.reduce((a, b) => a + b, 0) / numericValues.length;
+            if (avg !== 0) {
+              const pct = ((current - avg) / avg) * 100;
+              if (Math.abs(pct) >= 5) {
+                trend = pct > 0 ? "up" : "down";
+                trendLabel = `${pct > 0 ? "+" : ""}${pct.toFixed(1)}% vs média ${window}d`;
+              } else {
+                trendLabel = "estável";
+              }
             }
           }
 
@@ -181,10 +200,12 @@ export function PatientVitalsSection({ patientId }: { patientId: string }) {
             icon: "",
             current,
             secondary,
-            data: rows.map((r) => ({
-              t: r.measured_at,
-              v: Number(r.value_numeric || 0),
-            })),
+            data: rows
+              .map((r) => ({
+                t: r.measured_at,
+                v: num(r.value_numeric),
+              }))
+              .filter((d): d is { t: string; v: number } => d.v !== null),
             status,
             trend,
             trendLabel,
