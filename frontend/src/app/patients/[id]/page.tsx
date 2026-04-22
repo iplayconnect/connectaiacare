@@ -1,23 +1,20 @@
 import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import {
-  Activity,
-  AlertTriangle,
-  ArrowLeft,
-  FileText,
-  HeartPulse,
-  Phone,
-  Pill,
-  User,
-} from "lucide-react";
+import { Phone, UserRound } from "lucide-react";
 
 import { ClassificationBadge } from "@/components/classification-badge";
+import { PatientVitalsSection } from "@/components/patient-vitals-section";
 import { api, type CareEventSummary } from "@/lib/api";
 import { calcAge, formatDateTime, timeAgo } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
+
+// ═══════════════════════════════════════════════════════════════
+// Prontuário Longitudinal — ficha completa do paciente
+// Inspiração: mockup Claude Design + refinamentos
+// ═══════════════════════════════════════════════════════════════
 
 export default async function PatientDetailPage({
   params,
@@ -25,319 +22,278 @@ export default async function PatientDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  let data;
+
+  let patient;
+  let reports;
   let events: CareEventSummary[] = [];
+
   try {
-    [data, events] = await Promise.all([
+    const [patientResp, eventsResp] = await Promise.all([
       api.getPatient(id),
       api.listPatientEvents(id, true).catch(() => [] as CareEventSummary[]),
     ]);
+    patient = patientResp.patient;
+    reports = patientResp.reports || [];
+    events = eventsResp;
   } catch {
     notFound();
   }
 
-  const { patient, reports } = data;
+  const age = calcAge(patient.birth_date);
   const activeEvents = events.filter(
     (e) => e.status !== "resolved" && e.status !== "expired",
   );
-  const closedEvents = events.filter(
-    (e) => e.status === "resolved" || e.status === "expired",
-  );
-  const age = calcAge(patient.birth_date);
+
+  // Responsável (primário)
+  const responsible =
+    (patient.responsible as any) && (patient.responsible as any).family?.[0]
+      ? (patient.responsible as any).family[0]
+      : patient.responsible &&
+        ("phone" in patient.responsible || "name" in patient.responsible)
+      ? patient.responsible
+      : null;
 
   return (
-    <div className="space-y-6 max-w-6xl mx-auto">
-      <Link
-        href="/patients"
-        className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-accent-cyan transition-colors"
-      >
-        <ArrowLeft className="h-4 w-4" /> Voltar aos pacientes
-      </Link>
-
-      {/* Header */}
-      <div className="glass-card rounded-2xl p-6 flex items-start gap-5">
-        {patient.photo_url ? (
-          <Image
-            src={patient.photo_url}
-            alt={patient.full_name}
-            width={112}
-            height={112}
-            className="rounded-full object-cover w-28 h-28 ring-2 ring-white/10"
-          />
-        ) : (
-          <div className="w-28 h-28 rounded-full bg-white/[0.05] border border-white/[0.06] flex items-center justify-center">
-            <User className="h-12 w-12 text-muted-foreground" />
-          </div>
-        )}
-
-        <div className="flex-1">
-          <h1 className="text-3xl font-bold tracking-tight">{patient.full_name}</h1>
-          {patient.nickname && (
-            <p className="text-muted-foreground text-sm mt-0.5">
-              Conhecido(a) como <span className="text-foreground">{patient.nickname}</span>
-            </p>
-          )}
-          <p className="text-muted-foreground text-sm mt-1.5">
-            {age && <span className="tabular font-medium text-foreground/80">{age} anos</span>}
-            {patient.gender && (
-              <>
-                <span className="mx-2 opacity-40">·</span>
-                <span>{patient.gender === "F" ? "Feminino" : patient.gender === "M" ? "Masculino" : "Outro"}</span>
-              </>
+    <div className="space-y-6 max-w-[1400px]">
+      {/* ═══════════════ Header do paciente ═══════════════ */}
+      <header className="glass-card rounded-2xl p-6">
+        <div className="flex items-start justify-between gap-6 flex-wrap">
+          {/* Avatar + identidade */}
+          <div className="flex items-start gap-5 flex-1 min-w-0">
+            {patient.photo_url ? (
+              <Image
+                src={patient.photo_url}
+                alt={patient.full_name}
+                width={72}
+                height={72}
+                className="rounded-2xl object-cover w-[72px] h-[72px] ring-2 ring-white/10"
+              />
+            ) : (
+              <div className="w-[72px] h-[72px] rounded-2xl bg-gradient-to-br from-accent-cyan/20 to-accent-teal/20 border border-white/10 flex items-center justify-center text-lg font-bold tracking-wider">
+                {initials(patient.full_name)}
+              </div>
             )}
-            {patient.room_number && (
-              <>
-                <span className="mx-2 opacity-40">·</span>
-                <span className="uppercase tracking-wider text-xs">Quarto {patient.room_number}</span>
-              </>
-            )}
-            {patient.care_unit && (
-              <>
-                <span className="mx-2 opacity-40">·</span>
-                <span>{patient.care_unit}</span>
-              </>
-            )}
-          </p>
-          {patient.care_level && (
-            <span className="inline-block mt-3 text-xs uppercase tracking-[0.15em] px-2.5 py-1 rounded-full bg-accent-purple/10 border border-accent-purple/30 text-accent-purple font-semibold">
-              {patient.care_level}
-            </span>
-          )}
-        </div>
-      </div>
 
-      {/* Condições + medicações */}
-      <div className="grid md:grid-cols-2 gap-4">
-        <section className="glass-card rounded-2xl p-6">
-          <div className="flex items-center gap-2 mb-4">
-            <div className="p-2 rounded-lg bg-classification-attention/10 border border-classification-attention/30">
-              <AlertTriangle className="h-4 w-4 text-classification-attention" />
-            </div>
-            <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-              Condições clínicas
-            </h2>
-          </div>
-          <ul className="space-y-2">
-            {(patient.conditions || []).map((c, i) => (
-              <li key={i} className="text-sm flex items-start gap-2">
-                <span className="status-dot status-dot-warning mt-1.5 flex-shrink-0" />
-                <div>
-                  <span className="font-medium text-foreground">{c.description}</span>
-                  {c.code && (
-                    <span className="text-[13px] text-muted-foreground ml-2 font-mono">({c.code})</span>
-                  )}
-                  {c.severity && (
-                    <span className="text-xs ml-2 px-1.5 py-0.5 rounded bg-white/[0.04] text-muted-foreground">
-                      {c.severity}
+            <div className="flex-1 min-w-0">
+              <div className="flex items-baseline gap-3 flex-wrap mb-1">
+                <h1 className="text-2xl md:text-[1.75rem] font-bold tracking-tight">
+                  {patient.full_name}
+                </h1>
+                {age && (
+                  <span className="text-sm text-muted-foreground tabular">
+                    {age} anos
+                  </span>
+                )}
+                {activeEvents.length > 0 && (
+                  <span className="inline-flex items-center gap-1 text-[11px] uppercase tracking-wider font-semibold text-classification-urgent">
+                    <span className="w-1.5 h-1.5 rounded-full bg-classification-urgent animate-pulse-soft" />
+                    {activeEvents.length} evento{activeEvents.length > 1 ? "s" : ""} ativo{activeEvents.length > 1 ? "s" : ""}
+                  </span>
+                )}
+              </div>
+
+              <div className="text-xs text-muted-foreground mb-3">
+                {patient.care_unit && <span>{patient.care_unit}</span>}
+                {patient.room_number && (
+                  <>
+                    <span className="mx-2 opacity-40">·</span>
+                    <span>Quarto {patient.room_number}</span>
+                  </>
+                )}
+                {patient.nickname && patient.nickname !== patient.full_name && (
+                  <>
+                    <span className="mx-2 opacity-40">·</span>
+                    <span>Conhecid{patient.gender === "F" ? "a" : "o"} como {patient.nickname}</span>
+                  </>
+                )}
+              </div>
+
+              {/* Tags condições */}
+              {patient.conditions && patient.conditions.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {patient.conditions.slice(0, 6).map((c, i) => (
+                    <span
+                      key={i}
+                      className="text-[11px] font-medium px-2 py-1 rounded-md bg-accent-cyan/5 border border-accent-cyan/20 text-accent-cyan/90"
+                      title={c.severity ? `${c.description} (${c.severity})` : c.description}
+                    >
+                      {c.description}
+                    </span>
+                  ))}
+                  {patient.conditions.length > 6 && (
+                    <span className="text-[11px] text-muted-foreground px-2 py-1">
+                      +{patient.conditions.length - 6} mais
                     </span>
                   )}
                 </div>
-              </li>
-            ))}
-            {(patient.conditions || []).length === 0 && (
-              <li className="text-sm text-muted-foreground">Nenhuma condição registrada</li>
-            )}
-          </ul>
+              )}
+            </div>
+          </div>
 
-          {patient.allergies && patient.allergies.length > 0 && (
-            <div className="mt-5 pt-5 border-t border-white/[0.05]">
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
-                Alergias
-              </h3>
-              <div className="flex flex-wrap gap-1.5">
-                {patient.allergies.map((a) => (
-                  <span
-                    key={a}
-                    className="text-[13px] px-2 py-0.5 rounded-full bg-classification-critical/10 border border-classification-critical/30 text-classification-critical font-medium"
-                  >
-                    {a}
-                  </span>
-                ))}
+          {/* Responsável (card direita) */}
+          {responsible && (
+            <div className="text-right bg-white/[0.02] rounded-xl p-4 border border-white/[0.04] min-w-[200px]">
+              <div className="text-[10px] uppercase tracking-[0.15em] text-muted-foreground mb-1">
+                Responsável
               </div>
-            </div>
-          )}
-        </section>
-
-        <section className="glass-card rounded-2xl p-6">
-          <div className="flex items-center gap-2 mb-4">
-            <div className="p-2 rounded-lg bg-accent-purple/10 border border-accent-purple/30">
-              <Pill className="h-4 w-4 text-accent-purple" />
-            </div>
-            <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-              Medicações em uso
-            </h2>
-          </div>
-          <ul className="space-y-2">
-            {(patient.medications || []).map((m, i) => (
-              <li key={i} className="text-sm flex items-start gap-2">
-                <span className="status-dot status-dot-success mt-1.5 flex-shrink-0" />
-                <div className="flex-1">
-                  <div className="font-medium text-foreground">{m.name}</div>
-                  <div className="text-[13px] text-muted-foreground mt-0.5">
-                    {m.schedule} {m.dose && `· ${m.dose}`}
-                  </div>
-                </div>
-              </li>
-            ))}
-            {(patient.medications || []).length === 0 && (
-              <li className="text-sm text-muted-foreground">Nenhuma medicação registrada</li>
-            )}
-          </ul>
-        </section>
-      </div>
-
-      {/* Responsável */}
-      {patient.responsible?.name && (
-        <section className="glass-card rounded-2xl p-6">
-          <div className="flex items-center gap-2 mb-4">
-            <div className="p-2 rounded-lg bg-accent-teal/10 border border-accent-teal/30">
-              <Phone className="h-4 w-4 text-accent-teal" />
-            </div>
-            <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-              Responsável
-            </h2>
-          </div>
-          <div className="flex items-center gap-4 flex-wrap">
-            <div>
-              <div className="font-semibold">{patient.responsible.name}</div>
-              {patient.responsible.relationship && (
-                <div className="text-xs text-muted-foreground capitalize">
-                  {patient.responsible.relationship}
+              <div className="font-semibold text-sm mb-0.5">
+                {responsible.name || "—"}
+                {responsible.relationship && (
+                  <span className="text-xs text-muted-foreground font-normal ml-1">
+                    ({responsible.relationship})
+                  </span>
+                )}
+              </div>
+              {responsible.phone && (
+                <div className="flex items-center justify-end gap-1.5 text-xs text-accent-teal tabular font-mono mt-1">
+                  <Phone className="h-3 w-3" />
+                  {formatPhone(responsible.phone)}
                 </div>
               )}
             </div>
-            {patient.responsible.phone && (
-              <div className="tabular text-sm text-accent-teal font-mono">
-                {patient.responsible.phone}
-              </div>
-            )}
-          </div>
-        </section>
-      )}
+          )}
+        </div>
+      </header>
 
-      {/* Eventos de Cuidado — ativos primeiro, depois encerrados */}
-      {events.length > 0 && (
+      {/* ═══════════════ Sinais Vitais (cards com sparkline) ═══════════════ */}
+      <PatientVitalsSection patientId={id} />
+
+      {/* ═══════════════ Eventos ativos (se houver) ═══════════════ */}
+      {activeEvents.length > 0 && (
         <section className="glass-card rounded-2xl overflow-hidden">
-          <div className="p-6 border-b border-white/[0.05] flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <div className="p-2 rounded-lg bg-accent-cyan/10 border border-accent-cyan/30">
-                <Activity className="h-4 w-4 text-accent-cyan" />
+          <div className="px-5 py-4 border-b border-white/[0.05] flex items-center justify-between">
+            <div>
+              <div className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                Eventos em andamento · Íris
               </div>
-              <div>
-                <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-                  Eventos de cuidado
-                </h2>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  <span className="tabular font-medium text-foreground">{activeEvents.length}</span>{" "}
-                  ativo(s) · <span className="tabular">{closedEvents.length}</span> encerrado(s)
-                </p>
-              </div>
+              <h2 className="text-base font-semibold mt-0.5">
+                {activeEvents.length} evento{activeEvents.length > 1 ? "s" : ""} ativo{activeEvents.length > 1 ? "s" : ""}
+              </h2>
             </div>
           </div>
-
           <ul className="divide-y divide-white/[0.04]">
-            {events.map((e) => {
-              const human = e.human_id
-                ? `#${e.human_id.toString().padStart(4, "0")}`
-                : "#----";
-              const isClosed = e.status === "resolved" || e.status === "expired";
-              return (
-                <li key={e.id}>
-                  <Link
-                    href={`/eventos/${e.id}`}
-                    className="flex items-center justify-between gap-4 p-5 hover:bg-white/[0.02] transition-colors group"
-                  >
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-0.5 flex-wrap">
-                        <span className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-                          {human}
+            {activeEvents.map((e) => (
+              <li key={e.id}>
+                <Link
+                  href={`/eventos/${e.id}`}
+                  className="flex items-center justify-between gap-4 px-5 py-4 hover:bg-white/[0.02] transition-colors group"
+                >
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-0.5">
+                      <span className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+                        #{String(e.human_id || 0).padStart(4, "0")}
+                      </span>
+                      {e.event_type && (
+                        <span className="text-xs uppercase tracking-wider text-muted-foreground">
+                          · {e.event_type}
                         </span>
-                        {e.event_type && (
-                          <span className="text-xs uppercase tracking-wider text-muted-foreground">
-                            · {e.event_type}
-                          </span>
-                        )}
-                        {isClosed && e.closed_reason && (
-                          <span className="text-xs uppercase tracking-wider text-classification-routine/80">
-                            · {e.closed_reason}
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-sm font-medium truncate group-hover:text-accent-cyan transition-colors">
-                        {e.summary || "Em análise…"}
-                      </p>
-                      <div className="flex items-center gap-2 text-xs uppercase tracking-wider text-muted-foreground mt-1">
-                        <span>
-                          aberto {formatDateTime(e.opened_at)}
-                        </span>
-                        {e.resolved_at && (
-                          <>
-                            <span>·</span>
-                            <span>
-                              fechado {timeAgo(e.resolved_at)}
-                            </span>
-                          </>
-                        )}
-                        {!isClosed && <span>· em andamento</span>}
-                      </div>
+                      )}
                     </div>
-                    <ClassificationBadge classification={e.classification} />
-                  </Link>
-                </li>
-              );
-            })}
+                    <p className="text-sm group-hover:text-accent-cyan transition-colors truncate">
+                      {e.summary || "Em análise…"}
+                    </p>
+                    <div className="text-[11px] text-muted-foreground mt-1">
+                      aberto {timeAgo(e.opened_at)}
+                    </div>
+                  </div>
+                  <ClassificationBadge classification={e.classification} />
+                </Link>
+              </li>
+            ))}
           </ul>
         </section>
       )}
 
-      {/* Histórico de relatos */}
+      {/* ═══════════════ Histórico de relatos ═══════════════ */}
       <section className="glass-card rounded-2xl overflow-hidden">
-        <div className="p-6 border-b border-white/[0.05] flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="p-2 rounded-lg bg-accent-cyan/10 border border-accent-cyan/30">
-              <FileText className="h-4 w-4 text-accent-cyan" />
-            </div>
-            <div>
-              <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-                Histórico de relatos
-              </h2>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                <span className="tabular font-medium text-foreground">{reports.length}</span> registros
-              </p>
-            </div>
+        <div className="px-5 py-4 border-b border-white/[0.05]">
+          <div className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+            Cuidador · WhatsApp · Transcrição + IA
+          </div>
+          <div className="flex items-baseline justify-between mt-0.5">
+            <h2 className="text-base font-semibold">Relatos recentes</h2>
+            <span className="text-xs text-muted-foreground tabular">
+              {reports.length} {reports.length === 1 ? "relato" : "relatos"}
+            </span>
           </div>
         </div>
 
-        <ul className="divide-y divide-white/[0.04]">
-          {reports.length === 0 ? (
-            <li className="p-12 text-center">
-              <HeartPulse className="h-10 w-10 text-muted-foreground mx-auto mb-3" />
-              <p className="text-sm text-muted-foreground">
-                Nenhum relato ainda para este paciente.
-              </p>
-            </li>
-          ) : (
-            reports.map((r) => (
+        {reports.length === 0 ? (
+          <div className="p-10 text-center">
+            <div className="inline-flex items-center justify-center w-14 h-14 rounded-full bg-white/[0.03] border border-white/[0.06] mb-3">
+              <UserRound className="h-5 w-5 text-muted-foreground" />
+            </div>
+            <p className="text-sm text-muted-foreground">
+              Nenhum relato registrado ainda para {patient.nickname || patient.full_name}.
+            </p>
+          </div>
+        ) : (
+          <ul className="divide-y divide-white/[0.04]">
+            {reports.slice(0, 10).map((r) => (
               <li key={r.id}>
                 <Link
                   href={`/reports/${r.id}`}
-                  className="flex items-center justify-between gap-4 p-5 hover:bg-white/[0.02] transition-colors group"
+                  className="flex items-start gap-4 px-5 py-4 hover:bg-white/[0.02] transition-colors group"
                 >
+                  <div className="text-[10px] text-muted-foreground tabular font-mono min-w-[56px] text-right mt-1 leading-tight">
+                    {formatDateShort(r.received_at)}
+                  </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate group-hover:text-accent-cyan transition-colors">
-                      {r.analysis?.summary || r.transcription?.slice(0, 120) || "Processando…"}
-                    </p>
-                    <p className="text-xs uppercase tracking-wider text-muted-foreground mt-1">
-                      {timeAgo(r.received_at)}
+                    <div className="flex items-center gap-2 mb-1 flex-wrap">
+                      <ClassificationBadge classification={r.classification} compact />
+                      {r.caregiver_name_claimed && (
+                        <span className="text-[11px] text-muted-foreground">
+                          · {r.caregiver_name_claimed}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[13px] text-foreground/90 group-hover:text-accent-cyan transition-colors line-clamp-2">
+                      {r.analysis?.summary ||
+                        r.transcription?.slice(0, 180) ||
+                        "Aguardando análise…"}
                     </p>
                   </div>
-                  <ClassificationBadge classification={r.classification} />
                 </Link>
               </li>
-            ))
-          )}
-        </ul>
+            ))}
+          </ul>
+        )}
       </section>
     </div>
   );
+}
+
+// Helpers
+function initials(name: string): string {
+  return name
+    .split(" ")
+    .filter((n) => n.length > 1)
+    .slice(0, 2)
+    .map((n) => n[0])
+    .join("")
+    .toUpperCase();
+}
+
+function formatPhone(phone: string): string {
+  const d = phone.replace(/\D/g, "");
+  if (d.length === 13 && d.startsWith("55")) {
+    return `+55 ${d.slice(2, 4)} ${d.slice(4, 9)}-${d.slice(9)}`;
+  }
+  if (d.length === 11) {
+    return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`;
+  }
+  return phone;
+}
+
+function formatDateShort(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  return d
+    .toLocaleString("pt-BR", {
+      day: "2-digit",
+      month: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    })
+    .replace(", ", "\n");
 }

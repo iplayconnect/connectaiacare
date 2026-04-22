@@ -21,12 +21,30 @@ const ICONS: Record<string, React.ReactNode> = {
 export function ClassificationBadge({
   classification,
   className,
+  compact = false,
 }: {
   classification: Classification;
   className?: string;
+  /** Versão reduzida — só ícone + label pequeno, sem padding grande */
+  compact?: boolean;
 }) {
   const key = classification || "routine";
   const label = CLASSIFICATION_LABELS[key] || key;
+
+  if (compact) {
+    return (
+      <span
+        className={cn(
+          "inline-flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded-md",
+          BADGE_CLASS[key],
+          className,
+        )}
+      >
+        {ICONS[key]}
+        <span>{label}</span>
+      </span>
+    );
+  }
 
   return (
     <span className={cn("badge-classification", BADGE_CLASS[key], className)}>
