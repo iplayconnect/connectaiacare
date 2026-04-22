@@ -168,7 +168,7 @@ class PriceSearchService:
                     scraped_text=scraped_text, medication=medication,
                 ),
                 model=MODEL_FAST,
-                max_tokens=1500,
+                max_tokens=2500,
                 temperature=0.1,
             )
             if not isinstance(result, dict):
@@ -198,7 +198,7 @@ class PriceSearchService:
                 system="Você estima preços típicos de medicamentos no varejo brasileiro (2026).",
                 user=FALLBACK_PROMPT.format(medication=medication),
                 model=MODEL_FAST,
-                max_tokens=1200,
+                max_tokens=2500,
                 temperature=0.3,
             )
             if not isinstance(result, dict):

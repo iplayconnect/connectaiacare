@@ -107,7 +107,9 @@ class PatientSummaryService:
                     doctor_specialty=doctor_specialty,
                 ),
                 model=MODEL_FAST,
-                max_tokens=2500,
+                # 2500 truncava resumos ricos (múltiplos medicamentos + warning_signs).
+                # 5000 cabe facilmente um SOAP extenso reformulado em linguagem simples.
+                max_tokens=5000,
                 temperature=0.3,
             )
             if not isinstance(result, dict):
