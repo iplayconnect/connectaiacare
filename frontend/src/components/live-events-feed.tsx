@@ -46,28 +46,42 @@ const RANK: Record<string, number> = {
   routine: 3,
 };
 
-const POLL_INTERVAL_MS = 10_000;
+const POLL_INTERVAL_MS = 5_000;
 
 export function LiveEventsFeed({
   initialEvents,
+  externalEvents,
 }: {
   initialEvents: CareEventSummary[];
+  /**
+   * Se o parent já está pollando (ex: DashboardLive), passa os eventos aqui
+   * e o feed desliga o polling interno pra não duplicar chamadas.
+   */
+  externalEvents?: CareEventSummary[];
 }) {
-  const [events, setEvents] = useState<CareEventSummary[]>(initialEvents);
+  const controlled = externalEvents !== undefined;
+  const [events, setEvents] = useState<CareEventSummary[]>(
+    controlled ? externalEvents! : initialEvents,
+  );
   const [lastUpdatedAt, setLastUpdatedAt] = useState<Date>(new Date());
   const [isPolling, setIsPolling] = useState(true);
   const [nowTick, setNowTick] = useState<number>(Date.now());
   const knownIdsRef = useRef<Set<string>>(
-    new Set(initialEvents.map((e) => e.id)),
+    new Set((controlled ? externalEvents! : initialEvents).map((e) => e.id)),
   );
 
-  // Polling dos eventos a cada POLL_INTERVAL_MS
+  // Quando controlled: sincroniza com o externo + atualiza timestamp
   useEffect(() => {
-    if (!isPolling) return;
+    if (!controlled) return;
+    setEvents(externalEvents!);
+    setLastUpdatedAt(new Date());
+  }, [externalEvents, controlled]);
+
+  // Polling interno — só roda em modo standalone (não-controlled)
+  useEffect(() => {
+    if (controlled || !isPolling) return;
 
     let mounted = true;
-    // Browser chama API pública (mesmo host do frontend não tem backend — é container Next separado).
-    // NEXT_PUBLIC_API_URL cai no valor do hostname ("https://demo.connectaia.com.br") em prod.
     const apiBase = process.env.NEXT_PUBLIC_API_URL || "";
     async function poll() {
       try {
@@ -76,31 +90,27 @@ export function LiveEventsFeed({
         });
         if (!mounted || !res.ok) return;
         const next = (await res.json()) as CareEventSummary[];
-
-        // Detecta novos eventos pra animação de entrada
         const previousIds = knownIdsRef.current;
         const nextIds = new Set(next.map((e) => e.id));
         knownIdsRef.current = nextIds;
-
-        // Mantém flag de "novo" por 6s pra disparar animação
         const withFreshness = next.map((e) => ({
           ...e,
           _isNew: !previousIds.has(e.id),
         }));
-
         setEvents(withFreshness as typeof events);
         setLastUpdatedAt(new Date());
       } catch {
-        // silencioso — tenta de novo no próximo tick
+        // silencioso
       }
     }
 
+    poll(); // dispara imediato ao montar
     const id = setInterval(poll, POLL_INTERVAL_MS);
     return () => {
       mounted = false;
       clearInterval(id);
     };
-  }, [isPolling]);
+  }, [isPolling, controlled]);
 
   // Tick de 1s pra contadores regressivos e "há X min"
   useEffect(() => {
@@ -135,11 +145,13 @@ export function LiveEventsFeed({
           </p>
         </div>
         <div className="flex items-center gap-3">
-          <LivePulse
-            isPolling={isPolling}
-            secondsSinceUpdate={secondsSinceUpdate}
-            onToggle={() => setIsPolling((v) => !v)}
-          />
+          {!controlled && (
+            <LivePulse
+              isPolling={isPolling}
+              secondsSinceUpdate={secondsSinceUpdate}
+              onToggle={() => setIsPolling((v) => !v)}
+            />
+          )}
           <Link
             href="/patients"
             className="text-xs font-medium text-accent-cyan hover:text-accent-teal transition-colors flex items-center gap-1"
