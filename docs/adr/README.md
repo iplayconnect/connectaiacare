@@ -33,6 +33,8 @@ Seguir: `NNN-kebab-case-title.md` (zero-padded, kebab-case).
 | [019](019-integracao-medmonitor-totalcare.md) | Integração MedMonitor/TotalCare — ConnectaIACare como plataforma principal | Accepted | 2026-04-20 |
 | [020](020-escalacao-hierarquica-evolution-sofia.md) | Escalação hierárquica — WhatsApp Evolution + Sofia Voice | Accepted | 2026-04-20 |
 | [021](021-iris-framework-agentico-healthcare.md) | **Íris** — Framework agêntico próprio, workflow-first, healthcare-specific | Accepted | 2026-04-21 |
+| [022](022-atente-fallback-humano-escalacao.md) | Atente como fallback humano de escalação (substitui SAMU automático) | Accepted | 2026-04-21 |
+| [023](023-teleconsulta-arquitetura-completa.md) | Teleconsulta — arquitetura completa (Opção 3 demo 28/04) | Accepted | 2026-04-21 |
 
 ## Como contribuir
 
