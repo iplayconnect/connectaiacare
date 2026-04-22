@@ -69,11 +69,91 @@ def get_patient(patient_id: str):
 
 @bp.get("/api/reports")
 def list_reports():
-    from config.settings import settings
+    """Lista relatos com filtros opcionais.
 
-    limit = int(request.args.get("limit", 50))
-    rows = get_report_service().list_recent(settings.tenant_id, limit=limit)
-    return jsonify({"reports": rows})
+    Query params:
+        limit             int (default 50, max 500)
+        classification    str | list — routine|attention|urgent|critical (comma sep ok)
+        patient_id        str — filtra por paciente específico
+        caregiver_phone   str — normaliza phone (só dígitos)
+        days              int — últimos N dias (default 30, max 365)
+        search            str — busca em transcription + summary (trigram ILIKE)
+    """
+    from config.settings import settings
+    from datetime import datetime, timedelta, timezone
+    from src.services.postgres import get_postgres
+
+    args = request.args
+    tenant_id = settings.tenant_id
+    limit = min(int(args.get("limit", 50)), 500)
+    days = min(int(args.get("days", 30)), 365)
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+
+    classifications_raw = args.get("classification")
+    classifications = (
+        [c.strip() for c in classifications_raw.split(",") if c.strip()]
+        if classifications_raw
+        else None
+    )
+
+    patient_id = args.get("patient_id")
+    caregiver_phone = args.get("caregiver_phone")
+    if caregiver_phone:
+        caregiver_phone = "".join(c for c in caregiver_phone if c.isdigit())
+
+    search = (args.get("search") or "").strip() or None
+
+    # Monta query dinâmica com bindings seguros
+    where_clauses = ["r.tenant_id = %s", "r.received_at >= %s"]
+    params: list = [tenant_id, since]
+
+    if classifications:
+        where_clauses.append("r.classification = ANY(%s)")
+        params.append(classifications)
+    if patient_id:
+        where_clauses.append("r.patient_id = %s")
+        params.append(patient_id)
+    if caregiver_phone:
+        where_clauses.append("r.caregiver_phone = %s")
+        params.append(caregiver_phone)
+    if search:
+        where_clauses.append(
+            "(r.transcription ILIKE %s OR (r.analysis->>'summary') ILIKE %s)"
+        )
+        like = f"%{search}%"
+        params.extend([like, like])
+
+    where_sql = " AND ".join(where_clauses)
+    params.append(limit)
+
+    rows = get_postgres().fetch_all(
+        f"""
+        SELECT r.id, r.patient_id, r.caregiver_phone, r.caregiver_name_claimed,
+               r.transcription, r.classification, r.status,
+               r.analysis, r.received_at, r.analyzed_at,
+               p.full_name AS patient_name, p.nickname AS patient_nickname,
+               p.photo_url AS patient_photo, p.room_number AS patient_room,
+               p.care_unit AS patient_care_unit
+        FROM aia_health_reports r
+        LEFT JOIN aia_health_patients p ON p.id = r.patient_id
+        WHERE {where_sql}
+        ORDER BY r.received_at DESC
+        LIMIT %s
+        """,
+        params,
+    )
+
+    return jsonify({
+        "reports": rows,
+        "filters_applied": {
+            "classifications": classifications,
+            "patient_id": patient_id,
+            "caregiver_phone": caregiver_phone,
+            "search": search,
+            "days": days,
+        },
+        "total_returned": len(rows),
+    })
 
 
 @bp.get("/api/reports/<report_id>")

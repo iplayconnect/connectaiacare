@@ -84,10 +84,16 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        # NEXT_PUBLIC_* precisa ser BUILD arg pra ser inlineado no bundle JS
+        # do browser. Sem isso, fetch client-side vira relativo (care.* em vez
+        # de demo.*) e endpoints retornam 404.
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-https://demo.connectaia.com.br}
     container_name: connectaiacare-frontend
     restart: unless-stopped
     environment:
-      # Browser (Client Components): hostname público
+      # Browser (Client Components): hostname público — também em runtime por
+      # robustez, mas o valor que importa é o do build arg acima.
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-https://demo.connectaia.com.br}
       # Server Components (SSR dentro do container): service name Docker
       INTERNAL_API_URL: http://api:5055

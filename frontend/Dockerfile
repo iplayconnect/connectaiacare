@@ -7,6 +7,12 @@ FROM node:20-alpine AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
+
+# Build args — essenciais pro Next.js inlinear NEXT_PUBLIC_* no bundle do browser.
+# Sem isso, client components caem em fetch relativo e o browser tenta bater no
+# proprio host do frontend em vez do API publico.
+ARG NEXT_PUBLIC_API_URL=https://demo.connectaia.com.br
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build
 
