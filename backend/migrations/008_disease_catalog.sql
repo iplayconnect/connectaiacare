@@ -10,6 +10,9 @@
 --  - Busca no prontuário longitudinal
 --  - Mapeamento FHIR (Condition.code)
 
+-- pg_trgm: precisa vir ANTES do CREATE TABLE pra gin_trgm_ops funcionar.
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+
 CREATE TABLE IF NOT EXISTS aia_health_disease_catalog (
     id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
 
@@ -56,9 +59,6 @@ CREATE INDEX IF NOT EXISTS idx_disease_description_trgm
 CREATE INDEX IF NOT EXISTS idx_disease_geriatric
     ON aia_health_disease_catalog(is_geriatric_common)
     WHERE is_geriatric_common = TRUE;
-
--- pg_trgm: extensão pra busca por similaridade (fuzzy)
-CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
 COMMENT ON TABLE aia_health_disease_catalog IS
 'Catálogo de códigos de doenças CID-10 (DATASUS). Extensível pra CID-11 e SNOMED-CT (quando licenciado).';
