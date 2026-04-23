@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Check, Loader2, Save, Sparkles } from "lucide-react";
 
 import type { SoapDocument } from "@/lib/api";
+import { CidAutocomplete } from "./cid-autocomplete";
 
 // ═══════════════════════════════════════════════════════════════
 // toDisplayString — converte qualquer coisa que o LLM retornou num
@@ -181,36 +182,20 @@ export function SoapEditor({
           <div className="text-[11px] uppercase tracking-[0.1em] text-accent-cyan/80 font-semibold mb-1.5">
             Hipótese diagnóstica principal
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-            <input
-              disabled={disabled}
-              value={soap.assessment.primary_hypothesis?.description || ""}
-              onChange={(e) =>
-                patchSection("assessment", {
-                  primary_hypothesis: {
-                    ...(soap.assessment.primary_hypothesis || {}),
-                    description: e.target.value,
-                  },
-                })
-              }
-              placeholder="Descrição clínica"
-              className="md:col-span-2 rounded-md bg-black/30 border border-white/[0.06] px-2.5 py-1.5 text-sm disabled:opacity-60 focus:outline-none focus:border-accent-cyan/40"
-            />
-            <input
-              disabled={disabled}
-              value={soap.assessment.primary_hypothesis?.icd10 || ""}
-              onChange={(e) =>
-                patchSection("assessment", {
-                  primary_hypothesis: {
-                    ...(soap.assessment.primary_hypothesis || {}),
-                    icd10: e.target.value,
-                  },
-                })
-              }
-              placeholder="CID-10"
-              className="rounded-md bg-black/30 border border-white/[0.06] px-2.5 py-1.5 text-sm font-mono disabled:opacity-60 focus:outline-none focus:border-accent-cyan/40"
-            />
-          </div>
+          <CidAutocomplete
+            description={soap.assessment.primary_hypothesis?.description || ""}
+            icd10={soap.assessment.primary_hypothesis?.icd10 || ""}
+            disabled={disabled}
+            onChange={(next) =>
+              patchSection("assessment", {
+                primary_hypothesis: {
+                  ...(soap.assessment.primary_hypothesis || {}),
+                  description: next.description,
+                  icd10: next.icd10,
+                },
+              })
+            }
+          />
         </div>
 
         <TextArea
