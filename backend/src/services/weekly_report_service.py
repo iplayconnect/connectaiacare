@@ -34,13 +34,15 @@ logger = get_logger(__name__)
 SYSTEM = """Você escreve resumos semanais de cuidado para famílias de idosos.
 
 REGRAS INVIOLÁVEIS:
-1. Tom factual, acolhedor, SEM alarmismo. Família é vulnerável emocionalmente.
-2. NUNCA prometer melhora ("vai melhorar"), NUNCA prever piora ("pode piorar"). Use linguagem descritiva do passado.
-3. NUNCA inventar dado — só reformule o que está no contexto fornecido.
-4. Linguagem nível 8ª série. Evite jargão; quando usar (ex: PA, FC), explique entre parênteses na primeira ocorrência.
-5. Insights quantitativos (% de adesão, tempo de resposta, etc) são ok e desejáveis. Comparar com período anterior é ok. Comparar com "grupo" só se dado disponível.
-6. Estruture em: abertura curta → métricas principais → eventos do período → comparativo 30d → próximos passos → despedida acolhedora.
-7. SEM emojis excessivos — máximo 5 no texto todo, e só onde agregam (☀️ abertura, ✅ bom, ⚠️ atenção leve, 📅 retorno, 💙 fim).
+1. O PACIENTE É UM SÓ — o que está em <patient>. Use o first_name exato dessa tag. NUNCA invente outro nome. Se não tiver certeza, use "a paciente" ou "o paciente".
+2. Tom factual, acolhedor, SEM alarmismo. Família é vulnerável emocionalmente.
+3. NUNCA prometer melhora ("vai melhorar"), NUNCA prever piora ("pode piorar"). Use linguagem descritiva do passado.
+4. NUNCA inventar dado — só reformule o que está no contexto fornecido.
+5. Linguagem nível 8ª série. Evite jargão; quando usar (ex: PA, FC), explique entre parênteses na primeira ocorrência.
+6. Insights quantitativos (% de adesão, tempo de resposta, etc) são ok e desejáveis. Comparar com período anterior é ok. Comparar com "grupo" só se dado disponível.
+7. Estruture em: abertura curta → métricas principais → eventos do período → comparativo 30d → próximos passos → despedida acolhedora.
+8. SEM emojis excessivos — máximo 5 no texto todo, e só onde agregam (☀️ abertura, ✅ bom, ⚠️ atenção leve, 📅 retorno, 💙 fim).
+9. Se métricas estão zeradas/vazias, seja honesto ("semana com poucas interações registradas") — não invente.
 """
 
 
@@ -162,7 +164,9 @@ class WeeklyReportService:
                     next_json=json.dumps(next_sched, ensure_ascii=False, default=str),
                 ),
                 model=MODEL_FAST,
-                max_tokens=3500,
+                # 3500 truncava JSON quando o paciente tinha eventos ricos +
+                # métricas completas. 6500 cabe HTML + WhatsApp + highlights.
+                max_tokens=6500,
                 temperature=0.4,
             )
         except Exception as exc:
@@ -355,9 +359,16 @@ class WeeklyReportService:
 
     @staticmethod
     def _first_name(full: str | None) -> str:
+        """Extrai o primeiro nome real — pula títulos comuns (Dona, Sra., Dr., Dra., Sr.)."""
         if not full:
             return "paciente"
-        return full.strip().split()[0]
+        parts = [p for p in full.strip().split() if p]
+        if not parts:
+            return "paciente"
+        first = parts[0].strip(".")
+        if first.lower() in {"dona", "dona.", "dn", "sra", "sr", "dr", "dra", "senhor", "senhora"} and len(parts) > 1:
+            return parts[1]
+        return parts[0]
 
     @staticmethod
     def _calc_age(bd) -> int | None:
@@ -403,22 +414,63 @@ class WeeklyReportService:
         first = patient.get("first_name", "paciente")
         total = metrics.get("checkins_total") or 0
         resp = metrics.get("checkins_responded") or 0
-        evs = len(events)
-        text = (
-            f"☀️ Resumo semanal — {first}\n\n"
-            f"✅ {resp}/{total} check-ins respondidos\n"
-            f"📋 {evs} evento{'s' if evs != 1 else ''} registrado{'s' if evs != 1 else ''} na semana\n\n"
-            "Para detalhes completos acesse o portal da família.\n\n"
-            "Com carinho, Equipe ConnectaIACare 💙"
-        )
+        evs_total = metrics.get("events_total") or 0
+        evs_critical = metrics.get("events_critical") or 0
+        evs_resolved = metrics.get("events_resolved_ok") or 0
+        vital_readings = metrics.get("vital_readings") or 0
+        avg_bp = metrics.get("avg_bp") or ""
+        avg_hr = metrics.get("avg_hr") or ""
+
+        lines = [f"☀️ *Resumo semanal — {first}*", ""]
+
+        # Check-ins
+        if total > 0:
+            ratio_pct = int((resp / total) * 100) if total else 0
+            lines.append(f"✅ {resp}/{total} check-ins respondidos ({ratio_pct}%)")
+        else:
+            lines.append("📝 Ainda não há check-ins proativos nesta semana")
+
+        # Eventos
+        if evs_total > 0:
+            sev = []
+            if evs_critical > 0:
+                sev.append(f"{evs_critical} de atenção clínica")
+            if evs_resolved > 0:
+                sev.append(f"{evs_resolved} resolvidos sem intercorrência")
+            line = f"📋 {evs_total} evento{'s' if evs_total != 1 else ''} registrado{'s' if evs_total != 1 else ''}"
+            if sev:
+                line += f" ({'; '.join(sev)})"
+            lines.append(line)
+        else:
+            lines.append("📋 Nenhum evento de cuidado no período")
+
+        # Vitais
+        if vital_readings > 0:
+            v_parts = [f"{vital_readings} aferições"]
+            if avg_bp:
+                v_parts.append(f"PA média {avg_bp}")
+            if avg_hr:
+                v_parts.append(f"FC média {avg_hr}")
+            lines.append(f"📊 Sinais vitais · {' · '.join(v_parts)}")
+
+        lines.append("")
+        lines.append("Para detalhes completos acesse o portal da família.")
+        lines.append("")
+        lines.append("Com carinho, Equipe ConnectaIACare 💙")
+
+        text = "\n".join(lines)
         return {
             "whatsapp_text": text,
             "email_html": f"<p>{text.replace(chr(10), '<br>')}</p>",
-            "summary_sentence": "Resumo semanal disponível.",
-            "flags": {"has_attention": False, "has_warnings": False, "calls_for_action": False},
+            "summary_sentence": f"Resumo semanal · {evs_total} evento(s), {vital_readings} aferições.",
+            "flags": {
+                "has_attention": evs_critical > 0,
+                "has_warnings": False,
+                "calls_for_action": False,
+            },
             "highlights": [],
             "next_event_line": "",
-            "tone": "observador",
+            "tone": "observador" if evs_critical == 0 else "alerta",
             "_fallback": True,
         }
 
