@@ -324,11 +324,159 @@ Substitui **contextualmente**:
 
 ---
 
+## 8.5. Rate Limiting por Plano (sustentabilidade financeira)
+
+> Gap identificado em revisão: safety cobre jailbreak, mas não uso normal.
+> Um idoso solitário manda facilmente 150-200 msgs/dia pra Sofia no modo
+> companion — cada mensagem é uma chamada LLM. Sem limite, 10k usuários
+> B2C estouram custo.
+
+**Limites por plano (mensagens user→Sofia por dia, janela 24h rolling):**
+
+| Plano | Mensagens/dia (hipótese inicial) | Racional |
+|-------|----------------------------------|----------|
+| Essencial (R$ 49,90) | 30 | Check-in diário + 1-2 conversas leves |
+| Família (R$ 89,90) | 60 | Check-in + conversa + lembretes família |
+| Premium (R$ 149,90) | 100 | Companion ativo + teleconsultas |
+| Premium+Device (R$ 199,90) | 150 | + logs de dispositivo IoT |
+| Atente (B2B) | sem limite | Cuidador profissional, cobrança por uso |
+
+> **⚠️ Esses números são HIPÓTESE INICIAL, não verdade absoluta.**
+> O valor certo só aparece observando comportamento real. Sem dados, estamos
+> chutando. O feedback do Alexandre é correto: maior plano = maior limite,
+> mas **achar o score exato é empírico**.
+
+### Metodologia de calibração (executar pós-primeiros 50 assinantes)
+
+1. **Observar distribuição real** por plano (2-4 semanas de dados):
+   ```sql
+   SELECT plan_sku,
+          percentile_cont(0.5) WITHIN GROUP (ORDER BY daily_count) AS p50,
+          percentile_cont(0.9) WITHIN GROUP (ORDER BY daily_count) AS p90,
+          percentile_cont(0.95) WITHIN GROUP (ORDER BY daily_count) AS p95,
+          percentile_cont(0.99) WITHIN GROUP (ORDER BY daily_count) AS p99
+   FROM v_daily_message_count
+   GROUP BY plan_sku;
+   ```
+
+2. **Definir limite como P95 + margem**: cobre 95% dos usuários sem bloquear.
+   Só os 5% superiores (power users) batem limite.
+
+3. **Cross-check de custo** (sustentabilidade):
+   `limite × custo_msg ≤ (receita_plano × 0.7)` — deixa 30% margem operacional.
+   - Essencial R$ 49,90: se custo médio = R$ 0,015/msg → caberia até 2.300 msgs/mês
+     antes de zerar margem. Limite de 30/dia × 30 dias = 900 msgs/mês — folgado.
+   - Premium R$ 149,90: até 7.000 msgs/mês → limite 100/dia (3.000/mês) cabe bem.
+
+4. **A/B test controlado**: 50% dos novos usuários com limite atual, 50% com
+   limite +20%. Comparar durante 4 semanas:
+   - **Churn rate**: limite apertado demais derruba retenção?
+   - **NPS**: insatisfação latente antes de churn aparente?
+   - **Custo infra**: limite folgado estoura margem?
+   - **Engajamento**: usuários que batem limite têm MAIS ou MENOS retenção?
+     (contraintuitivo, mas pode ser sinal de dependência emocional saudável)
+
+5. **Config-as-data, não hardcode**: limites vão viver em
+   `aia_health_rate_limit_config` (ou `llm_routing.yaml`) pra ajustar SEM
+   redeploy. Só no código ficam os fallbacks de segurança.
+
+### Telemetria já ativa (desde Onda A.5)
+
+No código atual (`rate_limit_service.py`):
+- Log `rate_limit_usage_alert` dispara quando user passa 80% do limite
+  → sinal de calibração apertada OU oportunidade de upgrade
+- Log `rate_limit_exceeded` registra cada bloqueio (plano + horário + phone)
+  → base de dados pra metodologia acima
+- Tabela `aia_health_conversation_messages` (já persistindo inbound) permite
+  reconstruir distribuição histórica assim que houver dados suficientes
+
+**Mensagem de limite (acolhedora, nunca rejeitante):**
+
+> "Que bom conversar contigo 💙. Vou descansar um pouquinho pra atender
+> a todos os outros. A gente continua amanhã cedo, tá? Se for urgência,
+> manda *'ajuda'* agora mesmo — emergências nunca ficam de fora do
+> limite."
+
+**Exceções ao limite (sempre passam, independente de cota):**
+- Triggers de safety emergency (suicidal_ideation, elder_abuse, medical_emergency)
+- Mensagens iniciadas com "ajuda" / "socorro" / "emergência"
+- Respostas a check-ins ativos do care event (paciente em risco)
+- Primeiras 3 msgs do dia (não "quebra" no primeiro "bom dia")
+
+**Implementação**:
+- Tabela: `conversation_history_service.count_recent(phone, minutes=1440, direction='inbound')`
+- Contador em `aia_health_conversation_messages` (já existe)
+- Reset natural via janela rolling (não é cron)
+- Plano lookup via `aia_health_subscriptions` → `plan_sku`
+- Escape valves por keyword + classificação safety
+
+**Quando o limite é atingido**: Sofia responde a mensagem acolhedora acima,
+grava a tentativa com `metadata.rate_limited=true`, e agenda um wake-up
+pra 6h da manhã seguinte (reseta disponibilidade). Atente recebe
+notificação diária se usuário bate limite 3 dias seguidos (pode indicar
+isolamento/solidão extrema — upgrade ou intervenção).
+
+---
+
+## 8.6. Fallback de Baixa Confiança (nunca inventar em saúde)
+
+> Em saúde, "não sei" é infinitamente melhor que resposta errada com
+> confiança. Sofia PRECISA ter humildade epistêmica.
+
+**Decisão**: protocolo de 3 degraus quando Sofia não entende ou não sabe:
+
+### Degrau 1 — Confiança < 0.5 na interpretação
+Sofia pede esclarecimento, sem tentar advinhar:
+```
+"Deixa eu confirmar se entendi: você disse [paraphrase]? É isso?"
+```
+Se paraphrase razoável: usuário confirma/corrige.
+Se paraphrase não faz sentido: vai para Degrau 2.
+
+### Degrau 2 — Segunda tentativa falha OU confiança < 0.3
+Sofia admite o limite + oferece reformulação:
+```
+"Não peguei direito, me desculpa 💙. Pode tentar de outro jeito? Se for
+mais fácil, pode mandar áudio — às vezes é mais simples falando."
+```
+Se usuário responde com áudio → transcreve + tenta de novo.
+Se ainda não entende → Degrau 3.
+
+### Degrau 3 — Terceira falha OU fora do escopo Sofia
+Escalação pra Atente (humano):
+```
+"Vou chamar uma pessoa do nosso time pra te ajudar, que vai entender
+melhor que eu. Em alguns minutos alguém aqui responde."
+```
+Cria evento em `aia_health_safety_events` com `trigger_type='low_confidence_handoff'`
+(não é safety crítico, mas rastreia padrões de falha pra melhoria).
+
+### Categorias onde Sofia NUNCA inventa (sempre escala)
+1. **Diagnóstico médico** — "isso é câncer?" → "não posso dizer. Leva ao médico."
+2. **Prescrição / dose** — "quanto de metformina posso tomar?" → sempre médico
+3. **Interação medicamentosa fora do PrescriptionValidator** — se não tem no validator, não inventa
+4. **Diagnóstico diferencial de sintoma novo** — "minha mãe tá assim há 2 dias, o que é?" → cuida de qualificar + sinalizar ao médico, nunca nomeia a doença
+5. **Resposta jurídica específica** — LGPD/CDC/Estatuto do Idoso em alto nível sim, caso concreto não
+6. **Valores financeiros não-catalogados** — preço de exame fora do price_search_service
+
+**Implementação**:
+- LLM já retorna `confidence` (onde suportado) ou extraímos via logit probs
+- Sofia prompt tem constitutional rule: "Se não tem certeza absoluta sobre
+  informação clínica, responda 'não sei' e ofereça alternativa humana"
+- Counter em `aia_health_conversation_messages.metadata.low_confidence_attempts`
+- Escalação tracking em `aia_health_safety_events` (severity: `info`)
+
+**Métrica**: taxa de escalação por baixa confiança. Alvo < 5% das mensagens.
+Se > 10%, investigar: prompt mal calibrado ou LLM fraco pra tarefa.
+
+---
+
 ## 9. Roadmap de Implementação
 
 | Onda | Escopo | Quando |
 |------|--------|--------|
-| **A** | Humanizer + buffer + janela deslizante + correction + **Safety Layer** | Hoje (~7h) |
+| **A** | Humanizer + buffer + janela deslizante + correction + Safety Layer | ✅ 2026-04-23 |
+| **A.5** | Rate limit por plano + Fallback de baixa confiança (§8.5/8.6) | ~2-3h |
 | **B** | Qualificador CSM + KB vetorizada + Agente Objeções + Guardrails completos | Amanhã (~10h) |
 | **C** | Memória 2 camadas (individual + coletiva regionalizada) + Distiller + K-anonymity | Pós-demo (~10h) |
 | **D** | Multi-agent orchestrator 3 camadas + 8 agentes | Pós-C (~2-3d) |

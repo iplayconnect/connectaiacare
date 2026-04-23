@@ -39,7 +39,9 @@ from src.services.correction_handler import (
 )
 from src.services.humanizer_service import Chunk, get_humanizer
 from src.services.llm_router import get_llm_router
+from src.services.low_confidence_handler import get_low_confidence_handler
 from src.services.postgres import get_postgres
+from src.services.rate_limit_service import get_rate_limiter
 from src.services.safety_moderation_service import (
     SafetyResult,
     get_safety_moderation_service,
@@ -140,6 +142,8 @@ class SofiaOnboardingService:
         self.safety = get_safety_moderation_service()
         self.humanizer = get_humanizer()
         self.history = get_conversation_history()
+        self.rate_limiter = get_rate_limiter()
+        self.low_confidence = get_low_confidence_handler()
 
     # ═══════════════════════════════════════════════════════════════
     # Entry point — chamado pelo pipeline ao receber mensagem
@@ -202,6 +206,45 @@ class SofiaOnboardingService:
             return self._build_humanized_result(
                 phone=phone, session_id=session_id, state=state,
                 reply=reply, safety=safety, skip_variator=True,
+            )
+
+        # 2.5. Rate limit por plano (ADR-027 §8.5 — sustentabilidade financeira)
+        rate_check = self.rate_limiter.check(
+            phone=phone,
+            text=text or "",
+            safety_triggers=safety.triggers,
+            has_active_care_event=False,  # onboarding não tem care event
+        )
+        if not rate_check.allowed:
+            logger.info(
+                "onboarding_rate_limited",
+                phone=phone, used=rate_check.used, limit=rate_check.limit,
+                plan=rate_check.plan,
+            )
+            return self._build_humanized_result(
+                phone=phone, session_id=session_id, state=state,
+                reply=rate_check.response or "",
+                safety=safety, skip_variator=True,
+            )
+
+        # 2.6. Low-confidence categories "nunca inventar" (ADR-027 §8.6)
+        lc_decision = self.low_confidence.evaluate(
+            text=text or "",
+            phone=phone,
+            session_id=session_id,
+            llm_confidence=None,  # no onboarding é só category-based
+            prior_attempts=0,
+        )
+        if lc_decision.should_handle and lc_decision.degree == 3:
+            # Escalação direta pra humano em categorias sensíveis
+            logger.info(
+                "onboarding_lc_handoff",
+                phone=phone, category=lc_decision.category,
+            )
+            return self._build_humanized_result(
+                phone=phone, session_id=session_id, state=state,
+                reply=lc_decision.response or "",
+                safety=safety, skip_variator=True,
             )
 
         # 3. Correction handler — intenção de correção/cancelamento
