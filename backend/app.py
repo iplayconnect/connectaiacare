@@ -8,6 +8,7 @@ from src.handlers.disease_routes import bp as disease_bp
 from src.handlers.patient_portal_routes import bp as patient_portal_bp
 from src.handlers.routes import bp as api_bp
 from src.handlers.teleconsulta_routes import bp as teleconsulta_bp
+from src.handlers.weekly_report_routes import bp as weekly_report_bp
 from src.utils.logger import configure_logging, get_logger
 
 
@@ -48,6 +49,7 @@ def create_app() -> Flask:
     app.register_blueprint(teleconsulta_bp)
     app.register_blueprint(patient_portal_bp)
     app.register_blueprint(disease_bp)
+    app.register_blueprint(weekly_report_bp)
 
     # Headers de segurança em todas as respostas.
     # Ver FINDING-006 do security audit.
@@ -91,6 +93,17 @@ def create_app() -> Flask:
             logger.info("checkin_scheduler_thread_started")
         except Exception as exc:
             logger.error("checkin_scheduler_failed_to_start", error=str(exc))
+
+    # Proactive Scheduler — disparo de check-ins B2C, lembretes, relatórios
+    # (independente de care_events). Lock advisory próprio pra não conflitar
+    # com o checkin_scheduler.
+    if os.getenv("ENABLE_PROACTIVE_SCHEDULER", "true").lower() == "true":
+        try:
+            from src.services.proactive_scheduler import get_proactive_scheduler
+            get_proactive_scheduler().start()
+            logger.info("proactive_scheduler_thread_started")
+        except Exception as exc:
+            logger.error("proactive_scheduler_failed_to_start", error=str(exc))
 
     logger.info("app_created", env=settings.env, debug=settings.debug)
     return app
