@@ -4,9 +4,12 @@ import { useState } from "react";
 import {
   AlertTriangle,
   Check,
+  Download,
   ExternalLink,
+  FileText,
   Heart,
   Info,
+  Loader2,
   Pill,
   RefreshCw,
   Stethoscope,
@@ -81,6 +84,7 @@ export function PortalContent({
 }) {
   const { teleconsulta: tc, summary, prices } = data;
   const [refreshing, setRefreshing] = useState(false);
+  const [downloadingPdf, setDownloadingPdf] = useState(false);
   const [priceResults, setPriceResults] = useState<PriceResult[]>(
     prices?.results || [],
   );
@@ -103,6 +107,37 @@ export function PortalContent({
       }
     } finally {
       setRefreshing(false);
+    }
+  }
+
+  async function downloadPdf() {
+    if (!pin) return;
+    setDownloadingPdf(true);
+    try {
+      const res = await fetch(
+        `${apiBase}/api/patient-portal/${teleconsultaId}/pdf`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ pin }),
+        },
+      );
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        alert("Não foi possível gerar o PDF. " + (err.status || ""));
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `receita-${teleconsultaId.slice(0, 8)}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } finally {
+      setDownloadingPdf(false);
     }
   }
 
@@ -326,7 +361,41 @@ export function PortalContent({
           </Section>
         )}
 
-        {/* Mensagem acolhedora final */}
+        {/* Ações — PDF e mensagem acolhedora */}
+        {tc.prescription && tc.prescription.length > 0 && (
+          <div className="glass-card rounded-2xl p-5 border border-accent-cyan/20 bg-gradient-to-br from-accent-cyan/[0.04] to-accent-teal/[0.03]">
+            <div className="flex items-start gap-3 mb-3">
+              <div className="w-9 h-9 rounded-lg bg-accent-cyan/15 border border-accent-cyan/30 flex items-center justify-center flex-shrink-0">
+                <FileText className="h-4 w-4 text-accent-cyan" />
+              </div>
+              <div className="flex-1">
+                <div className="text-[15px] font-semibold">Receita médica</div>
+                <div className="text-[12px] text-foreground/75 leading-relaxed mt-0.5">
+                  Baixe o PDF assinado para apresentar na farmácia ou guardar.
+                  Inclui QR code de verificação de autenticidade.
+                </div>
+              </div>
+            </div>
+            <button
+              onClick={downloadPdf}
+              disabled={downloadingPdf}
+              className="w-full px-4 py-3 rounded-xl bg-accent-cyan text-slate-900 text-sm font-semibold hover:bg-accent-teal transition-colors disabled:opacity-50 inline-flex items-center justify-center gap-2 shadow-glow-cyan"
+            >
+              {downloadingPdf ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Gerando PDF…
+                </>
+              ) : (
+                <>
+                  <Download className="h-4 w-4" />
+                  Baixar receita em PDF
+                </>
+              )}
+            </button>
+          </div>
+        )}
+
         {summary.supportive_message && (
           <div className="mt-6 text-center">
             <p className="text-[13px] text-foreground/70 italic leading-relaxed max-w-md mx-auto">

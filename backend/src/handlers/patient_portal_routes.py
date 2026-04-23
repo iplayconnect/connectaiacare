@@ -14,10 +14,11 @@ Endpoints:
 """
 from __future__ import annotations
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, Response, jsonify, request
 
 from src.services.patient_portal_service import get_patient_portal_service
 from src.services.patient_summary_service import get_patient_summary_service
+from src.services.prescription_pdf_service import get_prescription_pdf_service
 from src.services.price_search_service import get_price_search_service
 from src.services.teleconsulta_service import get_teleconsulta_service
 from src.utils.logger import get_logger
@@ -122,6 +123,72 @@ def access(tc_id: str):
         "summary": summary,
         "prices": prices,
     })
+
+
+@bp.post("/api/patient-portal/<tc_id>/pdf")
+def download_pdf(tc_id: str):
+    """Gera PDF da receita médica. Requer PIN válido.
+
+    Body: {"pin": "123456"}
+    Response: application/pdf
+    """
+    body = request.get_json(silent=True) or {}
+    pin = (body.get("pin") or "").strip()
+    if not pin:
+        return jsonify({"status": "pin_required"}), 400
+
+    portal = get_patient_portal_service()
+    result = portal.validate_pin(
+        tc_id, pin,
+        ip_address=_client_ip(),
+        user_agent=request.headers.get("User-Agent", "")[:300],
+    )
+    if result.get("status") != "valid":
+        return jsonify(result), 401
+
+    tc = get_teleconsulta_service().get_by_id(tc_id)
+    if not tc:
+        return jsonify({"status": "not_found"}), 404
+
+    patient_obj = {
+        "full_name": tc.get("patient_full_name"),
+        "birth_date": tc.get("patient_birth_date"),
+        "gender": tc.get("patient_gender"),
+        "care_unit": tc.get("patient_care_unit"),
+        "allergies": tc.get("patient_allergies") or [],
+    }
+    doctor_obj = {
+        "full_name": tc.get("doctor_name_snapshot") or "Médico(a)",
+        "crm_number": tc.get("doctor_crm_snapshot") or "",
+        "specialties": ["Geriatria"],
+    }
+    pdf_bytes = get_prescription_pdf_service().generate(
+        teleconsultation=tc,
+        patient=patient_obj,
+        doctor=doctor_obj,
+        prescription_items=tc.get("prescription") or [],
+        soap=tc.get("soap") or {},
+    )
+    try:
+        portal._log(
+            result.get("access_id"), tc_id, tc.get("tenant_id") or "connectaiacare_demo",
+            action="pdf_downloaded",
+            detail={"bytes": len(pdf_bytes)},
+            ip=_client_ip(),
+            ua=request.headers.get("User-Agent", "")[:300],
+        )
+    except Exception:
+        pass
+
+    filename = f"receita-{tc.get('human_id', 0):04d}.pdf"
+    return Response(
+        pdf_bytes,
+        mimetype="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Content-Length": str(len(pdf_bytes)),
+        },
+    )
 
 
 @bp.post("/api/patient-portal/<tc_id>/refresh-prices")

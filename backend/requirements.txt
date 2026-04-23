@@ -44,3 +44,7 @@ rich==13.9.2
 # Teleconsulta via LiveKit (ADR-012 — reuso LiveKit da Hostinger)
 # SDK gera JWT tokens + cria rooms via API. Web clients usam livekit-client (npm).
 livekit-api==0.8.2
+
+# PDF da receita médica + QR de verificação (CFM 2.314/2022).
+reportlab==4.2.5
+qrcode==7.4.2
