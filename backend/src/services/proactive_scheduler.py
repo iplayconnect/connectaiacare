@@ -154,6 +154,13 @@ class ProactiveScheduler:
         except Exception as exc:
             logger.warning("proactive_reconcile_error", error=str(exc))
 
+        # Processa lembretes de medicação (independente dos proactive_schedules)
+        try:
+            med_fired, med_missed = self._tick_medication_reminders()
+            dispatched += med_fired
+        except Exception as exc:
+            logger.warning("medication_reminders_tick_error", error=str(exc))
+
         # Heartbeat (detecção de scheduler parado)
         try:
             self._write_heartbeat(checked, dispatched, errors)
@@ -413,6 +420,130 @@ class ProactiveScheduler:
             return None
         key = resp.get("key") or {}
         return key.get("id") if isinstance(key, dict) else None
+
+    # ══════════════════════════════════════════════════════════════════
+    # Lembretes de medicação (integração com medication_events)
+    # ══════════════════════════════════════════════════════════════════
+
+    def _tick_medication_reminders(self) -> tuple[int, int]:
+        """Envia lembretes de medicação que estão vencendo + marca missed.
+
+        Retorna (fired_count, missed_count).
+        """
+        from src.services.medication_event_service import get_medication_event_service
+        from src.services.evolution import get_evolution
+
+        med_svc = get_medication_event_service()
+        evo = get_evolution()
+
+        fired = 0
+        missed = 0
+
+        # Materializa events pra próximas 24h (idempotente)
+        try:
+            med_svc.materialize_for_all_active_patients(horizon_hours=24)
+        except Exception as exc:
+            logger.warning("medication_materialize_error", error=str(exc))
+
+        # Envia lembretes pendentes
+        pending = med_svc.get_pending_reminders(lookahead_minutes=15)
+        for event in pending:
+            try:
+                # Tenta pegar phone do paciente via proxy (care_event mais recente)
+                phone_row = self.db.fetch_one(
+                    """
+                    SELECT caregiver_phone
+                    FROM aia_health_care_events
+                    WHERE patient_id = %s
+                    ORDER BY opened_at DESC
+                    LIMIT 1
+                    """,
+                    (str(event["patient_id"]),),
+                )
+                phone = phone_row.get("caregiver_phone") if phone_row else None
+                if not phone:
+                    continue
+
+                # Renderiza mensagem com tom acolhedor
+                patient_row = self.db.fetch_one(
+                    "SELECT nickname, full_name FROM aia_health_patients WHERE id = %s",
+                    (str(event["patient_id"]),),
+                )
+                first_name = self._first_name_from_nick_or_full(
+                    (patient_row or {}).get("nickname"),
+                    (patient_row or {}).get("full_name"),
+                )
+
+                dose = event.get("dose") or ""
+                med = event.get("medication_name") or "medicação"
+                instr = event.get("special_instructions") or ""
+
+                scheduled_dt = event.get("scheduled_at")
+                if scheduled_dt and scheduled_dt.tzinfo is None:
+                    scheduled_dt = scheduled_dt.replace(tzinfo=timezone.utc)
+                tz = ZoneInfo("America/Sao_Paulo")
+                time_str = scheduled_dt.astimezone(tz).strftime("%H:%M") if scheduled_dt else ""
+
+                text = (
+                    f"🔔 Oi, {first_name}!\n\n"
+                    f"Daqui a pouco ({time_str}) é hora de tomar:\n"
+                    f"*{med} {dose}*\n"
+                )
+                if instr:
+                    text += f"\n_{instr}_\n"
+                text += (
+                    "\nResponda:\n"
+                    "✅ se já tomou ou vai tomar agora\n"
+                    "⏰ se vai tomar daqui a pouco\n"
+                    "❌ se não vai tomar essa dose"
+                )
+
+                resp = evo.send_text(phone, text)
+                external_ref = self._extract_msg_id(resp)
+                med_svc.mark_reminder_sent(
+                    str(event["id"]), channel="whatsapp", external_ref=external_ref,
+                )
+                fired += 1
+                logger.info(
+                    "medication_reminder_sent",
+                    event_id=str(event["id"]),
+                    medication=med,
+                    phone_prefix=phone[:4],
+                )
+            except Exception as exc:
+                logger.warning(
+                    "medication_reminder_failed",
+                    event_id=str(event.get("id")), error=str(exc),
+                )
+
+        # Marca missed eventos que ultrapassaram janela
+        try:
+            overdue = med_svc.get_overdue()
+            for event in overdue:
+                med_svc.mark_missed(str(event["id"]))
+                missed += 1
+                logger.info(
+                    "medication_marked_missed",
+                    event_id=str(event["id"]),
+                    medication=event.get("medication_name"),
+                )
+                # Detecta 3 missed consecutivos → alerta familiar (próxima iteração)
+        except Exception as exc:
+            logger.warning("medication_overdue_error", error=str(exc))
+
+        return fired, missed
+
+    @staticmethod
+    def _first_name_from_nick_or_full(nick: str | None, full: str | None) -> str:
+        """Primeiro nome honrando títulos brasileiros."""
+        candidate = nick or full or ""
+        parts = [p for p in candidate.strip().split() if p]
+        if not parts:
+            return "amigo(a)"
+        first = parts[0].strip(".")
+        if first.lower() in {"dona", "dn", "sra", "sr", "dr", "dra", "senhor", "senhora"} and len(parts) > 1:
+            return parts[1]
+        return parts[0]
 
     # ══════════════════════════════════════════════════════════════════
     # Learning — atualiza observed_response_avg_min

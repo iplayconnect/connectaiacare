@@ -352,6 +352,11 @@ class EldercarePipeline:
         tenant = settings.tenant_id
         text_lower = (text or "").strip().lower()
 
+        # ANTES de tudo: é confirmação de lembrete de medicação?
+        med_result = self._try_handle_medication_response(phone, text_lower)
+        if med_result:
+            return med_result
+
         # Primeiro: verifica se há sessão legada (confirmação SIM/NÃO)
         legacy = self.db.fetch_one(
             """
@@ -783,6 +788,102 @@ class EldercarePipeline:
             return True
 
         return False
+
+    # Vocabulário de confirmação/recusa pra lembretes de medicação
+    MED_TOOK_TERMS = (
+        "já tomei", "ja tomei", "tomei", "tomado", "tomada",
+        "sim tomei", "tomei já", "tomei ja", "ok tomei",
+        "✅", "tomei agora",
+    )
+    MED_WILL_TAKE_TERMS = (
+        "vou tomar", "vou tomar agora", "daqui a pouco", "agora vou tomar",
+        "em instantes", "já vou tomar", "⏰",
+    )
+    MED_WONT_TAKE_TERMS = (
+        "não vou", "nao vou", "não tomarei", "nao tomarei", "recuso",
+        "não quero", "nao quero", "pular essa", "pulo essa", "❌",
+    )
+
+    def _try_handle_medication_response(
+        self, phone: str, text_lower: str,
+    ) -> dict[str, Any] | None:
+        """Intercepta confirmação de lembrete de medicação antes do fluxo normal.
+
+        Detecta se:
+        1. Paciente tem event de medicação com reminder_sent nos últimos 3h
+        2. Texto bate com vocabulário de confirmação/recusa
+
+        Se SIM: marca o event + manda ack curta, não segue fluxo de care_event.
+        Se NÃO: retorna None (fluxo normal continua).
+        """
+        # Procura paciente associado a este phone via care_events recentes
+        row = self.db.fetch_one(
+            """
+            SELECT DISTINCT patient_id
+            FROM aia_health_care_events
+            WHERE caregiver_phone = %s
+            ORDER BY patient_id
+            LIMIT 1
+            """,
+            (phone,),
+        )
+        if not row:
+            return None
+        patient_id = str(row["patient_id"])
+
+        # Procura event aberto
+        try:
+            from src.services.medication_event_service import get_medication_event_service
+            med_svc = get_medication_event_service()
+            open_event = med_svc.find_open_event_for_confirmation(patient_id)
+        except Exception:
+            return None
+
+        if not open_event:
+            return None
+
+        # Qual intent?
+        took = any(t in text_lower for t in self.MED_TOOK_TERMS)
+        will_take = any(t in text_lower for t in self.MED_WILL_TAKE_TERMS)
+        wont = any(t in text_lower for t in self.MED_WONT_TAKE_TERMS)
+
+        if not (took or will_take or wont):
+            return None
+
+        event_id = str(open_event["id"])
+
+        if took or will_take:
+            med_svc.mark_taken(
+                event_id=event_id,
+                confirmed_by="patient",
+                notes="Confirmado via WhatsApp" + (" (vai tomar agora)" if will_take else ""),
+            )
+            self.evo.send_text(
+                phone,
+                f"👍 Anotado! {'Bom que tomou' if took else 'Ok, lembrete registrado — tome com tranquilidade'}. "
+                "A gente segue acompanhando."
+            )
+            logger.info(
+                "medication_confirmed_via_whatsapp",
+                event_id=event_id, patient_id=patient_id, intent="taken" if took else "will_take",
+            )
+            return {"status": "ok", "handler": "medication_confirm", "event_id": event_id}
+
+        if wont:
+            med_svc.mark_refused(event_id, notes=f"Recusado via WhatsApp: '{text_lower[:100]}'")
+            self.evo.send_text(
+                phone,
+                "😌 Entendi. Registrei que essa dose não foi tomada. "
+                "Se tiver algum motivo específico (mal-estar, esqueceu), me conta depois — "
+                "a gente coloca nas anotações pro médico."
+            )
+            logger.info(
+                "medication_refused_via_whatsapp",
+                event_id=event_id, patient_id=patient_id,
+            )
+            return {"status": "ok", "handler": "medication_refused", "event_id": event_id}
+
+        return None
 
     def _mark_checkin_response(
         self, event: dict, response_text: str, classification: str | None,
