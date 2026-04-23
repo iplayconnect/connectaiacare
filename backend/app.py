@@ -6,6 +6,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 from config.settings import settings
 from src.handlers.disease_routes import bp as disease_bp
 from src.handlers.medication_routes import bp as medication_bp
+from src.handlers.onboarding_web_routes import bp as onboarding_web_bp
 from src.handlers.patient_portal_routes import bp as patient_portal_bp
 from src.handlers.routes import bp as api_bp
 from src.handlers.teleconsulta_routes import bp as teleconsulta_bp
@@ -52,6 +53,7 @@ def create_app() -> Flask:
     app.register_blueprint(disease_bp)
     app.register_blueprint(weekly_report_bp)
     app.register_blueprint(medication_bp)
+    app.register_blueprint(onboarding_web_bp, url_prefix="/api")
 
     # Headers de segurança em todas as respostas.
     # Ver FINDING-006 do security audit.

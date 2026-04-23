@@ -96,9 +96,13 @@ def _install_module_mocks() -> None:
 
     Necessário porque structlog/psycopg2 podem não estar instalados no ambiente
     local de testes, e settings.py pode quebrar sem .env.
+
+    Se a dep estiver instalada de verdade, deixa em paz — não substitui.
     """
-    # structlog — logger no-op
-    if "structlog" not in sys.modules:
+    # structlog — logger no-op (só se não estiver instalado)
+    try:
+        import structlog  # noqa: F401
+    except ImportError:
         sl = types.ModuleType("structlog")
         sl.stdlib = types.SimpleNamespace(BoundLogger=object)
 
@@ -114,14 +118,19 @@ def _install_module_mocks() -> None:
         sl.processors = types.SimpleNamespace()
         sys.modules["structlog"] = sl
 
-    # psycopg2 — só precisa dos símbolos importados
-    for name in ["psycopg2", "psycopg2.extras", "psycopg2.pool", "psycopg2.extensions"]:
-        if name not in sys.modules:
-            sys.modules[name] = types.ModuleType(name)
-    sys.modules["psycopg2.pool"].ThreadedConnectionPool = object
-    sys.modules["psycopg2.extras"].register_uuid = lambda: None
-    sys.modules["psycopg2.extras"].RealDictCursor = object
-    sys.modules["psycopg2.extensions"].AsIs = lambda x: x
+    # psycopg2 — só mocka se não estiver instalado de verdade
+    try:
+        import psycopg2  # noqa: F401
+        import psycopg2.extras  # noqa: F401
+        import psycopg2.pool  # noqa: F401
+    except ImportError:
+        for name in ["psycopg2", "psycopg2.extras", "psycopg2.pool", "psycopg2.extensions"]:
+            if name not in sys.modules:
+                sys.modules[name] = types.ModuleType(name)
+        sys.modules["psycopg2.pool"].ThreadedConnectionPool = lambda *a, **kw: None
+        sys.modules["psycopg2.extras"].register_uuid = lambda: None
+        sys.modules["psycopg2.extras"].RealDictCursor = object
+        sys.modules["psycopg2.extensions"].AsIs = lambda x: x
 
 
 _install_module_mocks()
@@ -150,6 +159,10 @@ def patch_get_postgres(monkeypatch, mock_db):
         "src.services.conversation_history_service",
         "src.services.rate_limit_service",
         "src.services.low_confidence_handler",
+        "src.services.knowledge_base_service",
+        "src.services.conversation_state_manager",
+        "src.services.objection_handler_service",
+        "src.handlers.onboarding_web_routes",
     ]:
         if mod_name in sys.modules:
             mod = sys.modules[mod_name]
@@ -168,6 +181,9 @@ def reset_singletons():
         "src.services.message_buffer_service",
         "src.services.rate_limit_service",
         "src.services.low_confidence_handler",
+        "src.services.knowledge_base_service",
+        "src.services.conversation_state_manager",
+        "src.services.objection_handler_service",
     ]
     for mod_name in modules_with_singletons:
         if mod_name in sys.modules:

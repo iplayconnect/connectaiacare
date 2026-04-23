@@ -40,6 +40,7 @@ from src.services.correction_handler import (
 from src.services.humanizer_service import Chunk, get_humanizer
 from src.services.llm_router import get_llm_router
 from src.services.low_confidence_handler import get_low_confidence_handler
+from src.services.objection_handler_service import get_objection_handler
 from src.services.postgres import get_postgres
 from src.services.rate_limit_service import get_rate_limiter
 from src.services.safety_moderation_service import (
@@ -144,6 +145,7 @@ class SofiaOnboardingService:
         self.history = get_conversation_history()
         self.rate_limiter = get_rate_limiter()
         self.low_confidence = get_low_confidence_handler()
+        self.objections = get_objection_handler()
 
     # ═══════════════════════════════════════════════════════════════
     # Entry point — chamado pelo pipeline ao receber mensagem
@@ -246,6 +248,37 @@ class SofiaOnboardingService:
                 reply=lc_decision.response or "",
                 safety=safety, skip_variator=True,
             )
+
+        # 2.7. Objection handler — se detectamos objeção comercial em estados
+        # de decisão (plan_selection, payment_method), responde com argumento
+        # da KB sem avançar o estado. Em outros estados, ignora (pode ser
+        # fala genuína da coleta de dados).
+        OBJECTION_ACTIVE_STATES = {
+            "greeting", "role_selection", "plan_selection",
+            "payment_method", "payment_pending", "consent_lgpd",
+        }
+        if state in OBJECTION_ACTIVE_STATES and self.objections.is_objection(text or ""):
+            obj_response = self.objections.handle(
+                user_text=text or "",
+                phone=phone,
+                session_id=session_id,
+                context={
+                    "state": state,
+                    "collected_data": session.get("collected_data"),
+                },
+            )
+            if obj_response.is_objection and obj_response.reply:
+                logger.info(
+                    "onboarding_objection_handled",
+                    phone=phone, category=obj_response.category,
+                    kb_chunks=obj_response.kb_chunks_used,
+                    fallback=obj_response.fallback_used,
+                )
+                # Não avança o estado — pergunta segue em aberto
+                return self._build_humanized_result(
+                    phone=phone, session_id=session_id, state=state,
+                    reply=obj_response.reply, safety=safety,
+                )
 
         # 3. Correction handler — intenção de correção/cancelamento
         correction = detect_correction(text or "")
