@@ -388,13 +388,14 @@ class PrescriptionOcrService:
         user_corrections: list[dict] | None = None,
         created_schedule_ids: list[str] | None = None,
     ) -> None:
+        # Cast explícito de TEXT[] pra UUID[] (psycopg2 não infere automaticamente)
         self.db.execute(
             """
             UPDATE aia_health_medication_imports
             SET confirmation_status = 'confirmed',
                 confirmed_at = NOW(),
                 user_corrections = %s,
-                created_schedule_ids = %s
+                created_schedule_ids = %s::uuid[]
             WHERE id = %s
             """,
             (
