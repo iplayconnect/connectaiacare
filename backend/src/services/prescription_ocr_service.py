@@ -18,8 +18,6 @@ import base64
 import json
 from typing import Any
 
-import anthropic
-
 from config.settings import settings
 from src.services.postgres import get_postgres
 from src.utils.logger import get_logger
@@ -119,24 +117,76 @@ COMMERCIAL_TO_GENERIC = {
 
 
 class PrescriptionOcrService:
+    """Extrator multi-provider — escolhe Anthropic Vision OU Gemini Vision
+    baseado em settings.llm_provider. Ambos retornam o mesmo JSON schema.
+    """
+
     def __init__(self):
-        self._client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
-        self._model = "claude-sonnet-4-5-20250929"
         self.db = get_postgres()
+        self._provider = settings.llm_provider
+        self._anthropic_client = None
+        self._gemini_model = None
+
+        if self._provider == "anthropic" and settings.anthropic_api_key:
+            try:
+                import anthropic
+                self._anthropic_client = anthropic.Anthropic(
+                    api_key=settings.anthropic_api_key,
+                )
+                self._model = "claude-sonnet-4-5-20250929"
+            except Exception as exc:
+                logger.warning("anthropic_init_failed", error=str(exc))
+        if self._provider == "gemini" or self._anthropic_client is None:
+            # Fallback/default: Gemini Vision
+            self._init_gemini()
+
+    def _init_gemini(self):
+        """Inicializa Gemini Vision — tenta SDK novo primeiro, depois legacy."""
+        try:
+            import google.generativeai as genai
+            api_key = getattr(settings, "gemini_api_key", None) or \
+                      getattr(settings, "google_api_key", None) or \
+                      __import__("os").getenv("GEMINI_API_KEY") or \
+                      __import__("os").getenv("GOOGLE_API_KEY")
+            if api_key:
+                genai.configure(api_key=api_key)
+            self._gemini_model = genai.GenerativeModel("gemini-2.5-flash")
+            self._model = "gemini-2.5-flash"
+            logger.info("ocr_using_gemini", model=self._model)
+        except Exception as exc:
+            logger.error("gemini_init_failed", error=str(exc))
 
     def analyze_image(
         self,
         image_b64: str,
         mime_type: str = "image/jpeg",
     ) -> dict[str, Any]:
-        """Envia imagem pro Claude Vision, retorna extração estruturada."""
+        """Envia imagem pro vision LLM configurado. Retorna JSON estruturado."""
         # Limpa eventual prefixo data:image/...;base64,
         clean_b64 = image_b64
         if "," in image_b64[:50]:
             clean_b64 = image_b64.split(",", 1)[1]
 
+        if self._anthropic_client:
+            return self._analyze_anthropic(clean_b64, mime_type)
+        if self._gemini_model:
+            return self._analyze_gemini(clean_b64, mime_type)
+
+        return {
+            "kind": "unclear",
+            "confidence": 0.0,
+            "needs_more_info": "Serviço de análise indisponível.",
+            "medications": [],
+            "_error": "no_vision_provider_available",
+        }
+
+    # ══════════════════════════════════════════════════════════════════
+    # Anthropic Vision
+    # ══════════════════════════════════════════════════════════════════
+
+    def _analyze_anthropic(self, clean_b64: str, mime_type: str) -> dict:
         try:
-            response = self._client.messages.create(
+            response = self._anthropic_client.messages.create(
                 model=self._model,
                 max_tokens=4096,
                 system=SYSTEM_PROMPT,
@@ -157,8 +207,6 @@ class PrescriptionOcrService:
                     }
                 ],
             )
-
-            # Extrai texto + parse JSON
             text = "".join(
                 block.text for block in response.content if hasattr(block, "text")
             )
@@ -169,23 +217,79 @@ class PrescriptionOcrService:
             result["_output_tokens"] = response.usage.output_tokens
             return result
         except json.JSONDecodeError as exc:
-            logger.error("ocr_json_parse_failed", error=str(exc), text_sample=text[:300] if 'text' in locals() else "")
-            return {
-                "kind": "unclear",
-                "confidence": 0.0,
-                "needs_more_info": "Não consegui entender a imagem. Pode tentar outra foto com mais luz?",
-                "medications": [],
-                "_error": str(exc),
-            }
+            logger.error("ocr_anthropic_json_parse_failed", error=str(exc))
+            return self._unclear_fallback(str(exc))
         except Exception as exc:
-            logger.error("ocr_claude_failed", error=str(exc))
-            return {
-                "kind": "unclear",
-                "confidence": 0.0,
-                "needs_more_info": "Houve um problema ao analisar a imagem. Por favor tente novamente em alguns instantes.",
-                "medications": [],
-                "_error": str(exc),
-            }
+            logger.error("ocr_anthropic_failed", error=str(exc))
+            return self._unclear_fallback(str(exc))
+
+    # ══════════════════════════════════════════════════════════════════
+    # Gemini Vision
+    # ══════════════════════════════════════════════════════════════════
+
+    def _analyze_gemini(self, clean_b64: str, mime_type: str) -> dict:
+        try:
+            raw_bytes = base64.b64decode(clean_b64)
+            combined_prompt = SYSTEM_PROMPT + "\n\n" + USER_PROMPT
+            response = self._gemini_model.generate_content(
+                [
+                    {
+                        "inline_data": {
+                            "mime_type": mime_type,
+                            "data": raw_bytes,
+                        }
+                    },
+                    combined_prompt,
+                ],
+                generation_config={
+                    "temperature": 0.1,
+                    "max_output_tokens": 4096,
+                    "response_mime_type": "application/json",
+                },
+            )
+            text = response.text if hasattr(response, "text") else ""
+            if not text and hasattr(response, "candidates"):
+                # Fallback: monta texto a partir dos candidates
+                parts_text = []
+                for c in response.candidates or []:
+                    content = getattr(c, "content", None)
+                    if content and hasattr(content, "parts"):
+                        for part in content.parts:
+                            if hasattr(part, "text"):
+                                parts_text.append(part.text)
+                text = "".join(parts_text)
+
+            text = self._extract_json(text)
+            if not text.strip():
+                return self._unclear_fallback("gemini retornou resposta vazia")
+
+            result = json.loads(text)
+            result["_model_used"] = self._model
+            usage = getattr(response, "usage_metadata", None)
+            if usage:
+                result["_input_tokens"] = getattr(usage, "prompt_token_count", 0)
+                result["_output_tokens"] = getattr(usage, "candidates_token_count", 0)
+            return result
+        except json.JSONDecodeError as exc:
+            logger.error(
+                "ocr_gemini_json_parse_failed",
+                error=str(exc),
+                text_sample=(text[:400] if "text" in locals() else ""),
+            )
+            return self._unclear_fallback(str(exc))
+        except Exception as exc:
+            logger.error("ocr_gemini_failed", error=str(exc))
+            return self._unclear_fallback(str(exc))
+
+    @staticmethod
+    def _unclear_fallback(reason: str) -> dict:
+        return {
+            "kind": "unclear",
+            "confidence": 0.0,
+            "needs_more_info": "Não consegui analisar a imagem dessa vez. Pode tentar outra foto com boa iluminação?",
+            "medications": [],
+            "_error": reason,
+        }
 
     @staticmethod
     def _extract_json(text: str) -> str:
