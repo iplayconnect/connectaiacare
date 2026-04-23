@@ -333,6 +333,67 @@ export const api = {
       method: "POST",
       body: JSON.stringify(item),
     }),
+  // ========== Medication (Bloco 1) ==========
+  listMedicationSchedules: (patientId: string) =>
+    request<{ results: MedicationSchedule[] }>(
+      `/api/patients/${patientId}/medication-schedules`,
+    ),
+  createMedicationSchedule: (patientId: string, body: Partial<MedicationSchedule> & { medication_name: string; dose: string }) =>
+    request<{ status: string; schedule: MedicationSchedule }>(
+      `/api/patients/${patientId}/medication-schedules`,
+      { method: "POST", body: JSON.stringify(body) },
+    ),
+  updateMedicationSchedule: (scheduleId: string, body: Partial<MedicationSchedule>) =>
+    request<{ status: string; schedule: MedicationSchedule }>(
+      `/api/medication-schedules/${scheduleId}`,
+      { method: "PUT", body: JSON.stringify(body) },
+    ),
+  deleteMedicationSchedule: (scheduleId: string, reason?: string) =>
+    request<{ status: string }>(
+      `/api/medication-schedules/${scheduleId}${reason ? `?reason=${encodeURIComponent(reason)}` : ""}`,
+      { method: "DELETE" },
+    ),
+  listUpcomingMedicationEvents: (patientId: string, hours = 24) =>
+    request<{ results: MedicationEvent[] }>(
+      `/api/patients/${patientId}/medication-events/upcoming?hours=${hours}`,
+    ),
+  listMedicationHistory: (patientId: string, days = 7) =>
+    request<{ results: MedicationEvent[] }>(
+      `/api/patients/${patientId}/medication-events/history?days=${days}`,
+    ),
+  confirmMedicationEvent: (eventId: string, body: { confirmed_by?: string; actual_dose?: string; notes?: string }) =>
+    request<{ status: string }>(
+      `/api/medication-events/${eventId}/confirm`,
+      { method: "POST", body: JSON.stringify(body) },
+    ),
+  skipMedicationEvent: (eventId: string, reason: string) =>
+    request<{ status: string }>(
+      `/api/medication-events/${eventId}/skip`,
+      { method: "POST", body: JSON.stringify({ reason }) },
+    ),
+  medicationAdherence: (patientId: string, days = 30) =>
+    request<MedicationAdherence>(
+      `/api/patients/${patientId}/medication-adherence?days=${days}`,
+    ),
+  createMedicationImport: (patientId: string, body: {
+    source_type: string;
+    file_b64: string;
+    file_mime?: string;
+    uploaded_by_type?: string;
+  }) =>
+    request<MedicationImportAnalysis>(
+      `/api/patients/${patientId}/medication-imports`,
+      { method: "POST", body: JSON.stringify(body) },
+    ),
+  confirmMedicationImport: (importId: string, body: {
+    medications: ExtractedMedication[];
+    added_by_type?: string;
+  }) =>
+    request<{ status: string; created_schedule_ids: string[]; count: number }>(
+      `/api/medication-imports/${importId}/confirm`,
+      { method: "POST", body: JSON.stringify(body) },
+    ),
+
   signTeleconsulta: (
     tcId: string,
     payload?: { doctor_name?: string; doctor_crm?: string; closure_notes?: string },
@@ -484,4 +545,131 @@ export interface TeleconsultaRecord {
   soap: SoapDocument | null;
   prescription: PrescriptionItem[] | null;
   fhir_bundle: Record<string, unknown> | null;
+}
+
+// ========== Medication types (Bloco 1) ==========
+
+export interface MedicationSchedule {
+  id: string;
+  medication_name: string;
+  dose: string;
+  dose_form?: string;
+  schedule_type:
+    | "fixed_daily"
+    | "fixed_weekly"
+    | "fixed_monthly"
+    | "cycle"
+    | "prn"
+    | "custom";
+  times_of_day?: string[];
+  days_of_week?: number[];
+  with_food?: "with" | "without" | "either";
+  special_instructions?: string;
+  warnings?: string[];
+  source_type?: string;
+  source_confidence?: number;
+  verification_status?:
+    | "confirmed"
+    | "needs_review"
+    | "conflicting"
+    | "superseded";
+  active?: boolean;
+  starts_at?: string;
+  ends_at?: string | null;
+}
+
+export interface MedicationEvent {
+  id: string;
+  schedule_id: string;
+  medication_name?: string;
+  dose?: string;
+  scheduled_at: string;
+  reminder_sent_at?: string | null;
+  confirmed_at?: string | null;
+  confirmed_by?: string | null;
+  status:
+    | "scheduled"
+    | "reminder_sent"
+    | "taken"
+    | "missed"
+    | "skipped"
+    | "refused"
+    | "paused"
+    | "cancelled";
+  actual_dose_taken?: string | null;
+  notes?: string | null;
+  special_instructions?: string | null;
+  with_food?: string;
+  warnings?: string[];
+}
+
+export interface MedicationAdherence {
+  summary: {
+    taken: number;
+    missed: number;
+    refused: number;
+    skipped: number;
+    total: number;
+    adherence_pct: number | null;
+    period_days: number;
+  };
+  by_medication: Array<{
+    medication_name: string;
+    dose: string;
+    taken: number;
+    missed: number;
+    refused_skipped: number;
+    total: number;
+    adherence_pct: number | null;
+  }>;
+  consecutive_missed: Array<{
+    schedule_id: string;
+    medication_name: string;
+    recent_statuses: string[];
+    missed_in_last_n: number;
+  }>;
+}
+
+export interface ExtractedMedication {
+  name: string;
+  alternative_names?: string[];
+  dose: string;
+  dose_form?: string;
+  schedule_text?: string;
+  parsed_schedule?: {
+    times_per_day?: number;
+    times_of_day?: string[];
+    prn?: boolean;
+    days_of_week?: number[];
+    interval_hours?: number;
+  };
+  duration_text?: string;
+  duration_days?: number | null;
+  indication?: string;
+  warnings?: string[];
+  with_food?: "with" | "without" | "either";
+  field_confidence?: {
+    name?: number;
+    dose?: number;
+    schedule?: number;
+  };
+}
+
+export interface MedicationImportAnalysis {
+  status: string;
+  import_id: string;
+  analysis_status: "done" | "failed";
+  kind:
+    | "prescription"
+    | "package"
+    | "leaflet"
+    | "pill_organizer"
+    | "not_medication_related"
+    | "unclear";
+  confidence?: number;
+  needs_more_info?: string | null;
+  medications?: ExtractedMedication[];
+  notes_for_user?: string;
+  doctor_info?: { name?: string; crm?: string } | null;
+  issue_date?: string | null;
 }

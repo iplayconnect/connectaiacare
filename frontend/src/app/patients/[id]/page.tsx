@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { Phone, UserRound } from "lucide-react";
 
 import { ClassificationBadge } from "@/components/classification-badge";
+import { MedicationTimeline } from "@/components/medication/medication-timeline";
 import { PatientVitalsSection } from "@/components/patient-vitals-section";
 import { api, type CareEventSummary } from "@/lib/api";
 import { calcAge, formatDateTime, timeAgo } from "@/lib/utils";
@@ -157,6 +158,9 @@ export default async function PatientDetailPage({
 
       {/* ═══════════════ Sinais Vitais (cards com sparkline) ═══════════════ */}
       <PatientVitalsSection patientId={id} />
+
+      {/* ═══════════════ Medicação — timeline + upload foto/manual ═══════════════ */}
+      <MedicationTimeline patientId={id} patientName={patient.full_name} />
 
       {/* ═══════════════ Eventos ativos (se houver) ═══════════════ */}
       {activeEvents.length > 0 && (
