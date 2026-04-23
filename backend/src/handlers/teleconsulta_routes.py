@@ -324,6 +324,9 @@ def sign_teleconsulta(tc_id: str):
     # Gera PIN do portal do paciente + envia WhatsApp
     portal_result = _create_patient_portal_and_notify(tc_id, tc, patient_obj, doctor_name)
 
+    # Popula medication_schedules a partir da prescrição (motor de lembretes)
+    schedules_result = _populate_medication_schedules(tc, tc_id, doctor_name)
+
     return jsonify({
         "status": "signed",
         "teleconsulta_id": tc_id,
@@ -331,7 +334,28 @@ def sign_teleconsulta(tc_id: str):
         "signature_method": "mock",
         "medmonitor_sync": sync_result,
         "patient_portal": portal_result,
+        "medication_schedules": schedules_result,
     })
+
+
+def _populate_medication_schedules(tc: dict, tc_id: str, doctor_name: str) -> dict:
+    """Cria schedules a partir da prescrição. Não-fatal."""
+    try:
+        from src.services.medication_schedule_service import get_medication_schedule_service
+        prescription = tc.get("prescription") or []
+        if not prescription:
+            return {"created": 0, "reason": "no_prescription"}
+        rows = get_medication_schedule_service().populate_from_prescription(
+            tenant_id=tc.get("tenant_id") or "connectaiacare_demo",
+            patient_id=str(tc.get("patient_id")),
+            prescription_items=prescription,
+            teleconsultation_id=tc_id,
+            doctor_name=doctor_name,
+        )
+        return {"created": len(rows), "schedule_ids": [str(r["id"]) for r in rows]}
+    except Exception as exc:
+        logger.warning("populate_medication_schedules_failed", error=str(exc))
+        return {"created": 0, "error": str(exc)}
 
 
 def _create_patient_portal_and_notify(
