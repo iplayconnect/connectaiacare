@@ -6,7 +6,13 @@ __pycache__/
 env/
 venv/
 .venv/
+.venv-test/
 ENV/
+
+# pytest
+.pytest_cache/
+.coverage
+htmlcov/
 
 *.egg-info/
 .eggs/

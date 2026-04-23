@@ -70,7 +70,7 @@ ELDER_ABUSE_PATTERNS = [
     r"\b(prende\s+em\s+casa|trancad[oa]|n[ãa]o\s+me\s+deixa\s+sair)\b",
     r"\b(me\s+humilha|me\s+insulta|me\s+grita|me\s+xinga)\b",
     r"\b(levaram\s+meu\s+dinheiro|me\s+roubaram|roubaram\s+(minha\s+)?aposentadoria)\b",
-    r"\b(n[ãa]o\s+me\s+d[ãa]\s+comida|n[ãa]o\s+me\s+deixam\s+comer|passo\s+fome)\b",
+    r"\b(n[ãa]o\s+me\s+(d[ãa]o?|d[ãa])\s+comida|n[ãa]o\s+me\s+deixam\s+comer|passo\s+fome)\b",
     r"\b(abandonad[oa]|esqueceram\s+de\s+mim)\b",
 ]
 

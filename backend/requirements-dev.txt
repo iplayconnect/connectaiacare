@@ -1,0 +1,15 @@
+# Dependências de desenvolvimento (não vão pro container de produção)
+# Instalar: pip install -r requirements-dev.txt
+#
+# Rodar testes:
+#   pytest                         # toda suite
+#   pytest -m "not slow"           # pula testes com threading/sleep
+#   pytest tests/test_humanizer_service.py -v
+#   pytest --cov=src.services      # cobertura
+
+-r requirements.txt
+
+pytest==8.3.3
+pytest-mock==3.14.0
+pytest-cov==5.0.0
+pytest-timeout==2.3.1
