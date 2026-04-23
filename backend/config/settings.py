@@ -33,15 +33,21 @@ class Settings:
     evolution_instance: str = os.getenv("EVOLUTION_INSTANCE", "v6")
     evolution_webhook_secret: str = os.getenv("EVOLUTION_WEBHOOK_SECRET", "")
 
-    # LLM provider: "anthropic" (default) | "gemini"
+    # LLM provider default (legado — usado pelo llm.py antigo).
+    # NOVO: llm_router.py usa config/llm_routing.yaml (ADR-025) e escolhe
+    # provider por tarefa. As keys abaixo são TODAS opcionais — o router
+    # salta pro fallback se a primary não estiver configurada.
     llm_provider: str = os.getenv("LLM_PROVIDER", "anthropic").lower()
     anthropic_api_key: str = os.getenv("ANTHROPIC_API_KEY", "")
+    openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
+    deepseek_api_key: str = os.getenv("DEEPSEEK_API_KEY", "")
     # Gemini aceita tanto GOOGLE_API_KEY quanto GEMINI_API_KEY (convenção da comunidade)
     google_api_key: str = (
         os.getenv("GOOGLE_API_KEY")
         or os.getenv("GEMINI_API_KEY")
         or ""
     )
+    gemini_api_key: str = os.getenv("GEMINI_API_KEY", "") or os.getenv("GOOGLE_API_KEY", "")
     deepgram_api_key: str = os.getenv("DEEPGRAM_API_KEY", "")
 
     sofia_voice_url: str = os.getenv("SOFIA_VOICE_API_URL", "")

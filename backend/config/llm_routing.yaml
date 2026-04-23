@@ -1,0 +1,235 @@
+# ═══════════════════════════════════════════════════════════════════
+# LLM Routing por Tarefa (ADR-025)
+#
+# Cada tarefa clínica ou de rotina escolhe seu próprio modelo baseado
+# em critérios de criticidade vs custo. Mudar de modelo = editar YAML
+# + restart API. Nenhum código muda.
+#
+# Formato: tasks.<task_name>.primary + fallbacks[] + params
+#
+# Priority order:
+#   1. primary (se falhar ou indisponível)
+#   2. fallbacks[] em ordem (tenta próximo até um funcionar)
+#
+# Providers suportados (via settings.llm_provider ou via LiteLLM proxy):
+#   - anthropic/*         Claude Sonnet 4, 3.5 Sonnet, 3.5 Haiku
+#   - openai/*            GPT-5.4 nano, 5.4 mini, 4o-mini
+#   - google/*            Gemini 2.5 Flash, 2.5 Flash-Lite, 3.1 preview
+#   - deepseek/*          Chat V3.2, Reasoner (APENAS tarefas ZERO-PHI)
+# ═══════════════════════════════════════════════════════════════════
+
+tasks:
+  # ─── Clínico crítico — alucinação = incidente clínico ───
+
+  soap_writer:
+    description: "Gera SOAP estruturado a partir de transcrição da teleconsulta."
+    primary: anthropic/claude-sonnet-4-20250514
+    fallbacks:
+      - anthropic/claude-3-5-haiku-20241022
+      - openai/gpt-5.4-mini
+    temperature: 0.15
+    max_tokens: 6144
+    response_format: json_object
+    criticality: high
+
+  prescription_validator:
+    description: "Valida interações, Beers, alergias, dose geriátrica."
+    primary: anthropic/claude-sonnet-4-20250514
+    fallbacks:
+      - openai/gpt-5.4-mini
+      - google/gemini-2.5-flash
+    temperature: 0.1
+    max_tokens: 4096
+    response_format: json_object
+    criticality: high
+
+  clinical_analysis:
+    description: "Analisa relato do cuidador, classifica routine/attention/urgent/critical."
+    primary: openai/gpt-5.4-mini
+    fallbacks:
+      - anthropic/claude-3-5-haiku-20241022
+      - google/gemini-2.5-flash
+    temperature: 0.1
+    max_tokens: 4096
+    response_format: json_object
+    criticality: high
+
+  # ─── Comunicação com paciente/família — tom importa ───
+
+  patient_summary:
+    description: "Reformula SOAP em linguagem simples e acolhedora pra família."
+    primary: anthropic/claude-3-5-haiku-20241022
+    fallbacks:
+      - openai/gpt-5.4-mini
+      - google/gemini-2.5-flash
+    temperature: 0.3
+    max_tokens: 5000
+    response_format: json_object
+    criticality: medium
+
+  weekly_report:
+    description: "Resumo semanal família (tom factual + acolhedor)."
+    primary: openai/gpt-5.4-mini
+    fallbacks:
+      - google/gemini-2.5-flash-lite
+      - anthropic/claude-3-5-haiku-20241022
+    temperature: 0.4
+    max_tokens: 6500
+    response_format: json_object
+    criticality: medium
+
+  # ─── Vision — OCR de receitas/caixas ───
+
+  prescription_ocr:
+    description: "Extrai medicamentos de foto de receita/caixa/bula."
+    primary: google/gemini-2.5-flash
+    fallbacks:
+      - anthropic/claude-sonnet-4-20250514  # só fallback pq vision dele é caro
+      - openai/gpt-5.4-mini
+    temperature: 0.1
+    max_tokens: 4096
+    response_format: json_object
+    supports_vision: true
+    criticality: high
+
+  # ─── Rotina e extração — ZERO-PHI ok usar DeepSeek ───
+
+  price_search_extraction:
+    description: "Extrai ofertas de HTML scrapeado de farmácia. Sem PHI."
+    primary: google/gemini-2.5-flash-lite
+    fallbacks:
+      - deepseek/deepseek-chat  # OK aqui, sem PHI
+      - openai/gpt-5.4-nano
+    temperature: 0.1
+    max_tokens: 2500
+    response_format: json_object
+    criticality: low
+
+  intent_classifier:
+    description: "Classifica intenção de texto curto do cuidador (taken/refused/etc)."
+    primary: openai/gpt-5.4-nano
+    fallbacks:
+      - google/gemini-2.5-flash-lite
+    temperature: 0.0
+    max_tokens: 256
+    response_format: json_object
+    criticality: low
+
+  followup_answer:
+    description: "Responde textualmente ao cuidador durante evento ativo."
+    primary: openai/gpt-5.4-mini
+    fallbacks:
+      - google/gemini-2.5-flash
+    temperature: 0.2
+    max_tokens: 1024
+    response_format: json_object
+    criticality: medium
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Configuração global
+# ═══════════════════════════════════════════════════════════════════
+
+global:
+  # Timeout por chamada (segundos)
+  default_timeout: 45
+
+  # Retry em caso de 429/500/503 antes de cair no fallback
+  retry_attempts: 2
+  retry_backoff_base: 1.5  # exponencial
+
+  # Logging de custo (desliga em dev pra não poluir)
+  track_costs: true
+
+  # Se nenhum modelo disponível, qual é o "modo degradado"?
+  # 'fallback_offline' = retorna resposta stub pra sistema não quebrar
+  # 'raise'            = propaga erro pro caller decidir
+  on_all_failed: raise
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Model catalog — metadata pra cost tracker e validação
+# ═══════════════════════════════════════════════════════════════════
+
+models:
+  # ── Anthropic ──
+  anthropic/claude-sonnet-4-20250514:
+    provider: anthropic
+    input_cost_per_1m: 3.00
+    output_cost_per_1m: 15.00
+    context_window: 200000
+    supports_vision: true
+    supports_json: true
+
+  anthropic/claude-3-5-haiku-20241022:
+    provider: anthropic
+    input_cost_per_1m: 0.80
+    output_cost_per_1m: 4.00
+    context_window: 200000
+    supports_vision: true
+    supports_json: true
+
+  # ── OpenAI ──
+  openai/gpt-5.4-nano:
+    provider: openai
+    input_cost_per_1m: 0.05
+    output_cost_per_1m: 0.20
+    context_window: 128000
+    supports_vision: false
+    supports_json: true
+
+  openai/gpt-5.4-mini:
+    provider: openai
+    input_cost_per_1m: 0.20
+    output_cost_per_1m: 0.80
+    context_window: 128000
+    supports_vision: true
+    supports_json: true
+
+  openai/gpt-4o-mini:
+    provider: openai
+    input_cost_per_1m: 0.15
+    output_cost_per_1m: 0.60
+    context_window: 128000
+    supports_vision: true
+    supports_json: true
+
+  # ── Google Gemini ──
+  google/gemini-2.5-flash:
+    provider: gemini
+    model_id: gemini-2.5-flash
+    input_cost_per_1m: 0.30
+    output_cost_per_1m: 2.50
+    context_window: 1000000
+    supports_vision: true
+    supports_json: true
+
+  google/gemini-2.5-flash-lite:
+    provider: gemini
+    model_id: gemini-2.5-flash-lite
+    input_cost_per_1m: 0.10
+    output_cost_per_1m: 0.40
+    context_window: 1000000
+    supports_vision: true
+    supports_json: true
+
+  google/gemini-3.1-flash-lite:
+    provider: gemini
+    model_id: gemini-3.1-flash-lite-preview
+    input_cost_per_1m: 0.25
+    output_cost_per_1m: 1.50
+    context_window: 1000000
+    supports_vision: true
+    supports_json: true
+    is_preview: true
+
+  # ── DeepSeek (apenas tasks ZERO-PHI) ──
+  deepseek/deepseek-chat:
+    provider: deepseek
+    input_cost_per_1m: 0.28
+    output_cost_per_1m: 0.42
+    context_window: 128000
+    supports_vision: false
+    supports_json: true
+    data_sovereignty: "China"
+    allowed_for_phi: false

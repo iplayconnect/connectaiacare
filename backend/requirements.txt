@@ -48,3 +48,6 @@ livekit-api==0.8.2
 # PDF da receita médica + QR de verificação (CFM 2.314/2022).
 reportlab==4.2.5
 qrcode==7.4.2
+
+# LLM Router — config YAML por tarefa (ADR-025)
+PyYAML==6.0.2
