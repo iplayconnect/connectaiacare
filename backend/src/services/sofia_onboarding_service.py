@@ -31,8 +31,19 @@ import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from src.services.conversation_history_service import get_conversation_history
+from src.services.correction_handler import (
+    CorrectionIntent,
+    detect as detect_correction,
+    friendly_response as correction_response,
+)
+from src.services.humanizer_service import Chunk, get_humanizer
 from src.services.llm_router import get_llm_router
 from src.services.postgres import get_postgres
+from src.services.safety_moderation_service import (
+    SafetyResult,
+    get_safety_moderation_service,
+)
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -126,6 +137,9 @@ class SofiaOnboardingService:
     def __init__(self):
         self.db = get_postgres()
         self.router = get_llm_router()
+        self.safety = get_safety_moderation_service()
+        self.humanizer = get_humanizer()
+        self.history = get_conversation_history()
 
     # ═══════════════════════════════════════════════════════════════
     # Entry point — chamado pelo pipeline ao receber mensagem
@@ -136,40 +150,184 @@ class SofiaOnboardingService:
     ) -> dict[str, Any]:
         """Processa mensagem na sessão de onboarding.
 
+        Pipeline (ADR-027 Onda A):
+            1. Safety input moderation — bloqueia emergências/jailbreak
+            2. Correction handler — detecta "espera, não", "cancelar", "humano"
+            3. Session state dispatch — lógica de negócio por estado
+            4. Safety output moderation — checa resposta antes de enviar
+            5. Humanize — variações + chunks + typing delays
+            6. Persist — grava inbound + outbound no histórico
+
         Retorna:
-            {"reply": "texto pra enviar", "state": "current_state", "buttons": [...]}
+            {
+                "reply": "texto concatenado (compat)",
+                "chunks": [Chunk, ...] (novo, pra envio com delays),
+                "state": "current_state",
+                "safety": SafetyResult | None
+            }
         """
         session = self._get_or_create_session(phone)
         state = session["state"]
+        session_id = str(session["id"])
 
-        # Escape valves (qualquer estado)
-        text_lower = (text or "").strip().lower()
-        if any(w in text_lower for w in ("humano", "atendente", "pessoa", "falar com alguem", "cancelar onboarding")):
-            return self._handle_escape_to_human(session)
+        # 1. Persiste mensagem inbound no histórico (base pra janela deslizante)
+        inbound_msg_id = self.history.record_inbound(
+            phone=phone,
+            content=text or "",
+            channel="whatsapp",
+            session_context="onboarding",
+            session_id=session_id,
+            message_format=media_type,
+            metadata={"state_on_receive": state},
+        )
 
-        if text_lower in ("voltar", "corrigir", "corrigi", "anterior"):
-            return self._handle_go_back(session)
+        # 2. Safety Layer — INPUT moderation
+        safety = self.safety.moderate_input(
+            text=text or "",
+            phone=phone,
+            session_id=session_id,
+        )
+        if not safety.is_safe and safety.recommended_action in (
+            "escalate_human_immediate", "escalate_human", "block",
+        ):
+            # Marca mensagem como moderada
+            if inbound_msg_id:
+                self.history.mark_safety(
+                    inbound_msg_id, safety_score={"triggers": safety.triggers}
+                )
+            reply = safety.bot_response_override or (
+                "Preciso pausar essa conversa por segurança. "
+                "Se for urgência, ligue 190 ou 192."
+            )
+            return self._build_humanized_result(
+                phone=phone, session_id=session_id, state=state,
+                reply=reply, safety=safety, skip_variator=True,
+            )
 
-        # Incrementa contador de mensagens
+        # 3. Correction handler — intenção de correção/cancelamento
+        correction = detect_correction(text or "")
+        if correction is not None:
+            if correction == CorrectionIntent.HUMAN:
+                return self._build_humanized_result(
+                    phone=phone, session_id=session_id, state=state,
+                    reply=correction_response(correction), safety=safety,
+                )
+            if correction == CorrectionIntent.CANCEL:
+                self._advance_state(session["id"], "abandoned")
+                return self._build_humanized_result(
+                    phone=phone, session_id=session_id, state="abandoned",
+                    reply=correction_response(correction), safety=safety,
+                )
+            if correction == CorrectionIntent.GO_BACK:
+                result = self._handle_go_back(session)
+                return self._build_humanized_result(
+                    phone=phone, session_id=session_id,
+                    state=result.get("state", state),
+                    reply=result.get("reply", ""), safety=safety,
+                )
+            if correction == CorrectionIntent.RETRY_LAST:
+                result = self._handle_go_back(session)
+                reply = (
+                    correction_response(correction) + "\n\n"
+                    + (result.get("reply") or "Manda de novo do jeito certo.")
+                )
+                return self._build_humanized_result(
+                    phone=phone, session_id=session_id,
+                    state=result.get("state", state),
+                    reply=reply, safety=safety,
+                )
+
+        # 4. Incrementa contador de mensagens
         self._increment_message_count(session["id"])
 
-        # Dispatch por estado
+        # 5. Dispatch por estado (lógica de negócio)
         handler = getattr(self, f"_handle_{state}", None)
         if not handler:
             logger.warning("onboarding_state_without_handler", state=state)
-            return {
-                "reply": "Desculpa, algo deu errado. Vamos recomeçar? Me manda 'oi'.",
-                "state": state,
-            }
+            return self._build_humanized_result(
+                phone=phone, session_id=session_id, state=state,
+                reply="Desculpa, algo deu errado. Vamos recomeçar? Me manda 'oi'.",
+                safety=safety,
+            )
 
         try:
-            return handler(session, text, media_type)
+            handler_result = handler(session, text, media_type)
         except Exception as exc:
             logger.error("onboarding_handler_error", state=state, error=str(exc))
-            return {
-                "reply": "Tive um probleminha aqui, pode repetir em outras palavras?",
-                "state": state,
-            }
+            return self._build_humanized_result(
+                phone=phone, session_id=session_id, state=state,
+                reply="Tive um probleminha aqui, pode repetir em outras palavras?",
+                safety=safety,
+            )
+
+        reply = handler_result.get("reply") or ""
+        new_state = handler_result.get("state", state)
+
+        return self._build_humanized_result(
+            phone=phone, session_id=session_id, state=new_state,
+            reply=reply, safety=safety,
+            extra=handler_result,
+        )
+
+    def _build_humanized_result(
+        self,
+        *,
+        phone: str,
+        session_id: str,
+        state: str,
+        reply: str,
+        safety: SafetyResult | None,
+        skip_variator: bool = False,
+        extra: dict | None = None,
+    ) -> dict[str, Any]:
+        """Aplica output moderation + humanizer + persiste outbound."""
+        # Safety OUTPUT moderation
+        out_safety = self.safety.moderate_output(reply)
+        if not out_safety.is_safe and out_safety.bot_response_override:
+            reply = out_safety.bot_response_override
+
+        # Humanize (chunks + typing delays + variator)
+        chunks: list[Chunk]
+        if skip_variator:
+            # Em emergências / overrides, não varia — texto é canônico
+            chunks = [Chunk(
+                text=reply,
+                typing_delay_seconds=1.5,
+                is_first=True,
+                is_last=True,
+            )] if reply else []
+        else:
+            chunks = self.humanizer.humanize(reply)
+
+        # Persiste outbound no histórico
+        concatenated = "\n\n".join(c.text for c in chunks) if chunks else reply
+        if concatenated:
+            self.history.record_outbound(
+                phone=phone,
+                content=concatenated,
+                channel="whatsapp",
+                session_context="onboarding",
+                session_id=session_id,
+                processing_agent="sofia_onboarding",
+                metadata={
+                    "state": state,
+                    "chunks_count": len(chunks),
+                    "safety_triggers": safety.triggers if safety else [],
+                },
+            )
+
+        result = {
+            "reply": concatenated,
+            "chunks": chunks,
+            "state": state,
+            "safety": safety.triggers if safety else [],
+        }
+        if extra:
+            # preserva chaves extras do handler (ex: intent, buttons)
+            for k, v in extra.items():
+                if k not in result:
+                    result[k] = v
+        return result
 
     # ═══════════════════════════════════════════════════════════════
     # Session management

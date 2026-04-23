@@ -106,6 +106,23 @@ class EldercarePipeline:
         event_type = event.get("event") or event.get("type")
         data = event.get("data", event)
 
+        # presence.update → usuário digitando/gravando áudio
+        # Estende debounce do message buffer se houver um ativo (ADR-027 Onda A)
+        if event_type in {"presence.update", "PRESENCE_UPDATE", "presenceUpdate"}:
+            try:
+                presences = data.get("presences") or {}
+                # presences é dict com {jid: {lastKnownPresence: 'composing' | 'recording' | ...}}
+                for jid, pres in (presences.items() if isinstance(presences, dict) else []):
+                    status = (pres or {}).get("lastKnownPresence") or ""
+                    if status in ("composing", "recording"):
+                        phone = (jid or "").split("@")[0] if "@" in jid else jid
+                        if phone:
+                            from src.services.message_buffer_service import get_message_buffer
+                            get_message_buffer().notify_typing(phone)
+            except Exception as exc:
+                logger.debug("presence_update_handling_failed", error=str(exc))
+            return {"status": "ok", "reason": "presence_updated"}
+
         if event_type not in {"messages.upsert", "message.upsert", "MESSAGES_UPSERT"}:
             logger.debug("event_ignored", event_type=event_type)
             return {"status": "ignored", "reason": "event_type_not_handled"}
@@ -863,8 +880,13 @@ class EldercarePipeline:
         from src.services.sofia_onboarding_service import get_sofia_onboarding_service
         svc = get_sofia_onboarding_service()
         result = svc.handle_message(phone, text)
+        chunks = result.get("chunks") or []
         reply = result.get("reply") or ""
-        if reply:
+
+        # Envio humanizado: chunks com typing delay + presença "composing"
+        if chunks:
+            self._send_humanized_chunks(phone, chunks)
+        elif reply:
             try:
                 self.evo.send_text(phone, reply)
             except Exception as exc:
@@ -873,7 +895,25 @@ class EldercarePipeline:
             "status": "ok",
             "handler": "onboarding",
             "state": result.get("state"),
+            "safety": result.get("safety", []),
         }
+
+    def _send_humanized_chunks(self, phone: str, chunks: list) -> None:
+        """Envia cada chunk com presence='composing' + sleep pelo typing_delay.
+
+        Se falhar em um chunk, segue os próximos (best-effort delivery).
+        """
+        import time as _time
+        for i, chunk in enumerate(chunks):
+            try:
+                self.evo.set_presence(phone, "composing")
+                _time.sleep(max(0.3, float(chunk.typing_delay_seconds)))
+                self.evo.send_text(phone, chunk.text)
+            except Exception as exc:
+                logger.warning(
+                    "onboarding_chunk_send_failed",
+                    phone=phone, chunk_index=i, error=str(exc),
+                )
 
     def _try_handle_medication_response(
         self, phone: str, text_lower: str,
