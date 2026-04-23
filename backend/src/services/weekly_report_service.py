@@ -286,14 +286,15 @@ class WeeklyReportService:
             (patient_id, start, end),
         )
 
-        # Vitais agregados
+        # Vitais agregados — schema usa vital_type ('blood_pressure', 'heart_rate', ...)
+        # e pra PA usa value_numeric=sistólica + value_secondary=diastólica.
         vitals = self.db.fetch_one(
             """
             SELECT
                 COUNT(*) AS readings,
-                AVG(value_numeric) FILTER (WHERE code = 'bp_systolic') AS avg_sys,
-                AVG(value_numeric) FILTER (WHERE code = 'bp_diastolic') AS avg_dia,
-                AVG(value_numeric) FILTER (WHERE code = 'heart_rate') AS avg_hr
+                AVG(value_numeric)   FILTER (WHERE vital_type = 'blood_pressure') AS avg_sys,
+                AVG(value_secondary) FILTER (WHERE vital_type = 'blood_pressure') AS avg_dia,
+                AVG(value_numeric)   FILTER (WHERE vital_type = 'heart_rate')     AS avg_hr
             FROM aia_health_vital_signs
             WHERE patient_id = %s
               AND measured_at >= %s AND measured_at < %s
