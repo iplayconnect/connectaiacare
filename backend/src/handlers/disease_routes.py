@@ -50,15 +50,15 @@ def search_diseases():
                 CASE
                     WHEN UPPER(code) = %(q_upper)s THEN 100
                     WHEN UPPER(code) LIKE %(q_upper_prefix)s THEN 80
-                    WHEN ts_rank(search_vector, plainto_tsquery('portuguese', %(q)s)) > 0 THEN 50 + (ts_rank(search_vector, plainto_tsquery('portuguese', %(q)s)) * 20)
-                    WHEN similarity(description_pt, %(q)s) > 0.25 THEN 20 + (similarity(description_pt, %(q)s) * 20)
+                    WHEN ts_rank(search_vector, plainto_tsquery('portuguese', unaccent(%(q)s))) > 0 THEN 50 + (ts_rank(search_vector, plainto_tsquery('portuguese', unaccent(%(q)s))) * 20)
+                    WHEN similarity(unaccent(description_pt), unaccent(%(q)s)) > 0.25 THEN 20 + (similarity(unaccent(description_pt), unaccent(%(q)s)) * 20)
                     ELSE 0
                 END AS score
             FROM aia_health_disease_catalog
             WHERE
                 UPPER(code) LIKE %(q_upper_prefix)s
-                OR search_vector @@ plainto_tsquery('portuguese', %(q)s)
-                OR similarity(description_pt, %(q)s) > 0.25
+                OR search_vector @@ plainto_tsquery('portuguese', unaccent(%(q)s))
+                OR similarity(unaccent(description_pt), unaccent(%(q)s)) > 0.25
         )
         SELECT id, code, code_family, description_pt, synonyms, is_geriatric_common, score
         FROM scored

@@ -12,6 +12,8 @@
 
 -- pg_trgm: precisa vir ANTES do CREATE TABLE pra gin_trgm_ops funcionar.
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
+-- unaccent: normaliza acentos na busca ("pressao" bate com "pressão").
+CREATE EXTENSION IF NOT EXISTS unaccent;
 
 CREATE TABLE IF NOT EXISTS aia_health_disease_catalog (
     id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -50,8 +52,8 @@ CREATE OR REPLACE FUNCTION aia_health_disease_update_search_vector()
 RETURNS trigger AS $$
 BEGIN
     NEW.search_vector := to_tsvector('portuguese',
-        coalesce(NEW.description_pt, '') || ' ' ||
-        coalesce(array_to_string(NEW.synonyms, ' '), '') || ' ' ||
+        unaccent(coalesce(NEW.description_pt, '')) || ' ' ||
+        unaccent(coalesce(array_to_string(NEW.synonyms, ' '), '')) || ' ' ||
         coalesce(NEW.code, '')
     );
     NEW.updated_at := now();
