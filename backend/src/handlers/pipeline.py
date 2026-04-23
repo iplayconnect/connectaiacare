@@ -368,6 +368,12 @@ class EldercarePipeline:
         if legacy and legacy["state"] == "awaiting_patient_confirmation":
             return self._handle_confirmation_response(phone, text_lower, legacy["context"])
 
+        # Onboarding B2C — phone em sessão de onboarding ativa?
+        # (ADR-026: Sofia conduz cadastro via WhatsApp)
+        onboarding_result = self._try_handle_onboarding(phone, text)
+        if onboarding_result:
+            return onboarding_result
+
         # Depois: evento ativo?
         active_events = self.events.list_active_by_caregiver(tenant, phone)
         if not active_events:
@@ -803,6 +809,71 @@ class EldercarePipeline:
         "não vou", "nao vou", "não tomarei", "nao tomarei", "recuso",
         "não quero", "nao quero", "pular essa", "pulo essa", "❌",
     )
+
+    # ══════════════════════════════════════════════════════════════════
+    # Onboarding B2C (Sofia Cuida) — ADR-026
+    # ══════════════════════════════════════════════════════════════════
+
+    def _try_handle_onboarding(
+        self, phone: str, text: str,
+    ) -> dict[str, Any] | None:
+        """Se existe sessão de onboarding em andamento, OU se phone novo
+        envia saudação inicial ('oi', 'olá', 'quero saber'), entra no fluxo Sofia.
+
+        Retorna None se não for onboarding (fluxo normal continua).
+        """
+        # Sessão existe e está ativa (qualquer state diferente de 'active'/'abandoned')?
+        session_row = self.db.fetch_one(
+            """
+            SELECT id, state
+            FROM aia_health_onboarding_sessions
+            WHERE phone = %s AND tenant_id = 'sofiacuida_b2c'
+            """,
+            (phone,),
+        )
+
+        text_lower = (text or "").strip().lower()
+        is_saudacao = text_lower in (
+            "oi", "ola", "olá", "bom dia", "boa tarde", "boa noite",
+            "quero assinar", "quero saber", "quero contratar",
+            "sofia cuida", "sofia", "info", "informação",
+        )
+
+        # Casos que entram no onboarding:
+        # 1. Já tem sessão e está em estado intermediário
+        # 2. Sem sessão + texto é saudação + phone não está em care_event ativo
+        if session_row and session_row["state"] not in ("active", "abandoned", "rejected"):
+            pass  # continua
+        elif not session_row and is_saudacao:
+            # Phone não está em care_event ativo? (Se está, fluxo legado prevalece)
+            existing_caregiver = self.db.fetch_one(
+                """
+                SELECT id FROM aia_health_care_events
+                WHERE caregiver_phone = %s AND status NOT IN ('resolved', 'expired')
+                LIMIT 1
+                """,
+                (phone,),
+            )
+            if existing_caregiver:
+                return None  # cuidador com evento ativo, usa fluxo legado
+        else:
+            return None
+
+        # Delega pra Sofia Onboarding Service
+        from src.services.sofia_onboarding_service import get_sofia_onboarding_service
+        svc = get_sofia_onboarding_service()
+        result = svc.handle_message(phone, text)
+        reply = result.get("reply") or ""
+        if reply:
+            try:
+                self.evo.send_text(phone, reply)
+            except Exception as exc:
+                logger.warning("onboarding_send_text_failed", phone=phone, error=str(exc))
+        return {
+            "status": "ok",
+            "handler": "onboarding",
+            "state": result.get("state"),
+        }
 
     def _try_handle_medication_response(
         self, phone: str, text_lower: str,
