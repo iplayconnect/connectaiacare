@@ -35,20 +35,36 @@ CREATE TABLE IF NOT EXISTS aia_health_disease_catalog (
     -- Flags úteis em geriatria
     is_geriatric_common BOOLEAN DEFAULT FALSE,  -- Pré-flag manual pra acelerar UX
 
-    -- Full-text search (trgm + to_tsvector)
-    search_vector tsvector GENERATED ALWAYS AS (
-        to_tsvector('portuguese',
-            coalesce(description_pt, '') || ' ' ||
-            coalesce(array_to_string(synonyms, ' '), '') || ' ' ||
-            coalesce(code, '')
-        )
-    ) STORED,
+    -- Full-text search vector (atualizado via trigger — to_tsvector não é
+    -- immutable então não podemos usar GENERATED ALWAYS)
+    search_vector tsvector,
 
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
 
     UNIQUE(system, code)
 );
+
+-- Função + trigger que mantém search_vector sincronizado
+CREATE OR REPLACE FUNCTION aia_health_disease_update_search_vector()
+RETURNS trigger AS $$
+BEGIN
+    NEW.search_vector := to_tsvector('portuguese',
+        coalesce(NEW.description_pt, '') || ' ' ||
+        coalesce(array_to_string(NEW.synonyms, ' '), '') || ' ' ||
+        coalesce(NEW.code, '')
+    );
+    NEW.updated_at := now();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_disease_search_vector ON aia_health_disease_catalog;
+CREATE TRIGGER trg_disease_search_vector
+    BEFORE INSERT OR UPDATE OF description_pt, synonyms, code
+    ON aia_health_disease_catalog
+    FOR EACH ROW
+    EXECUTE FUNCTION aia_health_disease_update_search_vector();
 
 -- Indexes pra busca rápida
 CREATE INDEX IF NOT EXISTS idx_disease_code ON aia_health_disease_catalog(code);
