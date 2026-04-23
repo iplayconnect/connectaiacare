@@ -306,6 +306,26 @@ class WeeklyReportService:
             (patient_id, start, end),
         )
 
+        # Adesão à medicação no período
+        med_adherence = self.db.fetch_one(
+            """
+            SELECT
+                COUNT(*) FILTER (WHERE status = 'taken') AS taken,
+                COUNT(*) FILTER (WHERE status = 'missed') AS missed,
+                COUNT(*) FILTER (WHERE status IN ('refused', 'skipped')) AS refused_skipped,
+                COUNT(*) AS total_completed
+            FROM aia_health_medication_events
+            WHERE patient_id = %s
+              AND scheduled_at >= %s AND scheduled_at < %s
+              AND status NOT IN ('scheduled', 'reminder_sent', 'paused', 'cancelled')
+            """,
+            (patient_id, start, end),
+        )
+
+        med_total = (med_adherence or {}).get("total_completed") or 0
+        med_taken = (med_adherence or {}).get("taken") or 0
+        med_pct = round((med_taken / med_total * 100), 1) if med_total > 0 else None
+
         return {
             "checkins_total": (fires or {}).get("total") or 0,
             "checkins_responded": (fires or {}).get("responded") or 0,
@@ -319,6 +339,10 @@ class WeeklyReportService:
                 (vitals or {}).get("avg_dia"),
             ),
             "avg_hr": self._format_numeric((vitals or {}).get("avg_hr")),
+            "medication_adherence_pct": med_pct,
+            "medication_doses_taken": med_taken,
+            "medication_doses_total": med_total,
+            "medication_doses_missed": (med_adherence or {}).get("missed") or 0,
         }
 
     def _list_events(
@@ -452,6 +476,17 @@ class WeeklyReportService:
             if avg_hr:
                 v_parts.append(f"FC média {avg_hr}")
             lines.append(f"📊 Sinais vitais · {' · '.join(v_parts)}")
+
+        # Adesão à medicação
+        med_pct = metrics.get("medication_adherence_pct")
+        med_taken = metrics.get("medication_doses_taken") or 0
+        med_total_doses = metrics.get("medication_doses_total") or 0
+        if med_total_doses > 0:
+            emoji = "💊" if med_pct is None or med_pct >= 85 else "⚠️"
+            lines.append(
+                f"{emoji} Medicação · {med_taken}/{med_total_doses} doses"
+                + (f" ({med_pct}%)" if med_pct is not None else "")
+            )
 
         lines.append("")
         lines.append("Para detalhes completos acesse o portal da família.")

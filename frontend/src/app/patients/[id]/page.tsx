@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { Phone, UserRound } from "lucide-react";
 
 import { ClassificationBadge } from "@/components/classification-badge";
+import { MedicationAdherenceCard } from "@/components/medication/medication-adherence-card";
 import { MedicationTimeline } from "@/components/medication/medication-timeline";
 import { PatientVitalsSection } from "@/components/patient-vitals-section";
 import { api, type CareEventSummary } from "@/lib/api";
@@ -159,8 +160,15 @@ export default async function PatientDetailPage({
       {/* ═══════════════ Sinais Vitais (cards com sparkline) ═══════════════ */}
       <PatientVitalsSection patientId={id} />
 
-      {/* ═══════════════ Medicação — timeline + upload foto/manual ═══════════════ */}
-      <MedicationTimeline patientId={id} patientName={patient.full_name} />
+      {/* ═══════════════ Medicação — timeline + adesão 30d ═══════════════ */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+        <div className="lg:col-span-2">
+          <MedicationTimeline patientId={id} patientName={patient.full_name} />
+        </div>
+        <div>
+          <MedicationAdherenceCard patientId={id} days={30} />
+        </div>
+      </div>
 
       {/* ═══════════════ Eventos ativos (se houver) ═══════════════ */}
       {activeEvents.length > 0 && (
