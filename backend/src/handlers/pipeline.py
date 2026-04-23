@@ -899,21 +899,32 @@ class EldercarePipeline:
         }
 
     def _send_humanized_chunks(self, phone: str, chunks: list) -> None:
-        """Envia cada chunk com presence='composing' + sleep pelo typing_delay.
+        """Envia cada chunk em THREAD BACKGROUND (não bloqueia webhook).
+
+        Motivo crítico: typing_delay somado pode passar de 10s (ex: 3 chunks
+        de 4s cada = 12s). Evolution API tem timeout de webhook ~10s e faz
+        RETRY se não responder, causando msgs duplicadas. Ao rodar em thread,
+        o webhook retorna 200 em <100ms e os chunks saem no tempo certo.
 
         Se falhar em um chunk, segue os próximos (best-effort delivery).
         """
-        import time as _time
-        for i, chunk in enumerate(chunks):
-            try:
-                self.evo.set_presence(phone, "composing")
-                _time.sleep(max(0.3, float(chunk.typing_delay_seconds)))
-                self.evo.send_text(phone, chunk.text)
-            except Exception as exc:
-                logger.warning(
-                    "onboarding_chunk_send_failed",
-                    phone=phone, chunk_index=i, error=str(exc),
-                )
+        import threading
+
+        def _worker() -> None:
+            import time as _time
+            for i, chunk in enumerate(chunks):
+                try:
+                    self.evo.set_presence(phone, "composing")
+                    _time.sleep(max(0.3, float(chunk.typing_delay_seconds)))
+                    self.evo.send_text(phone, chunk.text)
+                except Exception as exc:
+                    logger.warning(
+                        "onboarding_chunk_send_failed",
+                        phone=phone, chunk_index=i, error=str(exc),
+                    )
+
+        t = threading.Thread(target=_worker, daemon=True, name=f"chunks-{phone[-4:]}")
+        t.start()
 
     def _try_handle_medication_response(
         self, phone: str, text_lower: str,

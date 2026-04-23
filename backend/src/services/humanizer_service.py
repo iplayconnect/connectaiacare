@@ -326,6 +326,9 @@ class HumanizerService:
         self.chunker = MessageChunker()
         self.emoji = EmojiManager()
 
+    # Primeira mensagem sempre rápida — feedback visual imediato ao user
+    FIRST_CHUNK_MAX_DELAY_S = 2.0
+
     def humanize(self, text: str) -> list[Chunk]:
         """Aplica toda pipeline e retorna chunks prontos pra envio."""
         if not text:
@@ -341,7 +344,11 @@ class HumanizerService:
         chunks: list[Chunk] = []
         for i, p in enumerate(parts):
             delay = self.behavior.calculate_typing_delay(p)
-            if i > 0:
+            if i == 0:
+                # Primeiro chunk: delay capped pra o user ter feedback rápido
+                # (se Sofia fica 5s "digitando" sem mandar nada, parece travada)
+                delay = min(delay, self.FIRST_CHUNK_MAX_DELAY_S)
+            else:
                 # pausa entre chunks (inclui no delay do próximo)
                 delay += self.behavior.calculate_pause_between_chunks()
             chunks.append(Chunk(
