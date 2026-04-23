@@ -17,7 +17,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from src.services.llm import MODEL_DEEP, get_llm
+from src.services.llm_router import get_llm_router
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -87,7 +87,7 @@ Sua missão: revisar 1 medicamento proposto e identificar RISCOS de:
 
 class PrescriptionValidator:
     def __init__(self):
-        self.llm = get_llm()
+        self.router = get_llm_router()
 
     async def validate(
         self,
@@ -121,14 +121,11 @@ class PrescriptionValidator:
         )
 
         try:
-            result = self.llm.complete_json(
+            # ADR-025: task='prescription_validator' → Claude Sonnet 4
+            result = self.router.complete_json(
+                task="prescription_validator",
                 system="Você é um farmacologista clínico geriátrico rigoroso e conservador.",
                 user=user_payload,
-                model=MODEL_DEEP,
-                # 2048 truncava JSON quando havia múltiplos issues com descrições
-                # médicas longas (detectado em prod com Domperidona + Parkinson).
-                max_tokens=4096,
-                temperature=0.1,
             )
         except Exception as exc:
             logger.error("prescription_validator_failed", error=str(exc))

@@ -16,7 +16,7 @@ from typing import Any
 from src.prompts.clinical_analysis import SYSTEM_PROMPT as CLINICAL_SYSTEM
 from src.prompts.followup_answer import SYSTEM_PROMPT as FOLLOWUP_SYSTEM
 from src.prompts.patient_extraction import SYSTEM_PROMPT as EXTRACTION_SYSTEM
-from src.services.llm import MODEL_DEEP, MODEL_FAST, get_llm
+from src.services.llm_router import get_llm_router
 from src.services.report_service import get_report_service
 from src.services.vital_signs_service import get_vital_signs_service
 from src.utils.logger import get_logger
@@ -56,19 +56,18 @@ EMERGENCY_KEYWORDS = {
 
 class AnalysisService:
     def __init__(self):
-        self.llm = get_llm()
+        self.router = get_llm_router()
         self.reports = get_report_service()
 
     def extract_entities(self, transcription: str) -> dict[str, Any]:
         if not transcription.strip():
             return {"patient_name_mentioned": None, "confidence": 0.0}
         try:
-            return self.llm.complete_json(
+            # ADR-025: task='intent_classifier' → GPT-5.4 nano (barato, rápido)
+            return self.router.complete_json(
+                task="intent_classifier",
                 system=EXTRACTION_SYSTEM,
                 user=f"Transcrição do áudio do cuidador:\n\n{transcription}",
-                model=MODEL_FAST,
-                max_tokens=1024,
-                temperature=0.0,
             )
         except Exception as exc:
             logger.error("entity_extraction_failed", error=str(exc))
@@ -151,12 +150,11 @@ class AnalysisService:
         )
 
         try:
-            result = self.llm.complete_json(
+            # ADR-025: task='clinical_analysis' → GPT-5.4 mini (alto volume, bom custo)
+            result = self.router.complete_json(
+                task="clinical_analysis",
                 system=CLINICAL_SYSTEM,
                 user=user_payload,
-                model=MODEL_DEEP,
-                max_tokens=4096,  # aumentado para suportar thinking tokens de modelos reasoning
-                temperature=0.1,
             )
         except Exception as exc:
             logger.error("analysis_failed", error=str(exc))
@@ -299,12 +297,11 @@ class AnalysisService:
         )
 
         try:
-            result = self.llm.complete_json(
+            # ADR-025: task='followup_answer' → GPT-5.4 mini
+            result = self.router.complete_json(
+                task="followup_answer",
                 system=FOLLOWUP_SYSTEM,
                 user=user_payload,
-                model=MODEL_FAST,
-                max_tokens=1024,
-                temperature=0.2,
             )
         except Exception as exc:
             logger.error("followup_answer_failed", error=str(exc))

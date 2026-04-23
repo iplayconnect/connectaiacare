@@ -24,7 +24,7 @@ import json
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from src.services.llm import MODEL_FAST, get_llm
+from src.services.llm_router import get_llm_router
 from src.services.postgres import get_postgres
 from src.utils.logger import get_logger
 
@@ -93,7 +93,7 @@ IMPORTANTE: se métricas estão vazias ou pobres, reflita honestamente ("semana 
 class WeeklyReportService:
     def __init__(self):
         self.db = get_postgres()
-        self.llm = get_llm()
+        self.router = get_llm_router()
 
     # ══════════════════════════════════════════════════════════════════
     # Entry point
@@ -147,9 +147,10 @@ class WeeklyReportService:
         )
         next_sched = self._load_next_scheduled(patient_id)
 
-        # Geração LLM
+        # Geração LLM — ADR-025: task='weekly_report' → GPT-5.4 mini
         try:
-            result = self.llm.complete_json(
+            result = self.router.complete_json(
+                task="weekly_report",
                 system=SYSTEM,
                 user=USER_TEMPLATE.format(
                     patient_json=json.dumps(patient, ensure_ascii=False, default=str),
@@ -163,11 +164,6 @@ class WeeklyReportService:
                     prior_metrics_json=json.dumps(prior, ensure_ascii=False, default=str),
                     next_json=json.dumps(next_sched, ensure_ascii=False, default=str),
                 ),
-                model=MODEL_FAST,
-                # 3500 truncava JSON quando o paciente tinha eventos ricos +
-                # métricas completas. 6500 cabe HTML + WhatsApp + highlights.
-                max_tokens=6500,
-                temperature=0.4,
             )
         except Exception as exc:
             logger.error("weekly_report_llm_failed", error=str(exc))

@@ -14,8 +14,8 @@ Uso:
         duration_min=18,
     )
 
-Modelo default: Claude Opus 4 (decisão clínica apoia médico em produção).
-Pro MVP demo: usa LLMRouter com MODEL_DEEP.
+Modelo: Claude Sonnet 4 (ADR-025 — task='soap_writer', criticality: high).
+Fallback: Claude 3.5 Haiku → GPT-5.4 mini → Gemini 2.5 Flash.
 """
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ import json
 from typing import Any
 
 from src.prompts.teleconsulta.soap_generation import SYSTEM_PROMPT
-from src.services.llm import MODEL_DEEP, get_llm
+from src.services.llm_router import get_llm_router
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -31,7 +31,7 @@ logger = get_logger(__name__)
 
 class SoapWriter:
     def __init__(self):
-        self.llm = get_llm()
+        self.router = get_llm_router()
 
     async def write(
         self,
@@ -80,12 +80,11 @@ class SoapWriter:
         )
 
         try:
-            result = self.llm.complete_json(
+            # Router escolhe primary (Claude Sonnet 4) → fallbacks per ADR-025
+            result = self.router.complete_json(
+                task="soap_writer",
                 system=SYSTEM_PROMPT,
                 user=payload,
-                model=MODEL_DEEP,
-                max_tokens=6144,  # SOAP pode ser longo, vitaminado
-                temperature=0.15,  # baixo, mas não zero (precisa fluência na HDA)
             )
         except Exception as exc:
             logger.error(

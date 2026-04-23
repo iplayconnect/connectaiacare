@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from src.services.llm import MODEL_FAST, get_llm
+from src.services.llm_router import get_llm_router
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -80,7 +80,7 @@ IMPORTANTE: se o SOAP tem seções vazias tipo "não foi abordado nesta consulta
 
 class PatientSummaryService:
     def __init__(self):
-        self.llm = get_llm()
+        self.router = get_llm_router()
 
     def generate(
         self,
@@ -97,7 +97,9 @@ class PatientSummaryService:
         }
 
         try:
-            result = self.llm.complete_json(
+            # ADR-025: task='patient_summary' → Claude 3.5 Haiku (tom acolhedor)
+            result = self.router.complete_json(
+                task="patient_summary",
                 system=SYSTEM,
                 user=USER_TEMPLATE.format(
                     soap_json=json.dumps(soap or {}, ensure_ascii=False, indent=2)[:6000],
@@ -106,11 +108,6 @@ class PatientSummaryService:
                     doctor_name=doctor_name,
                     doctor_specialty=doctor_specialty,
                 ),
-                model=MODEL_FAST,
-                # 2500 truncava resumos ricos (múltiplos medicamentos + warning_signs).
-                # 5000 cabe facilmente um SOAP extenso reformulado em linguagem simples.
-                max_tokens=5000,
-                temperature=0.3,
             )
             if not isinstance(result, dict):
                 return self._fallback(patient, doctor_name)

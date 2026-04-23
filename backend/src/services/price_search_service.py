@@ -22,7 +22,7 @@ from urllib.parse import quote_plus
 
 import httpx
 
-from src.services.llm import MODEL_FAST, get_llm
+from src.services.llm_router import get_llm_router
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -107,7 +107,7 @@ Retorne JSON:
 
 class PriceSearchService:
     def __init__(self):
-        self.llm = get_llm()
+        self.router = get_llm_router()
         self._client = httpx.Client(timeout=SCRAPER_TIMEOUT)
 
     def search_medication(self, medication: str) -> dict[str, Any]:
@@ -183,14 +183,13 @@ class PriceSearchService:
 
     def _extract_offers(self, scraped_text: str, medication: str) -> dict[str, Any]:
         try:
-            result = self.llm.complete_json(
+            # ADR-025: task='price_search_extraction' → Gemini 2.5 Flash-Lite (barato)
+            result = self.router.complete_json(
+                task="price_search_extraction",
                 system="Você é um extrator preciso de ofertas de medicamentos em farmácias brasileiras.",
                 user=EXTRACTION_PROMPT.format(
                     scraped_text=scraped_text, medication=medication,
                 ),
-                model=MODEL_FAST,
-                max_tokens=2500,
-                temperature=0.1,
             )
             if not isinstance(result, dict):
                 return {"offers": [], "confidence": "low",
@@ -215,12 +214,10 @@ class PriceSearchService:
 
     def _llm_fallback(self, medication: str) -> dict[str, Any]:
         try:
-            result = self.llm.complete_json(
+            result = self.router.complete_json(
+                task="price_search_extraction",
                 system="Você estima preços típicos de medicamentos no varejo brasileiro (2026).",
                 user=FALLBACK_PROMPT.format(medication=medication),
-                model=MODEL_FAST,
-                max_tokens=2500,
-                temperature=0.3,
             )
             if not isinstance(result, dict):
                 return {"offers": [], "confidence": "low",
