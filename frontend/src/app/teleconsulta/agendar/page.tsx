@@ -314,8 +314,9 @@ function AgendadoConfirmacao({
   doctor: (typeof DEMO_DOCTORS)[0];
   patient: Patient | null;
 }) {
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<"doctor" | "patient" | null>(null);
   const [copyError, setCopyError] = useState<string | null>(null);
+  const [copyErrorTarget, setCopyErrorTarget] = useState<"doctor" | "patient" | null>(null);
 
   // Defensivo: data pode vir inválida; não deixa render quebrar
   let dateStr = "";
@@ -334,27 +335,33 @@ function AgendadoConfirmacao({
     dateStr = submitted.scheduled_at || "";
   }
 
-  const copyLink = async () => {
+  const copyLink = async (target: "doctor" | "patient") => {
     setCopyError(null);
-    const link = submitted.link || "";
+    setCopyErrorTarget(null);
+    const link = target === "doctor" ? submitted.link : submitted.patient_link;
     if (!link) {
       setCopyError("Link não disponível");
+      setCopyErrorTarget(target);
       return;
     }
+
+    const onOk = () => {
+      setCopied(target);
+      setTimeout(() => setCopied(null), 2000);
+    };
 
     // Tenta API moderna primeiro; fallback pra execCommand (Safari antigo / iframes)
     try {
       if (navigator.clipboard?.writeText) {
         await navigator.clipboard.writeText(link);
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
+        onOk();
         return;
       }
     } catch {
       // cai no fallback
     }
 
-    // Fallback: input temporário + execCommand('copy')
+    // Fallback: textarea temporário + execCommand('copy')
     try {
       const ta = document.createElement("textarea");
       ta.value = link;
@@ -365,13 +372,14 @@ function AgendadoConfirmacao({
       const ok = document.execCommand("copy");
       document.body.removeChild(ta);
       if (ok) {
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
+        onOk();
       } else {
         setCopyError("Seu navegador bloqueou cópia. Copia manual: Ctrl+C no campo.");
+        setCopyErrorTarget(target);
       }
     } catch (err) {
       setCopyError("Erro ao copiar: " + (err instanceof Error ? err.message : String(err)));
+      setCopyErrorTarget(target);
     }
   };
 
@@ -381,8 +389,10 @@ function AgendadoConfirmacao({
     : undefined;
   const hasFamilyPhone = !!firstResponsible?.phone;
 
+  // Link pra envio pro paciente sempre usa o patient_link (seguro)
+  const linkForPatient = submitted.patient_link || submitted.link;
   const whatsappText = encodeURIComponent(
-    `Olá! Sua teleconsulta com ${doctor.name} está agendada para ${dateStr}.\n\nEntre no link no horário:\n${submitted.link}`,
+    `Olá! Sua teleconsulta com ${doctor.name} está agendada para ${dateStr}.\n\nEntre no link no horário:\n${linkForPatient}`,
   );
 
   return (
@@ -399,48 +409,44 @@ function AgendadoConfirmacao({
         <p className="text-sm text-foreground mt-3 capitalize">{dateStr}</p>
       </div>
 
-      {/* Link compartilhável */}
-      <section className="glass-card rounded-2xl p-5">
-        <div className="flex items-center gap-2 mb-3">
+      {/* Links compartilháveis — SEPARADOS por papel */}
+      <section className="glass-card rounded-2xl p-5 space-y-4">
+        <div className="flex items-center gap-2">
           <LinkIcon className="h-4 w-4 text-accent-cyan" />
           <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-            Link da sala
+            Links da sala
           </h2>
         </div>
 
-        <div className="flex items-center gap-2 p-3 bg-[hsl(222,30%,10%)] border border-white/10 rounded-lg">
-          <input
-            readOnly
-            value={submitted.link}
-            className="flex-1 bg-transparent text-sm font-mono text-foreground/90 outline-none truncate"
-            onFocus={(e) => e.currentTarget.select()}
-          />
-          <button
-            onClick={copyLink}
-            type="button"
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold border border-accent-cyan/30 bg-accent-cyan/8 text-accent-cyan hover:bg-accent-cyan/15 transition-colors"
-          >
-            {copied ? (
-              <>
-                <Check className="h-3 w-3" /> Copiado
-              </>
-            ) : (
-              <>
-                <Copy className="h-3 w-3" /> Copiar
-              </>
-            )}
-          </button>
-        </div>
+        {/* Link MÉDICO */}
+        <LinkBlock
+          label="Link do médico"
+          description="Você (ou outro profissional) entra por aqui. Ao encerrar, abre o editor de SOAP/prescrição."
+          accent="teal"
+          url={submitted.link}
+          target="doctor"
+          copied={copied === "doctor"}
+          onCopy={() => copyLink("doctor")}
+          copyError={copyErrorTarget === "doctor" ? copyError : null}
+        />
 
-        {copyError && (
-          <p className="text-[11px] text-classification-attention mt-2">
-            ⚠ {copyError}
-          </p>
+        {/* Link PACIENTE / família */}
+        {submitted.patient_link && (
+          <LinkBlock
+            label="Link do paciente / família"
+            description="Envie este link para o paciente ou família. Ao encerrar, eles veem a tela de agradecimento — nunca o prontuário."
+            accent="cyan"
+            url={submitted.patient_link}
+            target="patient"
+            copied={copied === "patient"}
+            onCopy={() => copyLink("patient")}
+            copyError={copyErrorTarget === "patient" ? copyError : null}
+          />
         )}
 
-        <p className="text-[11px] text-muted-foreground mt-2">
-          Qualquer pessoa com esse link entra na sala. Ele fica válido por 24h após
-          o horário agendado.
+        <p className="text-[11px] text-muted-foreground pt-2 border-t border-white/5">
+          ⚠️ <strong>Não envie o link do médico ao paciente</strong> — ele abriria o
+          editor clínico ao final. Tokens válidos por 24h após o horário.
         </p>
       </section>
 
@@ -451,13 +457,14 @@ function AgendadoConfirmacao({
           external
           icon={<MessageSquare className="h-4 w-4" />}
           label="Enviar pelo WhatsApp"
-          hint={hasFamilyPhone ? "Paciente/família" : ""}
+          hint={hasFamilyPhone ? "link do paciente" : "link do paciente"}
         />
         <ShareOption
-          href={`mailto:?subject=Teleconsulta agendada&body=Sua teleconsulta está agendada para ${dateStr}. Entre pelo link: ${submitted.link}`}
+          href={`mailto:?subject=Teleconsulta agendada&body=Sua teleconsulta está agendada para ${dateStr}. Entre pelo link: ${linkForPatient}`}
           external
           icon={<Share2 className="h-4 w-4" />}
           label="Enviar por email"
+          hint="link do paciente"
         />
         <Link
           href={submitted.link}
@@ -467,7 +474,7 @@ function AgendadoConfirmacao({
             <Video className="h-4 w-4" />
           </div>
           <div className="min-w-0">
-            <div className="text-sm font-semibold">Entrar agora</div>
+            <div className="text-sm font-semibold">Entrar como médico</div>
             <div className="text-[11px] text-muted-foreground">Testar a sala</div>
           </div>
         </Link>
@@ -537,5 +544,85 @@ function ShareOption({
         {hint && <div className="text-[11px] text-muted-foreground truncate">{hint}</div>}
       </div>
     </a>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════
+// LinkBlock — exibe 1 link com badge de papel (doctor/patient),
+// descrição + input copiável + feedback de cópia.
+// ══════════════════════════════════════════════════════════════════
+
+function LinkBlock({
+  label,
+  description,
+  url,
+  accent,
+  copied,
+  onCopy,
+  copyError,
+}: {
+  label: string;
+  description: string;
+  url: string;
+  accent: "teal" | "cyan";
+  target: "doctor" | "patient";
+  copied: boolean;
+  onCopy: () => void;
+  copyError: string | null;
+}) {
+  const accentClass =
+    accent === "teal"
+      ? "border-accent-teal/35 bg-accent-teal/5 text-accent-teal"
+      : "border-accent-cyan/35 bg-accent-cyan/5 text-accent-cyan";
+
+  return (
+    <div className={`rounded-xl p-3.5 border ${accentClass}`}>
+      <div className="flex items-center justify-between gap-2 mb-2">
+        <div className="flex items-center gap-2 min-w-0">
+          <div
+            className={`w-1.5 h-4 rounded-full ${
+              accent === "teal" ? "bg-accent-teal" : "bg-accent-cyan"
+            }`}
+          />
+          <h3 className="text-sm font-bold truncate">{label}</h3>
+        </div>
+      </div>
+
+      <p className="text-[11px] text-muted-foreground mb-3 leading-snug">
+        {description}
+      </p>
+
+      <div className="flex items-center gap-2 p-2 bg-[hsl(222,30%,10%)] border border-white/10 rounded-lg">
+        <input
+          readOnly
+          value={url}
+          className="flex-1 bg-transparent text-xs font-mono text-foreground/90 outline-none truncate"
+          onFocus={(e) => e.currentTarget.select()}
+        />
+        <button
+          onClick={onCopy}
+          type="button"
+          className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-semibold border transition-colors ${
+            accent === "teal"
+              ? "border-accent-teal/30 bg-accent-teal/10 text-accent-teal hover:bg-accent-teal/20"
+              : "border-accent-cyan/30 bg-accent-cyan/10 text-accent-cyan hover:bg-accent-cyan/20"
+          }`}
+        >
+          {copied ? (
+            <>
+              <Check className="h-3 w-3" /> Copiado
+            </>
+          ) : (
+            <>
+              <Copy className="h-3 w-3" /> Copiar
+            </>
+          )}
+        </button>
+      </div>
+
+      {copyError && (
+        <p className="text-[11px] text-classification-attention mt-2">⚠ {copyError}</p>
+      )}
+    </div>
   );
 }
