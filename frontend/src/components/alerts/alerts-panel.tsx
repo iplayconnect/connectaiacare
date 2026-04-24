@@ -25,6 +25,7 @@ import {
   STATUS_SYSTEM,
   AlertStatusBadge,
 } from "./alert-status-badge";
+import { CallConfirmModal } from "./call-confirm-modal";
 import type { AlertClassification, ClinicalAlert } from "@/hooks/use-alerts";
 import { startVoipCall } from "@/hooks/use-voip";
 
@@ -42,6 +43,7 @@ export function AlertsPanel({ initialAlerts }: Props) {
   const [showAck, setShowAck] = useState(false);
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [dialpadFor, setDialpadFor] = useState<ClinicalAlert | null>(null);
 
   // Contagens sobre alertas ATIVOS (fonte única)
   const liveCounts = useMemo(() => {
@@ -102,31 +104,24 @@ export function AlertsPanel({ initialAlerts }: Props) {
       ),
     );
   };
-  const handleCall = async (id: string) => {
+  // Clicar "Ligar família" → abre dialpad (NÃO disca direto)
+  const handleCall = (id: string) => {
     const alert = alerts.find((a) => a.id === id);
     if (!alert) return;
+    setDialpadFor(alert);
+  };
 
-    const contact = alert.patient.family_contact;
-    if (!contact?.phone) {
-      // Atualiza UI com erro inline
-      setAlerts((prev) =>
-        prev.map((a) =>
-          a.id === id
-            ? {
-                ...a,
-                call_state: {
-                  status: "failed",
-                  target: "Sem contato cadastrado",
-                  started_at: new Date().toISOString(),
-                },
-              }
-            : a,
-        ),
-      );
-      return;
-    }
+  // User clicou no botão verde "Ligar" DENTRO do dialpad → aí sim disca
+  const handleDialpadConfirm = async (finalPhone: string) => {
+    const alert = dialpadFor;
+    if (!alert) return;
+    const id = alert.id;
+    const targetName = alert.patient.family_contact?.name ?? "Família";
 
-    // Otimista: mostra "ligando..." imediatamente
+    // Fecha dialpad imediatamente pra user ver o feedback na lista
+    setDialpadFor(null);
+
+    // Otimista: UI mostra "ligando…" enquanto VoIP conecta
     setAlerts((prev) =>
       prev.map((a) =>
         a.id === id
@@ -134,7 +129,7 @@ export function AlertsPanel({ initialAlerts }: Props) {
               ...a,
               call_state: {
                 status: "dialing",
-                target: contact.name,
+                target: targetName,
                 started_at: new Date().toISOString(),
               },
             }
@@ -142,9 +137,8 @@ export function AlertsPanel({ initialAlerts }: Props) {
       ),
     );
 
-    // Chama VoIP real
     const result = await startVoipCall({
-      destination: contact.phone,
+      destination: finalPhone,
       patient_id: alert.patient.id,
       alert_id: alert.id,
       alert_summary: alert.excerpt,
@@ -160,8 +154,9 @@ export function AlertsPanel({ initialAlerts }: Props) {
                 ...a,
                 call_state: {
                   status: (result.call_status as "dialing" | "connected") || "dialing",
-                  target: contact.name,
+                  target: targetName,
                   started_at: new Date().toISOString(),
+                  call_id: result.call_id,
                 },
               }
             : a,
@@ -281,6 +276,15 @@ export function AlertsPanel({ initialAlerts }: Props) {
           onAck={handleAck}
           onEscalate={handleEscalate}
           onCall={handleCall}
+        />
+      )}
+
+      {/* Dialpad aberto quando user clica "Ligar família" */}
+      {dialpadFor && (
+        <CallConfirmModal
+          alert={dialpadFor}
+          onConfirm={handleDialpadConfirm}
+          onCancel={() => setDialpadFor(null)}
         />
       )}
     </div>

@@ -293,6 +293,18 @@
   }
 }
 
+/* Dialpad/modal — slide de baixo pra cima */
+@keyframes slide-in-up {
+  0% {
+    transform: translateY(12px) scale(0.98);
+    opacity: 0;
+  }
+  100% {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
+}
+
 /* Drawer lateral — slide da direita */
 @keyframes slide-in-right {
   0% {
