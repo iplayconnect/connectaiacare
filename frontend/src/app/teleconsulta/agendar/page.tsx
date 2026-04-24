@@ -315,25 +315,71 @@ function AgendadoConfirmacao({
   patient: Patient | null;
 }) {
   const [copied, setCopied] = useState(false);
+  const [copyError, setCopyError] = useState<string | null>(null);
 
-  const scheduled = new Date(submitted.scheduled_at);
-  const dateStr = scheduled.toLocaleString("pt-BR", {
-    weekday: "long",
-    day: "2-digit",
-    month: "long",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  // Defensivo: data pode vir inválida; não deixa render quebrar
+  let dateStr = "";
+  try {
+    const scheduled = new Date(submitted.scheduled_at);
+    if (!Number.isNaN(scheduled.getTime())) {
+      dateStr = scheduled.toLocaleString("pt-BR", {
+        weekday: "long",
+        day: "2-digit",
+        month: "long",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+    }
+  } catch {
+    dateStr = submitted.scheduled_at || "";
+  }
 
   const copyLink = async () => {
+    setCopyError(null);
+    const link = submitted.link || "";
+    if (!link) {
+      setCopyError("Link não disponível");
+      return;
+    }
+
+    // Tenta API moderna primeiro; fallback pra execCommand (Safari antigo / iframes)
     try {
-      await navigator.clipboard.writeText(submitted.link);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(link);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+        return;
+      }
     } catch {
-      // ignore
+      // cai no fallback
+    }
+
+    // Fallback: input temporário + execCommand('copy')
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = link;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand("copy");
+      document.body.removeChild(ta);
+      if (ok) {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      } else {
+        setCopyError("Seu navegador bloqueou cópia. Copia manual: Ctrl+C no campo.");
+      }
+    } catch (err) {
+      setCopyError("Erro ao copiar: " + (err instanceof Error ? err.message : String(err)));
     }
   };
+
+  // Defensivo: responsible pode ser array vazio, null, ou undefined
+  const firstResponsible = Array.isArray(patient?.responsible)
+    ? patient?.responsible?.[0]
+    : undefined;
+  const hasFamilyPhone = !!firstResponsible?.phone;
 
   const whatsappText = encodeURIComponent(
     `Olá! Sua teleconsulta com ${doctor.name} está agendada para ${dateStr}.\n\nEntre no link no horário:\n${submitted.link}`,
@@ -371,6 +417,7 @@ function AgendadoConfirmacao({
           />
           <button
             onClick={copyLink}
+            type="button"
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold border border-accent-cyan/30 bg-accent-cyan/8 text-accent-cyan hover:bg-accent-cyan/15 transition-colors"
           >
             {copied ? (
@@ -385,6 +432,12 @@ function AgendadoConfirmacao({
           </button>
         </div>
 
+        {copyError && (
+          <p className="text-[11px] text-classification-attention mt-2">
+            ⚠ {copyError}
+          </p>
+        )}
+
         <p className="text-[11px] text-muted-foreground mt-2">
           Qualquer pessoa com esse link entra na sala. Ele fica válido por 24h após
           o horário agendado.
@@ -398,7 +451,7 @@ function AgendadoConfirmacao({
           external
           icon={<MessageSquare className="h-4 w-4" />}
           label="Enviar pelo WhatsApp"
-          hint={patient?.responsible[0]?.phone ? "Paciente/família" : ""}
+          hint={hasFamilyPhone ? "Paciente/família" : ""}
         />
         <ShareOption
           href={`mailto:?subject=Teleconsulta agendada&body=Sua teleconsulta está agendada para ${dateStr}. Entre pelo link: ${submitted.link}`}
