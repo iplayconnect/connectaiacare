@@ -771,16 +771,45 @@ class EldercarePipeline:
     # Usadas em combinação com classificação clínica "routine" pra fechar
     # o evento automaticamente quando o cuidador retorna dizendo que está OK.
     REASSURANCE_TERMS = (
+        # Frases "tudo" (afirmativo completo)
         "tudo ok", "tudo bem", "tudo certo", "tudo certinho", "tudo bom",
+        "ta tudo bem", "tá tudo bem", "tá tudo ok", "ta tudo ok",
+        # Frases "está/tá" + bem/ok/bom/normal
         "está bem", "esta bem", "está ok", "esta ok", "está bom", "esta bom",
+        "tá bem", "ta bem", "tá ok", "ta ok", "tá bom", "ta bom",
+        "está normal", "esta normal", "tá normal", "ta normal",
+        "está tranquilo", "esta tranquilo", "está calmo", "esta calmo",
+        "está sentado", "esta sentado",
+        # Intensificadores positivos
+        "muito bem", "bem melhor", "bem tranquilo",
+        # Evolução
         "melhorou", "melhorando", "dormindo bem", "passou", "já passou",
-        "ja passou", "não preciso", "nao preciso", "sem problema",
-        "falso alarme", "alarme falso", "foi só susto", "foi so susto",
+        "ja passou", "recuperou", "recuperada", "recuperado",
+        "já se levantou", "ja se levantou", "se recompôs", "se recompos",
+        # Falsa emergência
+        "falso alarme", "alarme falso", "só foi susto", "so foi susto",
+        "foi só susto", "foi so susto", "só 1 susto", "so 1 susto",
+        "só um susto", "so um susto", "foi só 1 susto", "foi só um susto",
+        "foi so 1 susto", "foi so um susto",
+        "foi falso alarme", "foi falso",
+        # Negativas de preocupação
+        "não preciso", "nao preciso", "sem problema", "sem problemas",
+        "não é nada", "nao e nada", "não é preocupante", "nao e preocupante",
+        # Estabilidade clínica
         "estabilizou", "estável", "estavel", "normalizou", "voltou ao normal",
-        "está normal", "esta normal", "se acalmou", "acalmou",
-        "reagiu bem", "comeu bem", "bebeu água", "tomou remédio",
-        "tomou o remedio", "aceitou o remédio",
+        "voltou pro normal", "se acalmou", "acalmou",
+        # Autocuidado
+        "reagiu bem", "comeu bem", "bebeu água", "bebeu agua",
+        "tomou remédio", "tomou o remedio", "tomou o remédio",
+        "aceitou o remédio", "aceitou remédio",
     )
+
+    # Statuses ATIVOS de care_event onde ainda cabe fechar automaticamente.
+    # resolved/expired obviamente não entram (já fechados); demais sim.
+    _RESOLVABLE_STATUSES = frozenset({
+        "analyzing", "awaiting_ack", "pattern_analyzed",
+        "escalating", "awaiting_status_update",
+    })
 
     # Prioridade de classificação (usada pra detectar "evolução") —
     # quanto MAIOR o valor, mais crítico.
@@ -818,8 +847,13 @@ class EldercarePipeline:
         Ser conservador continua importante: needs_medical_attention=True
         SEMPRE bloqueia fechamento automático.
         """
-        status = event.get("status")
-        if status != STATUS_AWAITING_STATUS_UPDATE:
+        # Antes aceitávamos só awaiting_status_update. Mas eventos urgent/critical
+        # passam direto pra 'escalating' (escalation.should_escalate) e nunca
+        # entravam em awaiting_status_update. Com isso o cuidador mandava
+        # "tá tudo ok, foi susto" e o evento ficava preso em escalating pra sempre.
+        # Solução: aceitar qualquer status ATIVO (não-terminal).
+        status = (event.get("status") or "").lower()
+        if status not in self._RESOLVABLE_STATUSES:
             return False
 
         # needs_medical_attention sempre bloqueia (segurança máxima)
