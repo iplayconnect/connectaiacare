@@ -5,14 +5,18 @@ import { createPortal } from "react-dom";
 import { AlertCircle, UserPlus, X } from "lucide-react";
 
 import {
+  type Caregiver,
   type CaregiverRole,
   type CaregiverShift,
   createCaregiver,
+  updateCaregiver,
 } from "@/hooks/use-caregivers";
 
 interface Props {
   onSuccess: () => void;
   onCancel: () => void;
+  /** Se passado, abre em modo edição com dados pré-populados */
+  editing?: Caregiver;
 }
 
 const ROLES: { value: CaregiverRole; label: string; hint: string }[] = [
@@ -37,18 +41,31 @@ const SHIFTS: { value: CaregiverShift; label: string }[] = [
 // Formulário de cadastro de cuidador/profissional
 // ═══════════════════════════════════════════════════════════════════
 
-export function CaregiverForm({ onSuccess, onCancel }: Props) {
+export function CaregiverForm({ onSuccess, onCancel, editing }: Props) {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
-  const [fullName, setFullName] = useState("");
-  const [cpf, setCpf] = useState("");
-  const [phone, setPhone] = useState("");
-  const [role, setRole] = useState<CaregiverRole>("cuidador");
-  const [shift, setShift] = useState<CaregiverShift>("manha");
-  const [email, setEmail] = useState("");
-  const [crm, setCrm] = useState("");
-  const [notes, setNotes] = useState("");
+  const isEdit = !!editing;
+  const editMeta = (editing?.metadata ?? {}) as Record<string, unknown>;
+
+  const [fullName, setFullName] = useState(editing?.full_name ?? "");
+  const [cpf, setCpf] = useState(editing?.cpf ?? "");
+  const [phone, setPhone] = useState(editing?.phone ?? "");
+  const [role, setRole] = useState<CaregiverRole>(
+    (editing?.role as CaregiverRole) ?? "cuidador",
+  );
+  const [shift, setShift] = useState<CaregiverShift>(
+    (editing?.shift as CaregiverShift) ?? "manha",
+  );
+  const [email, setEmail] = useState(
+    typeof editMeta.email === "string" ? editMeta.email : "",
+  );
+  const [crm, setCrm] = useState(
+    typeof editMeta.crm === "string" ? editMeta.crm : "",
+  );
+  const [notes, setNotes] = useState(
+    typeof editMeta.notes === "string" ? editMeta.notes : "",
+  );
 
   const [submitting, setSubmitting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -84,14 +101,24 @@ export function CaregiverForm({ onSuccess, onCancel }: Props) {
     if (crm) metadata.crm = crm.trim().toUpperCase();
     if (notes) metadata.notes = notes.trim();
 
-    const result = await createCaregiver({
+    // Preserva metadata original + sobrescreve os campos editáveis
+    const finalMetadata = {
+      ...(editMeta as Record<string, unknown>),
+      ...metadata,
+    };
+
+    const payload = {
       full_name: fullName.trim(),
       cpf: cpf.replace(/\D/g, "") || undefined,
       phone: phone.replace(/\D/g, "") || undefined,
       role,
       shift,
-      metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
-    });
+      metadata: Object.keys(finalMetadata).length > 0 ? finalMetadata : undefined,
+    };
+
+    const result = isEdit
+      ? await updateCaregiver(editing!.id, payload)
+      : await createCaregiver(payload);
 
     if (result.status === "ok") {
       onSuccess();
@@ -128,9 +155,13 @@ export function CaregiverForm({ onSuccess, onCancel }: Props) {
               <UserPlus className="h-5 w-5 text-slate-900" strokeWidth={2.5} />
             </div>
             <div>
-              <h2 className="text-lg font-bold">Novo profissional</h2>
+              <h2 className="text-lg font-bold">
+                {isEdit ? "Editar profissional" : "Novo profissional"}
+              </h2>
               <p className="text-xs text-muted-foreground mt-0.5">
-                Cadastre cuidadores, enfermagem, técnicos ou médicos da equipe
+                {isEdit
+                  ? "Atualize função, turno, contato ou observações"
+                  : "Cadastre cuidadores, enfermagem, técnicos ou médicos da equipe"}
               </p>
             </div>
           </div>
@@ -283,7 +314,7 @@ export function CaregiverForm({ onSuccess, onCancel }: Props) {
             disabled={submitting}
             className="inline-flex items-center gap-2 px-5 py-2 rounded-lg accent-gradient text-slate-900 text-sm font-semibold hover:shadow-[0_0_20px_rgba(49,225,255,0.35)] transition-all disabled:opacity-60"
           >
-            {submitting ? "Salvando…" : "Cadastrar"}
+            {submitting ? "Salvando…" : isEdit ? "Salvar alterações" : "Cadastrar"}
           </button>
         </footer>
       </form>

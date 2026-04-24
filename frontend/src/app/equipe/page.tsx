@@ -120,6 +120,7 @@ export default function EquipePage() {
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
   const [showForm, setShowForm] = useState(false);
+  const [editing, setEditing] = useState<Caregiver | null>(null);
 
   const refresh = async () => {
     setLoading(true);
@@ -264,20 +265,26 @@ export default function EquipePage() {
             <CaregiverCard
               key={c.id}
               caregiver={c}
+              onEdit={() => setEditing(c)}
               onDeactivate={() => handleDeactivate(c.id, c.full_name)}
             />
           ))}
         </div>
       )}
 
-      {/* Form modal */}
-      {showForm && (
+      {/* Form modal (novo OU edit) */}
+      {(showForm || editing) && (
         <CaregiverForm
+          editing={editing ?? undefined}
           onSuccess={() => {
             setShowForm(false);
+            setEditing(null);
             refresh();
           }}
-          onCancel={() => setShowForm(false)}
+          onCancel={() => {
+            setShowForm(false);
+            setEditing(null);
+          }}
         />
       )}
     </div>
@@ -325,9 +332,11 @@ function TabButton({
 
 function CaregiverCard({
   caregiver,
+  onEdit,
   onDeactivate,
 }: {
   caregiver: Caregiver;
+  onEdit: () => void;
   onDeactivate: () => void;
 }) {
   const color = getRoleStyle(caregiver.role);
@@ -342,7 +351,19 @@ function CaregiverCard({
     .toUpperCase();
 
   return (
-    <article className="solid-card rounded-xl p-4 flex gap-3 group hover:border-accent-cyan/30 transition-colors">
+    <article
+      onClick={onEdit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onEdit();
+        }
+      }}
+      role="button"
+      tabIndex={0}
+      aria-label={`Editar ${caregiver.full_name}`}
+      className="solid-card rounded-xl p-4 flex gap-3 group hover:border-accent-cyan/40 hover:shadow-[0_0_20px_rgba(49,225,255,0.08)] cursor-pointer transition-all"
+    >
       <div
         className={`w-12 h-12 rounded-full flex items-center justify-center font-bold flex-shrink-0 border ${color.bg} ${color.text} ${color.border}`}
       >
@@ -352,7 +373,9 @@ function CaregiverCard({
       <div className="flex-1 min-w-0">
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0 flex-1">
-            <h3 className="text-sm font-semibold truncate">{caregiver.full_name}</h3>
+            <h3 className="text-sm font-semibold truncate group-hover:text-accent-cyan transition-colors">
+              {caregiver.full_name}
+            </h3>
             <div className={`flex items-center gap-1 mt-0.5 text-[10px] uppercase tracking-wider font-semibold ${color.text}`}>
               <Icon className="h-3 w-3" />
               {roleLabel}
@@ -366,7 +389,10 @@ function CaregiverCard({
           </div>
 
           <button
-            onClick={onDeactivate}
+            onClick={(e) => {
+              e.stopPropagation();
+              onDeactivate();
+            }}
             aria-label={`Desativar ${caregiver.full_name}`}
             className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-classification-critical transition-all"
             title="Desativar"
@@ -389,6 +415,11 @@ function CaregiverCard({
               {String(caregiver.metadata.crm)}
             </div>
           )}
+
+        {/* Hint de edição on hover */}
+        <div className="mt-2 text-[10px] text-accent-cyan/0 group-hover:text-accent-cyan/70 transition-colors">
+          Clique pra editar
+        </div>
       </div>
     </article>
   );

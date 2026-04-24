@@ -81,6 +81,25 @@ export async function createCaregiver(
   }
 }
 
+export async function updateCaregiver(
+  id: string,
+  patch: Partial<CreateCaregiverPayload> & { active?: boolean },
+): Promise<{ status: "ok" | "error"; caregiver?: Caregiver; field?: string; message?: string }> {
+  try {
+    const res = await fetch(`${API_BASE}/api/caregivers/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    });
+    return await res.json();
+  } catch (err) {
+    return {
+      status: "error",
+      message: err instanceof Error ? err.message : "Erro de rede",
+    };
+  }
+}
+
 export async function deactivateCaregiver(id: string): Promise<boolean> {
   try {
     const res = await fetch(`${API_BASE}/api/caregivers/${id}`, {
