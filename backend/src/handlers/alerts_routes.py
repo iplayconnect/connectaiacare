@@ -38,7 +38,7 @@ def list_alerts():
     tenant_id = settings.tenant_id
 
     # Care events ativos (abertos) ou resolvidos nas últimas 48h
-    rows = db.fetch_all(
+    events = db.fetch_all(
         """
         SELECT
             ce.id AS event_id,
@@ -50,15 +50,10 @@ def list_alerts():
             ce.summary,
             ce.opened_at,
             ce.resolved_at,
+            ce.closed_reason,
             ce.caregiver_phone,
             ce.context,
             ce.initial_report_id,
-            r.id AS report_id,
-            r.audio_url,
-            r.audio_duration_seconds,
-            r.transcription,
-            r.analysis,
-            r.received_at AS report_received_at,
             p.id AS patient_id,
             p.full_name AS patient_name,
             p.nickname AS patient_nickname,
@@ -67,7 +62,6 @@ def list_alerts():
             p.room_number AS patient_room,
             p.responsible AS patient_responsible
         FROM aia_health_care_events ce
-        LEFT JOIN aia_health_reports r ON r.id = ce.initial_report_id
         LEFT JOIN aia_health_patients p ON p.id = ce.patient_id
         WHERE ce.tenant_id = %s
           AND (
@@ -88,7 +82,27 @@ def list_alerts():
         (tenant_id,),
     )
 
-    alerts = [_shape_alert(r) for r in rows]
+    # Busca TODOS reports ligados aos care_events desta lista (pra timeline/áudios)
+    event_ids = [str(e["event_id"]) for e in events if e.get("event_id")]
+    reports_by_event: dict[str, list[dict]] = {}
+    if event_ids:
+        reports_rows = db.fetch_all(
+            """
+            SELECT
+                id, care_event_id, audio_url, audio_duration_seconds,
+                transcription, classification, analysis, received_at,
+                caregiver_name_claimed
+            FROM aia_health_reports
+            WHERE care_event_id = ANY(%s::uuid[])
+            ORDER BY received_at ASC
+            """,
+            (event_ids,),
+        )
+        for r in reports_rows:
+            ev_id = str(r["care_event_id"])
+            reports_by_event.setdefault(ev_id, []).append(r)
+
+    alerts = [_shape_alert(e, reports_by_event.get(str(e["event_id"]), [])) for e in events]
     logger.info("alerts_list_served", count=len(alerts), tenant_id=tenant_id)
 
     return jsonify({"alerts": alerts, "total": len(alerts)}), 200
@@ -98,20 +112,26 @@ def list_alerts():
 # Shape transformer
 # ══════════════════════════════════════════════════════════════════
 
-def _shape_alert(row: dict) -> dict:
-    """Transforma row do care_events+reports+patients no shape ClinicalAlert."""
-    now = datetime.now(timezone.utc)
-    opened = row.get("opened_at")
-    minutes_ago = 0
-    if opened:
-        if isinstance(opened, datetime):
-            delta = now - (opened if opened.tzinfo else opened.replace(tzinfo=timezone.utc))
-            minutes_ago = max(0, int(delta.total_seconds() / 60))
+def _shape_alert(event: dict, reports: list[dict]) -> dict:
+    """Transforma care_event + reports + patient no shape ClinicalAlert.
 
-    analysis = row.get("analysis") or {}
+    `reports` é a lista de TODOS os reports ligados ao care_event (ordenados
+    cronologicamente), não só o inicial. Cada um com audio_url próprio.
+    """
+    now = datetime.now(timezone.utc)
+    opened = event.get("opened_at")
+    minutes_ago = 0
+    if opened and isinstance(opened, datetime):
+        delta = now - (opened if opened.tzinfo else opened.replace(tzinfo=timezone.utc))
+        minutes_ago = max(0, int(delta.total_seconds() / 60))
+
+    # Report mais recente (pra excerpt + ai_reason) OU inicial como fallback
+    primary = reports[-1] if reports else None
+    initial = reports[0] if reports else None
+    analysis = (primary or {}).get("analysis") or {}
 
     # Extrai family_contact do responsible (schema JSONB)
-    responsible = row.get("patient_responsible") or {}
+    responsible = event.get("patient_responsible") or {}
     family_contact = None
     if isinstance(responsible, dict):
         name = responsible.get("name")
@@ -124,31 +144,52 @@ def _shape_alert(row: dict) -> dict:
             }
 
     classification = (
-        row.get("current_classification")
-        or row.get("initial_classification")
+        event.get("current_classification")
+        or event.get("initial_classification")
         or "attention"
     )
 
-    patient_age = _calc_age(row.get("patient_birth_date"))
+    patient_age = _calc_age(event.get("patient_birth_date"))
 
+    # Shape histórico (todos os reports em ordem)
+    history = [
+        {
+            "report_id": str(r.get("id")),
+            "received_at": r.get("received_at").isoformat()
+            if isinstance(r.get("received_at"), datetime)
+            else r.get("received_at"),
+            "caregiver_name": r.get("caregiver_name_claimed"),
+            "classification": r.get("classification"),
+            "audio_url": r.get("audio_url"),
+            "audio_duration_seconds": r.get("audio_duration_seconds"),
+            "transcription": r.get("transcription"),
+            "analysis_summary": (r.get("analysis") or {}).get("summary")
+            if isinstance(r.get("analysis"), dict)
+            else None,
+        }
+        for r in reports
+    ]
+
+    # Áudio + transcrição primária = do PRIMEIRO relato (inicial) pra retrocompat
+    # (se quiser mudar pra mais recente, basta trocar initial → primary)
     return {
-        "id": f"ce-{row.get('event_id')}",
+        "id": f"ce-{event.get('event_id')}",
         "classification": classification,
         "patient": {
-            "id": str(row.get("patient_id") or ""),
-            "name": row.get("patient_name") or "Paciente desconhecido",
+            "id": str(event.get("patient_id") or ""),
+            "name": event.get("patient_name") or "Paciente desconhecido",
             "age": patient_age or 0,
-            "unit": row.get("patient_unit") or "",
-            "ward": row.get("patient_unit") or "",
-            "room": row.get("patient_room") or "",
-            "seed": _seed_from_name(row.get("patient_name") or ""),
+            "unit": event.get("patient_unit") or "",
+            "ward": event.get("patient_unit") or "",
+            "room": event.get("patient_room") or "",
+            "seed": _seed_from_name(event.get("patient_name") or ""),
             "family_contact": family_contact,
         },
-        "report_id": str(row.get("report_id")) if row.get("report_id") else None,
+        "report_id": str(initial.get("id")) if initial else None,
         "excerpt": (
-            row.get("summary")
+            event.get("summary")
             or (analysis.get("summary") if isinstance(analysis, dict) else None)
-            or (row.get("transcription") or "")[:200]
+            or ((primary or {}).get("transcription") or "")[:200]
             or "Relato em análise..."
         ),
         "ai_reason": (
@@ -158,17 +199,22 @@ def _shape_alert(row: dict) -> dict:
         ),
         "created_at": opened.isoformat() if isinstance(opened, datetime) else None,
         "minutes_ago": minutes_ago,
-        "acknowledged_at": None,  # care_events não tem ACK separado ainda
+        "acknowledged_at": None,
         "acknowledged_by": None,
         "escalated_to": None,
         "call_state": None,
         "vitals_snapshot": _extract_vitals_from_analysis(analysis),
-        "audio_url": row.get("audio_url"),
-        "audio_duration_seconds": row.get("audio_duration_seconds"),
-        "transcription": row.get("transcription"),
-        # Metadata extra pra debug
-        "event_status": row.get("status"),
-        "event_human_id": row.get("human_id"),
+        # Campos "primários" (retrocompat com código existente)
+        "audio_url": (initial or {}).get("audio_url"),
+        "audio_duration_seconds": (initial or {}).get("audio_duration_seconds"),
+        "transcription": (initial or {}).get("transcription"),
+        # Histórico COMPLETO — todos os reports ligados ao care_event
+        "history": history,
+        "reports_count": len(reports),
+        # Metadata extra
+        "event_status": event.get("status"),
+        "event_human_id": event.get("human_id"),
+        "closed_reason": event.get("closed_reason"),
     }
 
 

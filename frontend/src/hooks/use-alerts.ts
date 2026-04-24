@@ -38,6 +38,17 @@ export interface CallState {
   call_id?: string; // retornado pelo VoIP pra hangup/status posterior
 }
 
+export interface AlertReportEntry {
+  report_id: string;
+  received_at: string;
+  caregiver_name?: string | null;
+  classification?: AlertClassification | null;
+  audio_url?: string | null;
+  audio_duration_seconds?: number | null;
+  transcription?: string | null;
+  analysis_summary?: string | null;
+}
+
 export interface ClinicalAlert {
   id: string;
   classification: AlertClassification;
@@ -56,6 +67,12 @@ export interface ClinicalAlert {
   audio_url?: string;
   audio_duration_seconds?: number;
   transcription?: string;
+  /** Histórico completo do care_event: TODOS os relatos em ordem cronológica. */
+  history?: AlertReportEntry[];
+  reports_count?: number;
+  event_status?: string;
+  event_human_id?: number;
+  closed_reason?: string | null;
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -334,14 +351,17 @@ export async function getAlerts(): Promise<ClinicalAlert[]> {
     if (res.ok) {
       const data = (await res.json()) as { alerts: ClinicalAlert[] };
       if (data.alerts && data.alerts.length > 0) {
-        // Backend retornou alertas reais → normaliza audio_url absoluto
+        // Backend retornou alertas reais → normaliza audio_urls pra absolutos
+        const normalizeUrl = (u?: string | null): string | undefined =>
+          u ? (u.startsWith("http") ? u : `${API_BASE}${u}`) : undefined;
+
         return data.alerts.map((a) => ({
           ...a,
-          audio_url: a.audio_url
-            ? a.audio_url.startsWith("http")
-              ? a.audio_url
-              : `${API_BASE}${a.audio_url}`
-            : undefined,
+          audio_url: normalizeUrl(a.audio_url),
+          history: a.history?.map((h) => ({
+            ...h,
+            audio_url: normalizeUrl(h.audio_url) ?? null,
+          })),
         }));
       }
     }

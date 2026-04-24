@@ -956,16 +956,38 @@ function RelatoTab({ alert }: { alert: ClinicalAlert }) {
 }
 
 function TranscricaoTab({ alert }: { alert: ClinicalAlert }) {
+  // Se temos histórico completo (backend real), prefere mostrar cada relato
+  // com seu próprio player + transcrição. Caso contrário, fallback pro primário.
+  const history = alert.history ?? [];
+  const hasMultiple = history.length > 1;
+
+  if (history.length > 0) {
+    return (
+      <div className="space-y-4">
+        {hasMultiple && (
+          <div className="flex items-center justify-between text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
+            <span>{history.length} relatos desse evento</span>
+            <span>em ordem cronológica</span>
+          </div>
+        )}
+        {history.map((entry, i) => (
+          <HistoryEntryCard
+            key={entry.report_id}
+            entry={entry}
+            index={i}
+            isLast={i === history.length - 1}
+          />
+        ))}
+      </div>
+    );
+  }
+
+  // Fallback simples (mock ou sem histórico): exibe audio_url + transcription do alert
   const hasAudio = !!alert.audio_url;
-  const duration = alert.audio_duration_seconds;
-  const durationLabel = duration
-    ? `${Math.floor(duration / 60)}min ${String(duration % 60).padStart(2, "0")}s`
-    : null;
   const transcription = alert.transcription;
 
   return (
     <div className="space-y-3.5">
-      {/* Player de áudio */}
       <div className="flex items-center gap-3 p-4 rounded-xl bg-[hsl(222,30%,10%)]/60 border border-white/10">
         <Mic
           className={`h-[18px] w-[18px] ${hasAudio ? "text-accent-cyan" : "text-muted-foreground"}`}
@@ -973,39 +995,33 @@ function TranscricaoTab({ alert }: { alert: ClinicalAlert }) {
         <div className="flex-1 min-w-0">
           <div className="text-sm font-semibold">
             {hasAudio ? "Áudio original do cuidador" : "Áudio não disponível"}
-            {durationLabel && (
+            {alert.audio_duration_seconds && (
               <span className="ml-2 text-muted-foreground font-normal tabular">
-                · {durationLabel}
+                · {formatAudioDuration(alert.audio_duration_seconds)}
               </span>
             )}
           </div>
           <div className="text-[11px] text-muted-foreground mt-0.5">
             {hasAudio
               ? "Transcrito por Deepgram nova-2 · pt-BR"
-              : "Áudio original não persistido (legado) ou relato só-texto"}
+              : "Áudio não persistido (legado) ou relato só-texto"}
           </div>
         </div>
       </div>
 
-      {/* Player HTML5 nativo — se houver audio_url */}
       {hasAudio && (
         <audio
           controls
           preload="metadata"
           src={alert.audio_url}
           className="w-full rounded-lg"
-          style={{
-            colorScheme: "dark",
-            accentColor: "#31e1ff",
-            height: "40px",
-          }}
+          style={{ colorScheme: "dark", accentColor: "#31e1ff", height: "40px" }}
         >
           Seu navegador não suporta áudio HTML5.
         </audio>
       )}
 
-      {/* Transcrição */}
-      {transcription ? (
+      {transcription && (
         <div>
           <div className="text-[10px] uppercase tracking-[0.14em] font-semibold text-muted-foreground mb-2">
             Transcrição
@@ -1014,25 +1030,116 @@ function TranscricaoTab({ alert }: { alert: ClinicalAlert }) {
             {transcription}
           </p>
         </div>
-      ) : (
-        // Fallback: transcrição demo (mantido pra alertas mockados)
-        <div>
-          <div className="text-[10px] uppercase tracking-[0.14em] font-semibold text-muted-foreground mb-2">
-            Transcrição (simulada)
-          </div>
-          <p className="p-4 rounded-lg bg-[hsl(222,30%,10%)]/40 border border-white/5 text-sm leading-relaxed text-foreground/85">
-            <em className="not-italic text-muted-foreground/60 tabular">[00:04] </em>
-            Doutor, a dona Maria depois do almoço ficou meio esquisita, não quis tomar o
-            remédio, tá falando embolado…
-            <em className="not-italic text-muted-foreground/60"> [00:18] </em>
-            Aferi a pressão aqui, deu cento e setenta por cem, ela tá suando frio também…
-            <em className="not-italic text-muted-foreground/60"> [00:34] </em>
-            Nunca vi ela assim, sempre tá bem depois do almoço. Acho que é bom chamar alguém.
-          </p>
-        </div>
       )}
     </div>
   );
+}
+
+function HistoryEntryCard({
+  entry,
+  index,
+  isLast,
+}: {
+  entry: import("@/hooks/use-alerts").AlertReportEntry;
+  index: number;
+  isLast: boolean;
+}) {
+  const hasAudio = !!entry.audio_url;
+  const timeLabel = entry.received_at
+    ? new Date(entry.received_at).toLocaleString("pt-BR", {
+        dateStyle: "short",
+        timeStyle: "short",
+      })
+    : "—";
+
+  // Cor do label baseada na classificação desse relato específico
+  const classColor = entry.classification
+    ? STATUS_SYSTEM[entry.classification as keyof typeof STATUS_SYSTEM]?.color
+    : "#94a3b8";
+
+  return (
+    <article
+      className="rounded-xl border border-white/5 bg-[hsl(222,30%,10%)]/40 overflow-hidden"
+      style={{ borderLeft: `3px solid ${classColor}` }}
+    >
+      {/* Header do relato */}
+      <div className="flex items-center justify-between gap-3 px-4 pt-3 pb-2">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-[10px] uppercase tracking-wider font-bold text-muted-foreground">
+              Relato #{index + 1}
+            </span>
+            {entry.classification && (
+              <span
+                className="text-[10px] uppercase tracking-wider font-bold px-1.5 py-0.5 rounded"
+                style={{
+                  background: `${classColor}22`,
+                  color: classColor,
+                  border: `1px solid ${classColor}55`,
+                }}
+              >
+                {entry.classification}
+              </span>
+            )}
+            {isLast && (
+              <span className="text-[10px] uppercase tracking-wider text-accent-cyan/80 font-bold">
+                · mais recente
+              </span>
+            )}
+          </div>
+          <div className="text-[11px] text-muted-foreground mt-0.5">
+            {timeLabel}
+            {entry.caregiver_name && ` · ${entry.caregiver_name}`}
+            {entry.audio_duration_seconds && (
+              <span className="tabular ml-1">
+                · {formatAudioDuration(entry.audio_duration_seconds)}
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Player */}
+      {hasAudio && entry.audio_url && (
+        <div className="px-4 pb-2">
+          <audio
+            controls
+            preload="metadata"
+            src={entry.audio_url}
+            className="w-full rounded-lg"
+            style={{ colorScheme: "dark", accentColor: "#31e1ff", height: "36px" }}
+          >
+            Seu navegador não suporta áudio HTML5.
+          </audio>
+        </div>
+      )}
+
+      {/* Transcrição */}
+      {entry.transcription && (
+        <div className="px-4 pb-3">
+          <p className="text-xs text-foreground/80 leading-relaxed whitespace-pre-wrap">
+            {entry.transcription}
+          </p>
+        </div>
+      )}
+
+      {/* Resumo IA */}
+      {entry.analysis_summary && (
+        <div className="px-4 py-2 bg-accent-cyan/5 border-t border-accent-cyan/15">
+          <p className="text-[11px] text-accent-cyan/80 leading-snug flex items-start gap-1.5">
+            <Sparkles className="h-2.5 w-2.5 flex-shrink-0 mt-0.5" />
+            <span>{entry.analysis_summary}</span>
+          </p>
+        </div>
+      )}
+    </article>
+  );
+}
+
+function formatAudioDuration(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m}min ${String(s).padStart(2, "0")}s`;
 }
 
 function VitaisTab({ alert }: { alert: ClinicalAlert }) {

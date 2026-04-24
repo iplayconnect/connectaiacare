@@ -166,12 +166,17 @@ def get_report(report_id: str):
 
 @bp.get("/api/reports/<report_id>/audio")
 def get_report_audio(report_id: str):
-    """Serve o áudio original do relato (OGG do WhatsApp).
+    """Serve o áudio original do relato com conversão opcional pra MP3.
 
-    Storage local em /app/storage/audio/<report_id>.ogg (gitignored, volume).
+    Storage local: /app/storage/audio/<report_id>.ogg (volume Docker).
+    Query:
+        ?format=mp3  (default) — converte OGG Opus → MP3 on-the-fly (Safari friendly)
+        ?format=ogg            — serve o OGG original direto
     """
     import os
-    from flask import send_file, Response
+    import subprocess
+
+    from flask import request, send_file
 
     # Valida UUID básico
     try:
@@ -180,15 +185,59 @@ def get_report_audio(report_id: str):
     except ValueError:
         return jsonify({"error": "invalid_id"}), 400
 
-    path = os.path.join("/app/storage/audio", f"{report_id}.ogg")
-    if not os.path.exists(path):
+    requested_format = (request.args.get("format") or "mp3").lower()
+    ogg_path = os.path.join("/app/storage/audio", f"{report_id}.ogg")
+
+    if not os.path.exists(ogg_path):
         return jsonify({"error": "audio_not_found"}), 404
 
+    # Modo OGG original (debug ou clients que preferem)
+    if requested_format == "ogg":
+        return send_file(
+            ogg_path,
+            mimetype="audio/ogg",
+            as_attachment=False,
+            download_name=f"relato-{report_id[:8]}.ogg",
+        )
+
+    # Modo MP3 (default) — converte uma vez e cacheia em disco
+    mp3_path = os.path.join("/app/storage/audio", f"{report_id}.mp3")
+    if not os.path.exists(mp3_path):
+        try:
+            subprocess.run(
+                [
+                    "ffmpeg", "-y",
+                    "-i", ogg_path,
+                    "-acodec", "libmp3lame",
+                    "-ab", "96k",
+                    "-ac", "1",       # mono (áudio de voz)
+                    "-ar", "22050",   # 22kHz suficiente pra voz
+                    mp3_path,
+                ],
+                check=True,
+                capture_output=True,
+                timeout=20,
+            )
+        except subprocess.CalledProcessError as exc:
+            logger.error(
+                "audio_convert_failed",
+                report_id=report_id, stderr=exc.stderr.decode("utf-8", errors="ignore")[:200],
+            )
+            # Fallback: serve OGG mesmo assim
+            return send_file(
+                ogg_path,
+                mimetype="audio/ogg",
+                as_attachment=False,
+            )
+        except Exception as exc:
+            logger.error("audio_convert_error", report_id=report_id, error=str(exc))
+            return send_file(ogg_path, mimetype="audio/ogg", as_attachment=False)
+
     return send_file(
-        path,
-        mimetype="audio/ogg",
+        mp3_path,
+        mimetype="audio/mpeg",
         as_attachment=False,
-        download_name=f"relato-{report_id[:8]}.ogg",
+        download_name=f"relato-{report_id[:8]}.mp3",
     )
 
 
