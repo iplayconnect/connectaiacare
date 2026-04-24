@@ -10,6 +10,7 @@ from src.handlers.onboarding_web_routes import bp as onboarding_web_bp
 from src.handlers.patient_portal_routes import bp as patient_portal_bp
 from src.handlers.routes import bp as api_bp
 from src.handlers.teleconsulta_routes import bp as teleconsulta_bp
+from src.handlers.voip_routes import bp as voip_bp
 from src.handlers.weekly_report_routes import bp as weekly_report_bp
 from src.utils.logger import configure_logging, get_logger
 
@@ -54,6 +55,7 @@ def create_app() -> Flask:
     app.register_blueprint(weekly_report_bp)
     app.register_blueprint(medication_bp)
     app.register_blueprint(onboarding_web_bp, url_prefix="/api")
+    app.register_blueprint(voip_bp, url_prefix="/api")
 
     # Headers de segurança em todas as respostas.
     # Ver FINDING-006 do security audit.

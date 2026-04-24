@@ -293,6 +293,28 @@
   }
 }
 
+/* Drawer lateral — slide da direita */
+@keyframes slide-in-right {
+  0% {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  100% {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+/* Overlay — fade simples */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
 /* Entrada de item novo no feed — deslizamento sutil + highlight breve */
 @keyframes slide-in-fade {
   0% {

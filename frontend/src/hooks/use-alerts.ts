@@ -17,6 +17,11 @@ export interface AlertPatient {
   ward: string;
   room: string;
   seed?: number;
+  family_contact?: {
+    name: string;
+    relationship: string;
+    phone: string; // E.164 sem + (ex: "5511987654321")
+  };
 }
 
 export interface VitalsSnapshot {
@@ -30,6 +35,7 @@ export interface CallState {
   status: "dialing" | "connected" | "completed" | "failed";
   target?: string;
   started_at?: string;
+  call_id?: string; // retornado pelo VoIP pra hangup/status posterior
 }
 
 export interface ClinicalAlert {
@@ -64,6 +70,11 @@ export const MOCK_ALERTS: ClinicalAlert[] = [
       ward: "Ala B",
       room: "12",
       seed: 0,
+      family_contact: {
+        name: "Clara Santos (filha)",
+        relationship: "filha",
+        phone: "5511987654321",
+      },
     },
     report_id: "r1",
     excerpt:
@@ -87,6 +98,11 @@ export const MOCK_ALERTS: ClinicalAlert[] = [
       ward: "Ala A",
       room: "08",
       seed: 3,
+      family_contact: {
+        name: "Eduardo Ribeiro (filho)",
+        relationship: "filho",
+        phone: "5511987650202",
+      },
     },
     report_id: "r4",
     excerpt:
@@ -110,6 +126,11 @@ export const MOCK_ALERTS: ClinicalAlert[] = [
       ward: "Ala C",
       room: "03",
       seed: 4,
+      family_contact: {
+        name: "Patrícia Lopes (filha)",
+        relationship: "filha",
+        phone: "5511944332211",
+      },
     },
     report_id: "r7",
     excerpt:

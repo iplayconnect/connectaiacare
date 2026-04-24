@@ -11,6 +11,7 @@ import {
   Sparkles,
   Stethoscope,
   User,
+  Video,
 } from "lucide-react";
 
 import { ClassificationBadge } from "@/components/classification-badge";
@@ -94,6 +95,28 @@ export default async function ReportDetailPage({ params }: { params: { id: strin
                 {formatDateTime(report.received_at)}
               </span>
             </div>
+          </div>
+
+          {/* CTAs contextuais */}
+          <div className="flex flex-wrap gap-2 mt-4 pt-4 border-t border-white/5">
+            {report.patient_id && (
+              <>
+                <Link
+                  href={`/teleconsulta/agendar?patient=${report.patient_id}`}
+                  className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold accent-gradient text-slate-900 hover:shadow-[0_0_20px_rgba(49,225,255,0.35)] transition-all"
+                >
+                  <Video className="h-3.5 w-3.5" strokeWidth={2.5} />
+                  Agendar teleconsulta
+                </Link>
+                <Link
+                  href={`/patients/${report.patient_id}`}
+                  className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold border border-white/10 bg-white/[0.03] text-foreground/85 hover:bg-white/[0.06] hover:border-accent-cyan/30 hover:text-accent-cyan transition-all"
+                >
+                  <User className="h-3.5 w-3.5" />
+                  Abrir prontuário
+                </Link>
+              </>
+            )}
           </div>
         </div>
       </div>

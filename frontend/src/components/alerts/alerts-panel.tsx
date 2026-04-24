@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   Activity,
   ArrowUpRight,
@@ -25,6 +26,7 @@ import {
   AlertStatusBadge,
 } from "./alert-status-badge";
 import type { AlertClassification, ClinicalAlert } from "@/hooks/use-alerts";
+import { startVoipCall } from "@/hooks/use-voip";
 
 // ══════════════════════════════════════════════════════════════════
 // Panel principal (client component)
@@ -100,7 +102,31 @@ export function AlertsPanel({ initialAlerts }: Props) {
       ),
     );
   };
-  const handleCall = (id: string) => {
+  const handleCall = async (id: string) => {
+    const alert = alerts.find((a) => a.id === id);
+    if (!alert) return;
+
+    const contact = alert.patient.family_contact;
+    if (!contact?.phone) {
+      // Atualiza UI com erro inline
+      setAlerts((prev) =>
+        prev.map((a) =>
+          a.id === id
+            ? {
+                ...a,
+                call_state: {
+                  status: "failed",
+                  target: "Sem contato cadastrado",
+                  started_at: new Date().toISOString(),
+                },
+              }
+            : a,
+        ),
+      );
+      return;
+    }
+
+    // Otimista: mostra "ligando..." imediatamente
     setAlerts((prev) =>
       prev.map((a) =>
         a.id === id
@@ -108,13 +134,55 @@ export function AlertsPanel({ initialAlerts }: Props) {
               ...a,
               call_state: {
                 status: "dialing",
-                target: "Familiar de referência",
+                target: contact.name,
                 started_at: new Date().toISOString(),
               },
             }
           : a,
       ),
     );
+
+    // Chama VoIP real
+    const result = await startVoipCall({
+      destination: contact.phone,
+      patient_id: alert.patient.id,
+      alert_id: alert.id,
+      alert_summary: alert.excerpt,
+      caller_name: "Sofia · ConnectaIACare",
+      mode: "ai_pipeline",
+    });
+
+    if (result.status === "ok") {
+      setAlerts((prev) =>
+        prev.map((a) =>
+          a.id === id
+            ? {
+                ...a,
+                call_state: {
+                  status: (result.call_status as "dialing" | "connected") || "dialing",
+                  target: contact.name,
+                  started_at: new Date().toISOString(),
+                },
+              }
+            : a,
+        ),
+      );
+    } else {
+      setAlerts((prev) =>
+        prev.map((a) =>
+          a.id === id
+            ? {
+                ...a,
+                call_state: {
+                  status: "failed",
+                  target: result.message || "VoIP indisponível",
+                  started_at: new Date().toISOString(),
+                },
+              }
+            : a,
+        ),
+      );
+    }
   };
 
   const totalActive =
@@ -433,6 +501,19 @@ function AlertRow({
             <Phone className="h-2.5 w-2.5" /> ligando…
           </span>
         )}
+        {alert.call_state?.status === "failed" && (
+          <span
+            className="text-[10px] text-classification-critical flex items-center gap-1"
+            title={alert.call_state.target}
+          >
+            <Phone className="h-2.5 w-2.5" /> VoIP falhou
+          </span>
+        )}
+        {alert.call_state?.status === "connected" && (
+          <span className="text-[10px] text-classification-routine flex items-center gap-1">
+            <Phone className="h-2.5 w-2.5" /> em chamada
+          </span>
+        )}
         {alert.escalated_to && (
           <span className="text-[10px] text-purple-400 flex items-center gap-1">
             <ArrowUpRight className="h-2.5 w-2.5" /> escalado
@@ -565,10 +646,31 @@ function AlertDrawer({ alert, onClose, onAck, onEscalate, onCall }: AlertDrawerP
   const [tab, setTab] = useState<"relato" | "transcricao" | "vitais" | "historico">(
     "relato",
   );
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+
   const s = STATUS_SYSTEM[alert.classification];
   const canCall = alert.classification === "urgent" || alert.classification === "critical";
   const isAck = !!alert.acknowledged_at;
   const calling = alert.call_state?.status === "dialing";
+
+  // Lock body scroll enquanto drawer aberto
+  useEffect(() => {
+    const original = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = original;
+    };
+  }, []);
+
+  // Esc fecha drawer
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [onClose]);
 
   const tabs: { k: typeof tab; label: string }[] = [
     { k: "relato", label: "Relato" },
@@ -577,12 +679,16 @@ function AlertDrawer({ alert, onClose, onAck, onEscalate, onCall }: AlertDrawerP
     { k: "historico", label: "Histórico 30d" },
   ];
 
-  return (
+  if (!mounted) return null;
+
+  // Portal pra document.body — escapa do stacking context do <main z-10>
+  return createPortal(
     <>
       {/* Overlay */}
       <div
         onClick={onClose}
-        className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm animate-fade-up"
+        className="fixed inset-0 z-[100] bg-black/50 backdrop-blur-sm"
+        style={{ animation: "fade-in 160ms ease" }}
         aria-hidden
       />
 
@@ -590,10 +696,11 @@ function AlertDrawer({ alert, onClose, onAck, onEscalate, onCall }: AlertDrawerP
       <aside
         role="dialog"
         aria-label={`Detalhes do alerta de ${alert.patient.name}`}
-        className="fixed top-0 right-0 bottom-0 z-50 flex flex-col bg-[hsl(222,47%,7%)]/95 shadow-[-24px_0_48px_rgba(0,0,0,0.5)]"
+        className="fixed top-0 right-0 bottom-0 z-[101] flex flex-col bg-[hsl(222,47%,7%)]/98 shadow-[-24px_0_48px_rgba(0,0,0,0.5)]"
         style={{
           width: "min(640px, 48vw)",
           borderLeft: `3px solid ${s.color}`,
+          animation: "slide-in-right 280ms cubic-bezier(0.16,1,0.3,1)",
         }}
       >
         {/* Header */}
@@ -681,7 +788,8 @@ function AlertDrawer({ alert, onClose, onAck, onEscalate, onCall }: AlertDrawerP
           )}
         </div>
       </aside>
-    </>
+    </>,
+    document.body,
   );
 }
 

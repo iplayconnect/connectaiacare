@@ -35,7 +35,7 @@ export function PatientActions({ patient, care_events }: Props) {
         </Link>
       ) : (
         <Link
-          href={`/teleconsulta?patient=${patient.id}`}
+          href={`/teleconsulta/agendar?patient=${patient.id}`}
           className="flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl accent-gradient text-slate-900 font-semibold text-sm hover:shadow-[0_0_24px_rgba(49,225,255,0.35)] transition-all"
         >
           <Video className="h-4 w-4" strokeWidth={2.5} />
