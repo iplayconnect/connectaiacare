@@ -257,6 +257,18 @@ export function ConsultaRoom({
     const room = roomRef.current;
     if (room) await room.disconnect();
 
+    // Notifica backend que a sala encerrou — grava ended_at + muda state
+    // pra 'documentation' (permite fluxo pós-call continuar).
+    if (teleconsultaId) {
+      try {
+        await fetch(`${API_BASE}/api/teleconsulta/${teleconsultaId}/end`, {
+          method: "POST",
+        });
+      } catch {
+        // best-effort; não bloqueia o redirect
+      }
+    }
+
     if (role === "doctor" && teleconsultaId) {
       // Médico: navega pro editor SOAP — fluxo pós-consulta
       window.location.href = `/teleconsulta/${teleconsultaId}/documentacao`;

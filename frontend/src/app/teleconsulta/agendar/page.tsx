@@ -70,7 +70,10 @@ function AgendarForm() {
     id: string;
     link: string;
     scheduled_at: string;
+    patient_link?: string;
   } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     if (!patientIdFromUrl) {
@@ -88,14 +91,56 @@ function AgendarForm() {
     return <div className="glass-card rounded-2xl p-8 text-center text-muted-foreground">Carregando paciente…</div>;
   }
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // TODO(coder): quando backend expuser POST /api/teleconsultas,
-    // trocar por chamada real que retorna {id, room_name, share_url, scheduled_at}
+    setError(null);
+
+    if (!patient) {
+      setError("Paciente não identificado. Volte ao prontuário e tente novamente.");
+      return;
+    }
+
+    setSubmitting(true);
     const scheduledAt = `${date}T${time}:00-03:00`;
-    const id = `tc-${Math.random().toString(36).slice(2, 10)}`;
-    const link = `${typeof window !== "undefined" ? window.location.origin : ""}/consulta/${id}`;
-    setSubmitted({ id, link, scheduled_at: scheduledAt });
+
+    const API_BASE =
+      typeof window !== "undefined"
+        ? process.env.NEXT_PUBLIC_API_URL || "http://localhost:5055"
+        : "http://api:5055";
+
+    try {
+      const res = await fetch(`${API_BASE}/api/teleconsulta/schedule`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          patient_id: patient.id,
+          doctor_name: doctor.name,
+          doctor_crm: doctor.crm,
+          specialty: doctor.specialty,
+          scheduled_for: scheduledAt,
+          duration_min: duration,
+          reason: reason || undefined,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || data.status === "error") {
+        setError(data.message || `Erro ao agendar (HTTP ${res.status})`);
+        setSubmitting(false);
+        return;
+      }
+
+      const origin = typeof window !== "undefined" ? window.location.origin : "";
+      setSubmitted({
+        id: data.id,
+        link: `${origin}${data.share_url_doctor}`,
+        patient_link: `${origin}${data.share_url_patient}`,
+        scheduled_at: scheduledAt,
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erro de rede");
+      setSubmitting(false);
+    }
   };
 
   if (submitted) {
@@ -223,6 +268,12 @@ function AgendarForm() {
           </p>
         </div>
 
+        {error && (
+          <div className="p-3 rounded-lg bg-classification-critical/10 border border-classification-critical/30 text-sm text-classification-critical">
+            {error}
+          </div>
+        )}
+
         {/* Submit */}
         <div className="flex items-center justify-between pt-2">
           <Link
@@ -233,10 +284,11 @@ function AgendarForm() {
           </Link>
           <button
             type="submit"
-            className="inline-flex items-center gap-2 accent-gradient text-slate-900 font-semibold px-5 py-2.5 rounded-xl hover:shadow-[0_0_24px_rgba(49,225,255,0.4)] transition-all"
+            disabled={submitting}
+            className="inline-flex items-center gap-2 accent-gradient text-slate-900 font-semibold px-5 py-2.5 rounded-xl hover:shadow-[0_0_24px_rgba(49,225,255,0.4)] transition-all disabled:opacity-60 disabled:cursor-wait"
           >
             <Video className="h-4 w-4" strokeWidth={2.5} />
-            Agendar e gerar link
+            {submitting ? "Agendando…" : "Agendar e gerar link"}
           </button>
         </div>
       </form>
@@ -258,7 +310,7 @@ function AgendadoConfirmacao({
   doctor,
   patient,
 }: {
-  submitted: { id: string; link: string; scheduled_at: string };
+  submitted: { id: string; link: string; scheduled_at: string; patient_link?: string };
   doctor: (typeof DEMO_DOCTORS)[0];
   patient: Patient | null;
 }) {

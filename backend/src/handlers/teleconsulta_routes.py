@@ -35,6 +35,153 @@ bp = Blueprint("teleconsulta", __name__)
 
 
 # ============================================================
+# POST /api/teleconsulta/schedule — agendamento direto (sem care_event)
+# ============================================================
+@bp.post("/api/teleconsulta/schedule")
+def schedule_teleconsulta():
+    """Cria registro em aia_health_teleconsultations pro fluxo /teleconsulta/agendar.
+
+    Gera room_name LiveKit único, persiste em state='scheduling', retorna
+    share_urls pra médico e paciente (ambos já com tc_id embutido pro
+    redirect pós-call achar /documentacao ou /finalizada).
+
+    Body esperado:
+        {
+            "patient_id": "uuid" (obrigatório),
+            "doctor_name": "Dra. Ana Silva",
+            "doctor_crm": "CRM/RS 12345",
+            "specialty": "Geriatria",
+            "scheduled_for": "2026-04-25T14:30:00-03:00",
+            "duration_min": 45,
+            "reason": "motivo opcional"
+        }
+
+    Retorna:
+        {
+            "status": "ok",
+            "id": "tc-uuid",
+            "room_name": "tc-...",
+            "share_url_doctor": "/consulta/<room>?tc=<id>&role=doctor",
+            "share_url_patient": "/consulta/<room>?tc=<id>&role=patient",
+            "scheduled_for": "..."
+        }
+    """
+    from config.settings import settings as _settings
+    from src.services.postgres import get_postgres
+
+    body = request.get_json(silent=True) or {}
+    patient_id = body.get("patient_id")
+    if not patient_id:
+        return jsonify({"status": "error", "message": "patient_id é obrigatório"}), 400
+
+    doctor_name = (body.get("doctor_name") or "Médico ConnectaIACare").strip()
+    doctor_crm = body.get("doctor_crm")
+    scheduled_for_raw = body.get("scheduled_for")
+    duration_min = int(body.get("duration_min") or 45)
+    reason = body.get("reason")
+    specialty = body.get("specialty")
+
+    db = get_postgres()
+    tenant_id = _settings.tenant_id
+
+    # Verifica que o paciente existe
+    patient = db.fetch_one(
+        "SELECT id, full_name FROM aia_health_patients WHERE id = %s AND tenant_id = %s",
+        (patient_id, tenant_id),
+    )
+    if not patient:
+        return jsonify({"status": "error", "message": "paciente não encontrado"}), 404
+
+    # Gera room_name único LiveKit
+    room_name = f"tc-sch-{uuid.uuid4().hex[:10]}"
+
+    # Monta metadata LiveKit + dados de agendamento
+    metadata = {
+        "source": "connectaiacare-schedule",
+        "specialty": specialty,
+        "reason": reason,
+        "duration_min": duration_min,
+    }
+
+    row = db.insert_returning(
+        """
+        INSERT INTO aia_health_teleconsultations
+            (tenant_id, patient_id, state, livekit_room_name, livekit_metadata,
+             doctor_name_snapshot, doctor_crm_snapshot, scheduled_for)
+        VALUES (%s, %s, 'scheduling', %s, %s::jsonb, %s, %s, %s)
+        RETURNING id, human_id, livekit_room_name, scheduled_for
+        """,
+        (
+            tenant_id,
+            patient_id,
+            room_name,
+            db.json_adapt(metadata),
+            doctor_name,
+            doctor_crm,
+            scheduled_for_raw,
+        ),
+    )
+
+    tc_id = str(row["id"])
+    logger.info(
+        "teleconsulta_scheduled",
+        id=tc_id, human_id=row.get("human_id"),
+        patient_id=patient_id, doctor=doctor_name,
+    )
+
+    share_base = f"/consulta/{room_name}?tc={tc_id}"
+    return jsonify({
+        "status": "ok",
+        "id": tc_id,
+        "human_id": row.get("human_id"),
+        "room_name": room_name,
+        "share_url_doctor": f"{share_base}&role=doctor",
+        "share_url_patient": f"{share_base}&role=patient",
+        "scheduled_for": row.get("scheduled_for").isoformat() if row.get("scheduled_for") else None,
+        "doctor_name": doctor_name,
+    }), 201
+
+
+# ============================================================
+# POST /api/teleconsulta/:id/end — finaliza sessão agendada
+# ============================================================
+@bp.post("/api/teleconsulta/<tc_id>/end")
+def end_teleconsulta(tc_id: str):
+    """Marca sessão como encerrada (state='documentation') + timestamps.
+
+    Chamado pelo frontend (ConsultaRoom) quando participante desconecta da
+    sala. Permite o fluxo pós-call ir pra /documentacao com dados coerentes.
+    """
+    from src.services.postgres import get_postgres
+
+    db = get_postgres()
+    row = db.insert_returning(
+        """
+        UPDATE aia_health_teleconsultations
+        SET ended_at = COALESCE(ended_at, NOW()),
+            started_at = COALESCE(started_at, NOW()),
+            state = CASE WHEN state IN ('signed', 'closed') THEN state
+                         ELSE 'documentation' END,
+            updated_at = NOW()
+        WHERE id = %s
+        RETURNING id, state, duration_seconds
+        """,
+        (tc_id,),
+    )
+
+    if not row:
+        return jsonify({"status": "error", "message": "teleconsulta não encontrada"}), 404
+
+    logger.info("teleconsulta_ended_manual", tc_id=tc_id, state=row.get("state"))
+    return jsonify({
+        "status": "ok",
+        "tc_id": tc_id,
+        "state": row.get("state"),
+        "duration_seconds": row.get("duration_seconds"),
+    }), 200
+
+
+# ============================================================
 # GET /api/teleconsulta/:id
 # ============================================================
 @bp.get("/api/teleconsulta/<tc_id>")
