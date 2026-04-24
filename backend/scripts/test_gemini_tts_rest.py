@@ -75,6 +75,31 @@ TTS_SAMPLES = [
 ]
 
 
+def _wrap_pcm_in_wav(pcm: bytes, sample_rate: int, channels: int, bits: int) -> bytes:
+    """Envolve PCM raw num container WAV RIFF válido."""
+    import struct
+
+    byte_rate = sample_rate * channels * bits // 8
+    block_align = channels * bits // 8
+    data_size = len(pcm)
+
+    header = b"RIFF"
+    header += struct.pack("<I", 36 + data_size)  # chunk size
+    header += b"WAVE"
+    header += b"fmt "
+    header += struct.pack("<I", 16)  # fmt chunk size
+    header += struct.pack("<H", 1)   # PCM format
+    header += struct.pack("<H", channels)
+    header += struct.pack("<I", sample_rate)
+    header += struct.pack("<I", byte_rate)
+    header += struct.pack("<H", block_align)
+    header += struct.pack("<H", bits)
+    header += b"data"
+    header += struct.pack("<I", data_size)
+
+    return header + pcm
+
+
 def tts_generate(model: str, text: str, voice: str) -> tuple[bytes | None, str, int]:
     """Chama Gemini TTS via REST. Retorna (audio_bytes, error, latency_ms)."""
     url = (
@@ -153,12 +178,14 @@ def main():
         )
         if audio:
             out_path = OUTPUT_DIR / f"tts_{sample['name']}.wav"
-            out_path.write_bytes(audio)
+            # Gemini retorna PCM raw (L16, 24kHz, mono) — envolve em WAV header
+            wav_bytes = _wrap_pcm_in_wav(audio, sample_rate=24000, channels=1, bits=16)
+            out_path.write_bytes(wav_bytes)
             print(
-                f"   ✓ {sample['name']:25s} ({latency_ms}ms, {len(audio)} bytes) "
-                f"→ {out_path.name}"
+                f"   ✓ {sample['name']:25s} ({latency_ms}ms, {len(audio)} bytes PCM, "
+                f"{len(wav_bytes)} bytes WAV) → {out_path.name}"
             )
-            results.append({**sample, "file": out_path.name, "latency": latency_ms, "size": len(audio)})
+            results.append({**sample, "file": out_path.name, "latency": latency_ms, "size": len(wav_bytes)})
         else:
             print(f"   ❌ {sample['name']}: {err[:120]}")
 
