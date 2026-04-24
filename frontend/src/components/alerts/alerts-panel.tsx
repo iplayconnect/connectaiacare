@@ -24,9 +24,9 @@ import {
   STATUS_SYSTEM,
   AlertStatusBadge,
 } from "./alert-status-badge";
-import { CallConfirmModal } from "./call-confirm-modal";
+import { CallConfirmModal, type CallLifecycle } from "./call-confirm-modal";
 import type { AlertClassification, ClinicalAlert } from "@/hooks/use-alerts";
-import { startVoipCall } from "@/hooks/use-voip";
+import { hangupVoipCall, startVoipCall } from "@/hooks/use-voip";
 
 // ══════════════════════════════════════════════════════════════════
 // Panel principal (client component)
@@ -43,6 +43,7 @@ export function AlertsPanel({ initialAlerts }: Props) {
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [dialpadFor, setDialpadFor] = useState<ClinicalAlert | null>(null);
+  const [callLifecycle, setCallLifecycle] = useState<CallLifecycle>({ stage: "idle" });
 
   // Contagens sobre alertas ATIVOS (fonte única)
   const liveCounts = useMemo(() => {
@@ -103,24 +104,28 @@ export function AlertsPanel({ initialAlerts }: Props) {
       ),
     );
   };
-  // Clicar "Ligar família" → abre dialpad (NÃO disca direto)
+  // Clicar "Ligar família" → abre dialpad (idle)
   const handleCall = (id: string) => {
     const alert = alerts.find((a) => a.id === id);
     if (!alert) return;
     setDialpadFor(alert);
+    setCallLifecycle({ stage: "idle" });
   };
 
-  // User clicou no botão verde "Ligar" DENTRO do dialpad → aí sim disca
+  // Usuário clicou "Ligar" verde dentro do dialpad → inicia chamada REAL
   const handleDialpadConfirm = async (finalPhone: string) => {
     const alert = dialpadFor;
     if (!alert) return;
     const id = alert.id;
     const targetName = alert.patient.family_contact?.name ?? "Família";
 
-    // Fecha dialpad imediatamente pra user ver o feedback na lista
-    setDialpadFor(null);
-
-    // Otimista: UI mostra "ligando…" enquanto VoIP conecta
+    // 1. Dialpad vira "dialing" imediato + atualiza card na lista
+    const startTs = Date.now();
+    setCallLifecycle({
+      stage: "dialing",
+      target: targetName,
+      started_at: startTs,
+    });
     setAlerts((prev) =>
       prev.map((a) =>
         a.id === id
@@ -129,13 +134,14 @@ export function AlertsPanel({ initialAlerts }: Props) {
               call_state: {
                 status: "dialing",
                 target: targetName,
-                started_at: new Date().toISOString(),
+                started_at: new Date(startTs).toISOString(),
               },
             }
           : a,
       ),
     );
 
+    // 2. Chama VoIP real
     const result = await startVoipCall({
       destination: finalPhone,
       patient_id: alert.patient.id,
@@ -146,15 +152,25 @@ export function AlertsPanel({ initialAlerts }: Props) {
     });
 
     if (result.status === "ok") {
+      // Backend aceitou. Dialpad permanece em dialing OU já muda pra connected
+      // dependendo do que voip retornou.
+      const finalStage: CallLifecycle["stage"] =
+        result.call_status === "connected" ? "connected" : "dialing";
+      setCallLifecycle({
+        stage: finalStage,
+        call_id: result.call_id,
+        target: targetName,
+        started_at: startTs,
+      });
       setAlerts((prev) =>
         prev.map((a) =>
           a.id === id
             ? {
                 ...a,
                 call_state: {
-                  status: (result.call_status as "dialing" | "connected") || "dialing",
+                  status: finalStage === "connected" ? "connected" : "dialing",
                   target: targetName,
-                  started_at: new Date().toISOString(),
+                  started_at: new Date(startTs).toISOString(),
                   call_id: result.call_id,
                 },
               }
@@ -162,6 +178,10 @@ export function AlertsPanel({ initialAlerts }: Props) {
         ),
       );
     } else {
+      setCallLifecycle({
+        stage: "failed",
+        message: result.message || "Não foi possível conectar ao VoIP.",
+      });
       setAlerts((prev) =>
         prev.map((a) =>
           a.id === id
@@ -170,13 +190,75 @@ export function AlertsPanel({ initialAlerts }: Props) {
                 call_state: {
                   status: "failed",
                   target: result.message || "VoIP indisponível",
-                  started_at: new Date().toISOString(),
+                  started_at: new Date(startTs).toISOString(),
                 },
               }
             : a,
         ),
       );
     }
+  };
+
+  // Encerrar chamada em andamento via botão "Encerrar chamada" no dialpad
+  const handleDialpadHangup = async () => {
+    if (
+      callLifecycle.stage !== "dialing" &&
+      callLifecycle.stage !== "connected"
+    ) {
+      return;
+    }
+    const callId = callLifecycle.call_id;
+    const startedAt = callLifecycle.started_at;
+    const target = callLifecycle.target;
+    const durationS = Math.floor((Date.now() - startedAt) / 1000);
+
+    // Atualiza UI imediato
+    setCallLifecycle({
+      stage: "ended",
+      call_id: callId,
+      target,
+      duration_s: durationS,
+    });
+
+    // Atualiza alerta na lista
+    if (dialpadFor) {
+      setAlerts((prev) =>
+        prev.map((a) =>
+          a.id === dialpadFor.id
+            ? {
+                ...a,
+                call_state: {
+                  status: "completed",
+                  target,
+                  started_at: new Date(startedAt).toISOString(),
+                  call_id: callId,
+                },
+              }
+            : a,
+        ),
+      );
+    }
+
+    // Best-effort hangup no backend (não bloqueia UI se falhar)
+    if (callId) {
+      try {
+        await hangupVoipCall(callId);
+      } catch {
+        // ignora; usuário já vê "encerrada"
+      }
+    }
+  };
+
+  // Fechar dialpad (só aceita se NÃO houver chamada ativa)
+  const handleDialpadClose = () => {
+    if (
+      callLifecycle.stage === "dialing" ||
+      callLifecycle.stage === "connected"
+    ) {
+      return; // ignora tentativa de fechar durante chamada
+    }
+    setDialpadFor(null);
+    setCallLifecycle({ stage: "idle" });
   };
 
   const totalActive =
@@ -282,8 +364,10 @@ export function AlertsPanel({ initialAlerts }: Props) {
       {dialpadFor && (
         <CallConfirmModal
           alert={dialpadFor}
+          callLifecycle={callLifecycle}
           onConfirm={handleDialpadConfirm}
-          onCancel={() => setDialpadFor(null)}
+          onHangup={handleDialpadHangup}
+          onCancel={handleDialpadClose}
         />
       )}
     </div>
