@@ -164,6 +164,34 @@ def get_report(report_id: str):
     return jsonify({"report": report})
 
 
+@bp.get("/api/reports/<report_id>/audio")
+def get_report_audio(report_id: str):
+    """Serve o áudio original do relato (OGG do WhatsApp).
+
+    Storage local em /app/storage/audio/<report_id>.ogg (gitignored, volume).
+    """
+    import os
+    from flask import send_file, Response
+
+    # Valida UUID básico
+    try:
+        import uuid
+        uuid.UUID(report_id)
+    except ValueError:
+        return jsonify({"error": "invalid_id"}), 400
+
+    path = os.path.join("/app/storage/audio", f"{report_id}.ogg")
+    if not os.path.exists(path):
+        return jsonify({"error": "audio_not_found"}), 404
+
+    return send_file(
+        path,
+        mimetype="audio/ogg",
+        as_attachment=False,
+        download_name=f"relato-{report_id[:8]}.ogg",
+    )
+
+
 # ==============================================================
 # Teleconsulta via LiveKit (ADR-012, módulo novo 2026-04-22)
 # ==============================================================

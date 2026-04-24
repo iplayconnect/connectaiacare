@@ -10,7 +10,6 @@ import {
   Info,
   Mic,
   Phone,
-  Play,
   Search,
   ShieldAlert,
   Sparkles,
@@ -872,30 +871,82 @@ function RelatoTab({ alert }: { alert: ClinicalAlert }) {
   );
 }
 
-function TranscricaoTab({ alert: _alert }: { alert: ClinicalAlert }) {
+function TranscricaoTab({ alert }: { alert: ClinicalAlert }) {
+  const hasAudio = !!alert.audio_url;
+  const duration = alert.audio_duration_seconds;
+  const durationLabel = duration
+    ? `${Math.floor(duration / 60)}min ${String(duration % 60).padStart(2, "0")}s`
+    : null;
+  const transcription = alert.transcription;
+
   return (
-    <div>
-      <div className="flex items-center gap-3 p-4 rounded-xl bg-[hsl(222,30%,10%)]/60 border border-white/10 mb-3.5">
-        <Mic className="h-[18px] w-[18px] text-accent-cyan" />
-        <div className="flex-1">
-          <div className="text-sm font-semibold">Áudio original · 1min 24s</div>
+    <div className="space-y-3.5">
+      {/* Player de áudio */}
+      <div className="flex items-center gap-3 p-4 rounded-xl bg-[hsl(222,30%,10%)]/60 border border-white/10">
+        <Mic
+          className={`h-[18px] w-[18px] ${hasAudio ? "text-accent-cyan" : "text-muted-foreground"}`}
+        />
+        <div className="flex-1 min-w-0">
+          <div className="text-sm font-semibold">
+            {hasAudio ? "Áudio original do cuidador" : "Áudio não disponível"}
+            {durationLabel && (
+              <span className="ml-2 text-muted-foreground font-normal tabular">
+                · {durationLabel}
+              </span>
+            )}
+          </div>
           <div className="text-[11px] text-muted-foreground mt-0.5">
-            Cuidadora: Joana Pereira · transcrito em pt-BR
+            {hasAudio
+              ? "Transcrito por Deepgram nova-2 · pt-BR"
+              : "Áudio original não persistido (legado) ou relato só-texto"}
           </div>
         </div>
-        <button className="w-9 h-9 rounded-full accent-gradient grid place-items-center">
-          <Play size={14} className="text-slate-900 ml-0.5" />
-        </button>
       </div>
-      <p className="p-4 rounded-lg bg-[hsl(222,30%,10%)]/40 border border-white/5 text-sm leading-relaxed text-foreground/85">
-        <em className="not-italic text-muted-foreground/60 tabular">[00:04] </em>
-        Doutor, a dona Maria depois do almoço ficou meio esquisita, não quis tomar o
-        remédio, tá falando embolado…
-        <em className="not-italic text-muted-foreground/60"> [00:18] </em>
-        Aferi a pressão aqui, deu cento e setenta por cem, ela tá suando frio também…
-        <em className="not-italic text-muted-foreground/60"> [00:34] </em>
-        Nunca vi ela assim, sempre tá bem depois do almoço. Acho que é bom chamar alguém.
-      </p>
+
+      {/* Player HTML5 nativo — se houver audio_url */}
+      {hasAudio && (
+        <audio
+          controls
+          preload="metadata"
+          src={alert.audio_url}
+          className="w-full rounded-lg"
+          style={{
+            colorScheme: "dark",
+            accentColor: "#31e1ff",
+            height: "40px",
+          }}
+        >
+          Seu navegador não suporta áudio HTML5.
+        </audio>
+      )}
+
+      {/* Transcrição */}
+      {transcription ? (
+        <div>
+          <div className="text-[10px] uppercase tracking-[0.14em] font-semibold text-muted-foreground mb-2">
+            Transcrição
+          </div>
+          <p className="p-4 rounded-lg bg-[hsl(222,30%,10%)]/40 border border-white/5 text-sm leading-relaxed text-foreground/85 whitespace-pre-wrap">
+            {transcription}
+          </p>
+        </div>
+      ) : (
+        // Fallback: transcrição demo (mantido pra alertas mockados)
+        <div>
+          <div className="text-[10px] uppercase tracking-[0.14em] font-semibold text-muted-foreground mb-2">
+            Transcrição (simulada)
+          </div>
+          <p className="p-4 rounded-lg bg-[hsl(222,30%,10%)]/40 border border-white/5 text-sm leading-relaxed text-foreground/85">
+            <em className="not-italic text-muted-foreground/60 tabular">[00:04] </em>
+            Doutor, a dona Maria depois do almoço ficou meio esquisita, não quis tomar o
+            remédio, tá falando embolado…
+            <em className="not-italic text-muted-foreground/60"> [00:18] </em>
+            Aferi a pressão aqui, deu cento e setenta por cem, ela tá suando frio também…
+            <em className="not-italic text-muted-foreground/60"> [00:34] </em>
+            Nunca vi ela assim, sempre tá bem depois do almoço. Acho que é bom chamar alguém.
+          </p>
+        </div>
+      )}
     </div>
   );
 }

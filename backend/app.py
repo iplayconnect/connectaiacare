@@ -4,6 +4,7 @@ from flask_cors import CORS
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from config.settings import settings
+from src.handlers.alerts_routes import bp as alerts_bp
 from src.handlers.caregivers_routes import bp as caregivers_bp
 from src.handlers.disease_routes import bp as disease_bp
 from src.handlers.medication_routes import bp as medication_bp
@@ -58,6 +59,7 @@ def create_app() -> Flask:
     app.register_blueprint(onboarding_web_bp, url_prefix="/api")
     app.register_blueprint(voip_bp, url_prefix="/api")
     app.register_blueprint(caregivers_bp, url_prefix="/api")
+    app.register_blueprint(alerts_bp, url_prefix="/api")
 
     # Headers de segurança em todas as respostas.
     # Ver FINDING-006 do security audit.

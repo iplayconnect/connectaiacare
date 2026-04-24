@@ -57,6 +57,9 @@ services:
     environment:
       DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/connectaiacare
       REDIS_URL: redis://redis:6379/5
+    volumes:
+      # Áudios WhatsApp persistidos pra reproduzir no painel (reports audio_url)
+      - connectaiacare_audio_storage:/app/storage/audio
     depends_on:
       postgres:
         condition: service_healthy
@@ -119,6 +122,7 @@ services:
 volumes:
   connectaiacare_pg_data:
   connectaiacare_redis_data:
+  connectaiacare_audio_storage:
 
 networks:
   # Rede PRIVADA da ConnectaIACare (isolamento LGPD).

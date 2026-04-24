@@ -52,6 +52,10 @@ export interface ClinicalAlert {
   escalated_to?: string | null;
   call_state?: CallState | null;
   vitals_snapshot?: VitalsSnapshot;
+  /** URL do áudio original (opcional, vem de /api/reports/:id/audio quando existe) */
+  audio_url?: string;
+  audio_duration_seconds?: number;
+  transcription?: string;
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -316,12 +320,34 @@ export const MOCK_ALERTS: ClinicalAlert[] = [
 ];
 
 // ══════════════════════════════════════════════════════════════════
-// Hook loader (Server Component-friendly)
+// Hook loader — tenta backend real primeiro, cai em mock se vazio
 // ══════════════════════════════════════════════════════════════════
 
+const API_BASE =
+  typeof window === "undefined"
+    ? process.env.INTERNAL_API_URL || "http://api:5055"
+    : process.env.NEXT_PUBLIC_API_URL || "http://localhost:5055";
+
 export async function getAlerts(): Promise<ClinicalAlert[]> {
-  // TODO: quando backend expuser GET /api/alerts, trocar por:
-  // const { alerts } = await api.listAlerts();
-  // return alerts;
+  try {
+    const res = await fetch(`${API_BASE}/api/alerts`, { cache: "no-store" });
+    if (res.ok) {
+      const data = (await res.json()) as { alerts: ClinicalAlert[] };
+      if (data.alerts && data.alerts.length > 0) {
+        // Backend retornou alertas reais → normaliza audio_url absoluto
+        return data.alerts.map((a) => ({
+          ...a,
+          audio_url: a.audio_url
+            ? a.audio_url.startsWith("http")
+              ? a.audio_url
+              : `${API_BASE}${a.audio_url}`
+            : undefined,
+        }));
+      }
+    }
+  } catch {
+    // ignore e cai no mock
+  }
+  // Fallback: mocks (pra demo quando banco vazio)
   return MOCK_ALERTS;
 }

@@ -174,6 +174,19 @@ class EldercarePipeline:
         )
         report_id = report["id"]
 
+        # Persiste áudio no storage local pra reproduzir no painel + alertas
+        # URL relativa → frontend chama /api/reports/:id/audio
+        try:
+            audio_path = self._save_audio_blob(str(report_id), audio_bytes)
+            if audio_path:
+                audio_url = f"/api/reports/{report_id}/audio"
+                self.db.execute(
+                    "UPDATE aia_health_reports SET audio_url = %s WHERE id = %s",
+                    (audio_url, report_id),
+                )
+        except Exception as exc:
+            logger.warning("audio_save_failed", error=str(exc), report_id=str(report_id))
+
         # Biometria (identifica caregiver interno)
         caregiver_id, voice_method = self._identify_caregiver_by_voice(phone, audio_bytes, tenant)
         if caregiver_id:
@@ -769,45 +782,100 @@ class EldercarePipeline:
         "tomou o remedio", "aceitou o remédio",
     )
 
+    # Prioridade de classificação (usada pra detectar "evolução") —
+    # quanto MAIOR o valor, mais crítico.
+    CLASSIFICATION_RANK = {
+        "routine": 0,
+        "attention": 1,
+        "urgent": 2,
+        "critical": 3,
+    }
+
     def _is_reassurance_response(
         self, event: dict, analysis: dict, transcription: str,
     ) -> bool:
         """Decide se um follow-up é resposta positiva a check-in de status.
 
-        Critérios (todos verdadeiros):
-          1. Evento está `awaiting_status_update` — ou seja, acabamos de
-             perguntar "como está?" e o cuidador está respondendo.
-          2. Classificação da análise veio como `routine` (mais baixa).
-          3. Nenhum alerta gerado + needs_medical_attention = False.
-          4. Transcrição contém termo de reasseguramento OU a análise
-             explicitamente marcou `resolves_event: True`.
+        Fecha o evento em QUALQUER um destes cenários (desde que esteja
+        em awaiting_status_update):
 
-        Ser conservador: se houver QUALQUER sinal de piora, não fecha.
+          A) Classification veio `routine` + sem needs_medical_attention
+             + sem alertas bloqueantes → fechamento clássico.
+
+          B) Classification veio < classification do evento (melhora relativa:
+             critical → urgent/attention/routine, urgent → attention/routine,
+             etc.) E o texto tem termo de reasseguramento ("tudo ok",
+             "passou", etc.). Ideia: IA ainda marca severidade pelo histórico
+             (ex: queda recente), mas se cuidador disse que melhorou E a IA
+             baixou a classificação, a intenção é clara.
+
+          C) LLM explicitamente sinalizou `resolves_event: True`.
+
+          D) Texto contém MÚLTIPLOS termos de reasseguramento fortes
+             (>= 2 matches) E sem needs_medical_attention E sem alertas
+             bloqueantes. Fallback agressivo pra evitar eventos "presos".
+
+        Ser conservador continua importante: needs_medical_attention=True
+        SEMPRE bloqueia fechamento automático.
         """
         status = event.get("status")
         if status != STATUS_AWAITING_STATUS_UPDATE:
             return False
 
-        classification = (analysis.get("classification") or "").lower()
-        if classification != "routine":
-            return False
-
+        # needs_medical_attention sempre bloqueia (segurança máxima)
         if analysis.get("needs_medical_attention"):
             return False
 
         alerts = analysis.get("alerts") or []
-        # Alertas de nível "alto"/"critico" bloqueiam fechamento automático
-        blocking = [a for a in alerts if (a.get("level") or "").lower() in ("alto", "critico", "crítico", "high", "critical")]
-        if blocking:
-            return False
+        blocking = [
+            a for a in alerts
+            if (a.get("level") or "").lower()
+            in ("alto", "critico", "crítico", "high", "critical")
+        ]
 
-        # LLM pode explicitamente sinalizar
-        if analysis.get("resolves_event") is True:
+        classification = (analysis.get("classification") or "").lower()
+        text_lower = (transcription or "").lower()
+        reassurance_hits = [t for t in self.REASSURANCE_TERMS if t in text_lower]
+
+        # ─── Cenário C: LLM explícito ──────────────────────────────
+        if analysis.get("resolves_event") is True and not blocking:
             return True
 
-        # Heurística lexical — barata, funciona pro MVP/demo
-        text_lower = (transcription or "").lower()
-        if any(term in text_lower for term in self.REASSURANCE_TERMS):
+        # ─── Cenário A: classificação routine + tudo limpo ────────
+        if classification == "routine" and not blocking:
+            if reassurance_hits:
+                return True
+            if analysis.get("resolves_event") is True:
+                return True
+
+        # ─── Cenário B: melhora relativa + reasseguramento ────────
+        # Ex: evento era 'critical', novo relato veio 'attention' ou 'routine'
+        # + cuidador disse "tá bem". A IA pode estar sendo conservadora por
+        # causa do histórico (ex: queda recente), mas o cuidador já confirmou
+        # melhora.
+        prev = (event.get("current_classification") or "").lower()
+        prev_rank = self.CLASSIFICATION_RANK.get(prev, -1)
+        new_rank = self.CLASSIFICATION_RANK.get(classification, 99)
+        improved = prev_rank > 0 and new_rank < prev_rank
+        if improved and reassurance_hits and not blocking:
+            logger.info(
+                "reassurance_by_improvement",
+                event_id=str(event.get("id")),
+                prev_classification=prev, new_classification=classification,
+                reassurance_hits=len(reassurance_hits),
+            )
+            return True
+
+        # ─── Cenário D: múltiplos termos de reasseguramento fortes ──
+        # Ex: "tá bem... está tudo certo... já passou" — 3 confirmações
+        # inequívocas. Mesmo sem melhora relativa, não faz sentido manter
+        # o evento aberto.
+        if len(reassurance_hits) >= 2 and not blocking:
+            logger.info(
+                "reassurance_by_strong_signals",
+                event_id=str(event.get("id")),
+                reassurance_hits=reassurance_hits[:3],
+            )
             return True
 
         return False
@@ -1182,6 +1250,27 @@ class EldercarePipeline:
             return msg["conversation"] or ""
         ext = msg.get("extendedTextMessage") or {}
         return ext.get("text") or ""
+
+    # Storage local de áudios (montado em /app/storage/audio no container).
+    # Fora do repo (gitignored) mas persistido em volume Docker.
+    _AUDIO_STORAGE_DIR = "/app/storage/audio"
+
+    @classmethod
+    def _save_audio_blob(cls, report_id: str, audio_bytes: bytes) -> str | None:
+        """Salva bytes de áudio no disco + retorna path relativo."""
+        import os
+        if not audio_bytes:
+            return None
+        try:
+            os.makedirs(cls._AUDIO_STORAGE_DIR, exist_ok=True)
+            # Evolution manda .ogg (opus) pelo WhatsApp
+            path = os.path.join(cls._AUDIO_STORAGE_DIR, f"{report_id}.ogg")
+            with open(path, "wb") as f:
+                f.write(audio_bytes)
+            return path
+        except Exception as exc:
+            logger.warning("audio_blob_save_failed", error=str(exc), report_id=report_id)
+            return None
 
     @staticmethod
     def _calc_age(birth_date) -> int | None:
