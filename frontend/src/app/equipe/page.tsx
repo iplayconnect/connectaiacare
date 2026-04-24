@@ -26,15 +26,25 @@ import {
 // /equipe — gestão de equipe clínica (médicos + cuidadores + técnicos)
 // ═══════════════════════════════════════════════════════════════
 
-const ROLE_LABELS: Record<CaregiverRole, string> = {
+// Maps tolerantes a valores desconhecidos vindos do banco (legado MedMonitor usa
+// "profissional", "cuidadora", etc.). Fallback evita crash client-side.
+const ROLE_LABELS: Record<string, string> = {
   cuidador: "Cuidador",
+  cuidadora: "Cuidadora",
+  profissional: "Profissional",
   enfermagem: "Enfermagem",
   tecnico: "Técnico",
   coordenador: "Coordenador",
   medico: "Médico",
 };
 
-const ROLE_COLORS: Record<CaregiverRole, { bg: string; text: string; border: string }> = {
+const DEFAULT_COLOR = {
+  bg: "bg-white/5",
+  text: "text-muted-foreground",
+  border: "border-white/10",
+};
+
+const ROLE_COLORS: Record<string, { bg: string; text: string; border: string }> = {
   medico: {
     bg: "bg-accent-cyan/10",
     text: "text-accent-cyan",
@@ -55,6 +65,16 @@ const ROLE_COLORS: Record<CaregiverRole, { bg: string; text: string; border: str
     text: "text-classification-routine",
     border: "border-classification-routine/30",
   },
+  cuidadora: {
+    bg: "bg-classification-routine/10",
+    text: "text-classification-routine",
+    border: "border-classification-routine/30",
+  },
+  profissional: {
+    bg: "bg-accent-teal/10",
+    text: "text-accent-teal",
+    border: "border-accent-teal/30",
+  },
   tecnico: {
     bg: "bg-purple-400/10",
     text: "text-purple-300",
@@ -62,13 +82,37 @@ const ROLE_COLORS: Record<CaregiverRole, { bg: string; text: string; border: str
   },
 };
 
-const ROLE_ICONS: Record<CaregiverRole, typeof UserRound> = {
+const ROLE_ICONS: Record<string, typeof UserRound> = {
   medico: Stethoscope,
   enfermagem: UserRound,
   coordenador: UserCog,
   cuidador: UserRound,
+  cuidadora: UserRound,
+  profissional: UserRound,
   tecnico: UserCog,
 };
+
+const SHIFT_LABELS: Record<string, string> = {
+  manha: "Manhã",
+  tarde: "Tarde",
+  noite: "Noite",
+  noturno: "Noturno",
+  diurno: "Diurno",
+  "12x36": "12×36",
+  "24h": "24h",
+  plantao: "Plantão",
+  flexivel: "Flexível",
+};
+
+function getRoleStyle(role: string) {
+  return ROLE_COLORS[role] ?? DEFAULT_COLOR;
+}
+function getRoleLabel(role: string): string {
+  return ROLE_LABELS[role] ?? role.charAt(0).toUpperCase() + role.slice(1);
+}
+function getRoleIcon(role: string): typeof UserRound {
+  return ROLE_ICONS[role] ?? UserRound;
+}
 
 export default function EquipePage() {
   const [activeTab, setActiveTab] = useState<CaregiverRole | "todos">("todos");
@@ -157,18 +201,29 @@ export default function EquipePage() {
             active={activeTab === "todos"}
             onClick={() => setActiveTab("todos")}
           />
-          {(["medico", "enfermagem", "cuidador", "tecnico", "coordenador"] as const).map(
-            (role) => (
-              <TabButton
-                key={role}
-                label={ROLE_LABELS[role]}
-                count={counts[role] || 0}
-                active={activeTab === role}
-                onClick={() => setActiveTab(role)}
-                color={ROLE_COLORS[role].text}
-              />
-            ),
-          )}
+          {/* Tabs fixas dos 5 roles principais + qualquer extra que apareça no banco */}
+          {Array.from(
+            new Set([
+              "medico",
+              "enfermagem",
+              "cuidador",
+              "tecnico",
+              "coordenador",
+              ...Object.keys(counts).filter(
+                (r) =>
+                  !["medico", "enfermagem", "cuidador", "tecnico", "coordenador"].includes(r),
+              ),
+            ]),
+          ).map((role) => (
+            <TabButton
+              key={role}
+              label={getRoleLabel(role)}
+              count={counts[role] || 0}
+              active={activeTab === role}
+              onClick={() => setActiveTab(role as CaregiverRole)}
+              color={getRoleStyle(role).text}
+            />
+          ))}
         </div>
 
         {/* Busca */}
@@ -275,8 +330,9 @@ function CaregiverCard({
   caregiver: Caregiver;
   onDeactivate: () => void;
 }) {
-  const color = ROLE_COLORS[caregiver.role];
-  const Icon = ROLE_ICONS[caregiver.role];
+  const color = getRoleStyle(caregiver.role);
+  const Icon = getRoleIcon(caregiver.role);
+  const roleLabel = getRoleLabel(caregiver.role);
   const initials = caregiver.full_name
     .split(" ")
     .filter((w) => w.length > 1)
@@ -299,7 +355,7 @@ function CaregiverCard({
             <h3 className="text-sm font-semibold truncate">{caregiver.full_name}</h3>
             <div className={`flex items-center gap-1 mt-0.5 text-[10px] uppercase tracking-wider font-semibold ${color.text}`}>
               <Icon className="h-3 w-3" />
-              {ROLE_LABELS[caregiver.role]}
+              {roleLabel}
               {caregiver.shift && (
                 <span className="text-muted-foreground/70 ml-1 normal-case tracking-normal font-normal flex items-center gap-0.5">
                   <Clock className="h-2.5 w-2.5" />
@@ -366,13 +422,5 @@ function formatPhone(phone: string): string {
 }
 
 function formatShift(shift: string): string {
-  return {
-    manha: "Manhã",
-    tarde: "Tarde",
-    noite: "Noite",
-    "12x36": "12×36",
-    "24h": "24h",
-    plantao: "Plantão",
-    flexivel: "Flexível",
-  }[shift] ?? shift;
+  return SHIFT_LABELS[shift] ?? shift;
 }

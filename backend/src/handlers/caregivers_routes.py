@@ -26,8 +26,14 @@ logger = get_logger(__name__)
 bp = Blueprint("caregivers", __name__)
 
 
-ALLOWED_ROLES = ("cuidador", "enfermagem", "tecnico", "coordenador", "medico")
-ALLOWED_SHIFTS = ("manha", "tarde", "noite", "12x36", "24h", "plantao", "flexivel")
+ALLOWED_ROLES = (
+    "cuidador", "cuidadora", "profissional",
+    "enfermagem", "tecnico", "coordenador", "medico",
+)
+ALLOWED_SHIFTS = (
+    "manha", "tarde", "noite", "noturno", "diurno",
+    "12x36", "24h", "plantao", "flexivel",
+)
 
 
 # ══════════════════════════════════════════════════════════════════
