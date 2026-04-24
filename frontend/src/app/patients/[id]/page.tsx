@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 
+import { MedicationTimeline } from "@/components/medication/medication-timeline";
 import { MedicationsAdherence } from "@/components/prontuario/medications-adherence";
 import { PatientHero } from "@/components/prontuario/patient-hero";
 import { SofiaInsights } from "@/components/prontuario/sofia-insights";
@@ -61,6 +62,10 @@ export default async function PatientDetailPage({
 
         <div className="space-y-5">
           <SofiaInsights insights={insights} />
+          <MedicationTimeline
+            patientId={patient.id}
+            patientName={patient.nickname || patient.full_name}
+          />
           <MedicationsAdherence
             medications={patient.medications}
             events={medication_events}
