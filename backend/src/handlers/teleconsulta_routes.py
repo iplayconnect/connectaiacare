@@ -35,6 +35,108 @@ bp = Blueprint("teleconsulta", __name__)
 
 
 # ============================================================
+# GET /api/teleconsulta — lista agendamentos (dashboard)
+# ============================================================
+@bp.get("/api/teleconsulta")
+def list_teleconsultas():
+    """Lista teleconsultas pra dashboard /teleconsulta.
+
+    Query:
+        ?state=scheduling|active|documentation|signed|closed (opcional, múltiplo)
+        ?limit=30
+    """
+    from config.settings import settings as _settings
+    from src.services.postgres import get_postgres
+
+    db = get_postgres()
+    tenant_id = _settings.tenant_id
+    limit = min(int(request.args.get("limit", 30)), 100)
+    states = request.args.getlist("state")
+
+    where = ["tc.tenant_id = %s"]
+    params: list[Any] = [tenant_id]
+    if states:
+        where.append("tc.state = ANY(%s)")
+        params.append(states)
+
+    params.append(limit)
+    rows = db.fetch_all(
+        f"""
+        SELECT
+            tc.id, tc.human_id, tc.state, tc.livekit_room_name,
+            tc.doctor_name_snapshot, tc.doctor_crm_snapshot,
+            tc.livekit_metadata, tc.scheduled_for, tc.started_at,
+            tc.ended_at, tc.duration_seconds, tc.care_event_id,
+            tc.soap IS NOT NULL AS has_soap,
+            tc.signed_at, tc.created_at,
+            p.id AS patient_id,
+            p.full_name AS patient_name,
+            p.nickname AS patient_nickname,
+            p.birth_date AS patient_birth_date,
+            p.care_unit AS patient_unit,
+            p.room_number AS patient_room
+        FROM aia_health_teleconsultations tc
+        LEFT JOIN aia_health_patients p ON p.id = tc.patient_id
+        WHERE {' AND '.join(where)}
+        ORDER BY
+            CASE tc.state
+                WHEN 'active' THEN 0
+                WHEN 'scheduling' THEN 1
+                WHEN 'documentation' THEN 2
+                WHEN 'signed' THEN 3
+                ELSE 4
+            END,
+            COALESCE(tc.scheduled_for, tc.created_at) DESC
+        LIMIT %s
+        """,
+        tuple(params),
+    )
+
+    def _to_dict(r: dict) -> dict:
+        md = r.get("livekit_metadata") or {}
+        return {
+            "id": str(r["id"]),
+            "human_id": r.get("human_id"),
+            "state": r.get("state"),
+            "room_name": r.get("livekit_room_name"),
+            "doctor_name": r.get("doctor_name_snapshot"),
+            "doctor_crm": r.get("doctor_crm_snapshot"),
+            "specialty": md.get("specialty") if isinstance(md, dict) else None,
+            "reason": md.get("reason") if isinstance(md, dict) else None,
+            "duration_min": (md.get("duration_min") if isinstance(md, dict) else None)
+                or (r.get("duration_seconds") // 60 if r.get("duration_seconds") else None),
+            "scheduled_for": r["scheduled_for"].isoformat()
+                if r.get("scheduled_for") and isinstance(r["scheduled_for"], datetime)
+                else r.get("scheduled_for"),
+            "started_at": r["started_at"].isoformat()
+                if r.get("started_at") and isinstance(r["started_at"], datetime)
+                else None,
+            "ended_at": r["ended_at"].isoformat()
+                if r.get("ended_at") and isinstance(r["ended_at"], datetime)
+                else None,
+            "duration_seconds": r.get("duration_seconds"),
+            "has_soap": r.get("has_soap"),
+            "signed_at": r["signed_at"].isoformat()
+                if r.get("signed_at") and isinstance(r["signed_at"], datetime)
+                else None,
+            "care_event_id": str(r["care_event_id"]) if r.get("care_event_id") else None,
+            "patient": {
+                "id": str(r["patient_id"]) if r.get("patient_id") else None,
+                "name": r.get("patient_name"),
+                "nickname": r.get("patient_nickname"),
+                "unit": r.get("patient_unit"),
+                "room": r.get("patient_room"),
+                "birth_date": r["patient_birth_date"].isoformat()
+                    if r.get("patient_birth_date")
+                    and hasattr(r["patient_birth_date"], "isoformat")
+                    else r.get("patient_birth_date"),
+            },
+        }
+
+    return jsonify({"teleconsultas": [_to_dict(r) for r in rows], "total": len(rows)}), 200
+
+
+# ============================================================
 # POST /api/teleconsulta/schedule — agendamento direto (sem care_event)
 # ============================================================
 @bp.post("/api/teleconsulta/schedule")
