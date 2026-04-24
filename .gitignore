@@ -56,3 +56,4 @@ demo-assets/audio_samples/*.mp3
 !.claude/skills/
 !.claude/settings.json
 .cursor/
+Temp/

@@ -7,6 +7,7 @@ import {
   FileText,
   HeartPulse,
   Settings,
+  ShieldAlert,
   Sparkles,
   UsersRound,
   UserCog,
@@ -27,6 +28,7 @@ type NavItem = {
 
 const NAV_ITEMS: NavItem[] = [
   { href: "/", label: "Dashboard", icon: Activity },
+  { href: "/alertas", label: "Alertas", icon: ShieldAlert },
   { href: "/reports", label: "Relatos", icon: FileText },
   { href: "/patients", label: "Pacientes", icon: UsersRound },
   { href: "/teleconsulta", label: "Teleconsulta", icon: Video },

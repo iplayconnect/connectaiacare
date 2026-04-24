@@ -1,17 +1,14 @@
 /**
  * use-patient — hook de acesso ao prontuário completo.
  *
- * Estado atual (MVP demo): retorna mock canônico do exploracoes/mocks/patients.ts.
- * TODO(coder): substituir por fetch real ao backend quando endpoints estiverem prontos:
- *   - GET /api/patients/:id
- *   - GET /api/patients/:id/reports?limit=30
- *   - GET /api/patients/:id/vital-signs?days=30
- *   - GET /api/patients/:id/medications/events?days=7
- *   - GET /api/patients/:id/care-events?status=active,resolved
- *   - GET /api/patients/:id/insights  (Onda C+ — distiller + pattern detection)
+ * Resolve paciente em 2 etapas:
+ *   1. Checa mock registry (demo: "maria", "antonio", "lucia" ou UUIDs deles)
+ *   2. Fallback pra API real GET /api/patients/:id
+ *      Campos não retornados pela API (vital_signs, insights, med_events)
+ *      são preenchidos com arrays vazios OU mocks genéricos pra demo visual.
  *
- * Padrão: suspense-friendly (Next.js 14 Server Components) + revalidate 0.
- * Para Client Components, use useSWR ou TanStack Query se precisar de polling.
+ * Quando backend ganhar endpoints dedicados (/api/patients/:id/vital-signs etc),
+ * basta adicionar chamadas paralelas na seção "Real API fallback".
  */
 import {
   mockAntonio,
@@ -29,6 +26,7 @@ import {
   type Report,
   type VitalSign,
 } from "@/mocks/patients";
+import { api, type Patient as ApiPatient, type Report as ApiReport } from "@/lib/api";
 
 // ══════════════════════════════════════════════════════════════════
 // Tipos consolidados
@@ -39,8 +37,8 @@ export interface SofiaInsight {
   type: "pattern" | "recommendation" | "alert";
   title: string;
   description: string;
-  confidence: number; // 0..1
-  sources: string[]; // chunk_ids ou "últimos 7 dias de vitais"
+  confidence: number;
+  sources: string[];
   cfm_disclaimer?: boolean;
   created_at: string;
 }
@@ -55,7 +53,7 @@ export interface PatientFull {
 }
 
 // ══════════════════════════════════════════════════════════════════
-// Mock registry — por enquanto, 3 personas do mock canônico
+// Mock registry — 3 personas do mock canônico
 // ══════════════════════════════════════════════════════════════════
 
 const MOCK_REGISTRY: Record<string, PatientFull> = {
@@ -85,30 +83,126 @@ const MOCK_REGISTRY: Record<string, PatientFull> = {
   },
 };
 
-// Também aceita "maria" / "antonio" / "lucia" como id pra demo
+// Aliases pra demo (pra digitar /patients/maria em vez de UUID)
 MOCK_REGISTRY["maria"] = MOCK_REGISTRY[mockMaria.id];
 MOCK_REGISTRY["antonio"] = MOCK_REGISTRY[mockAntonio.id];
 MOCK_REGISTRY["lucia"] = MOCK_REGISTRY[mockLucia.id];
 
 // ══════════════════════════════════════════════════════════════════
-// Hook principal (Server Component-friendly)
+// Hook principal
 // ══════════════════════════════════════════════════════════════════
 
 export async function getPatient(id: string): Promise<PatientFull | null> {
-  // TODO(coder): descomentar quando endpoints existirem
-  // const [patient, reports, vitals, events, meds, insights] = await Promise.all([
-  //   api.getPatient(id),
-  //   api.listPatientReports(id, 30),
-  //   api.listVitalSigns(id, 30),
-  //   api.listCareEvents(id),
-  //   api.listMedicationEvents(id, 7),
-  //   api.listSofiaInsights(id),
-  // ]);
-  // return { patient, reports, vital_signs: vitals, care_events: events,
-  //          medication_events: meds, insights };
+  // 1. Mock registry primeiro (3 personas de demo)
+  if (MOCK_REGISTRY[id]) {
+    return MOCK_REGISTRY[id];
+  }
 
-  // Mock pra demo
-  return MOCK_REGISTRY[id] ?? null;
+  // 2. Fallback pra API real do backend
+  try {
+    const [patientData, eventsData] = await Promise.all([
+      api.getPatient(id),
+      api.listPatientEvents(id, true).catch(() => []),
+    ]);
+
+    return {
+      patient: adaptApiPatient(patientData.patient),
+      reports: (patientData.reports || []).map(adaptApiReport),
+      care_events: (eventsData || []).map(adaptApiCareEvent),
+      // Ainda sem endpoint dedicado — campos vazios são aceitáveis
+      // TODO: quando backend expuser, plugar /api/patients/:id/vital-signs etc.
+      vital_signs: [],
+      medication_events: [],
+      insights: [],
+    };
+  } catch (err) {
+    // Paciente não existe nem no mock nem no backend
+    console.error("[use-patient] getPatient failed", id, err);
+    return null;
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════
+// Adapters — converte shapes do backend pro shape do mock canônico
+// ══════════════════════════════════════════════════════════════════
+
+function adaptApiPatient(p: ApiPatient): Patient {
+  return {
+    id: p.id,
+    tenant_id: "connectaiacare_demo",
+    full_name: p.full_name,
+    nickname: p.nickname ?? undefined,
+    birth_date: p.birth_date ?? "1950-01-01",
+    gender: (p.gender as "F" | "M" | "O") ?? "O",
+    photo_url: p.photo_url ?? undefined,
+    care_unit: p.care_unit ?? undefined,
+    room_number: p.room_number ?? undefined,
+    care_level:
+      p.care_level === "autonomo" ||
+      p.care_level === "semi_dependente" ||
+      p.care_level === "dependente"
+        ? p.care_level
+        : undefined,
+    conditions: (p.conditions || []).map((c) => ({
+      name: c.description,
+      cid10: c.code,
+      severity:
+        c.severity === "mild" || c.severity === "moderate" || c.severity === "severe"
+          ? c.severity
+          : undefined,
+    })),
+    medications: (p.medications || []).map((m) => ({
+      name: m.name,
+      dose: m.dose ?? "",
+      frequency: m.schedule ?? "",
+    })),
+    allergies: (p.allergies || []).map((a) => ({ substance: a })),
+    responsible: p.responsible
+      ? [
+          {
+            name: p.responsible.name ?? "Responsável",
+            relationship: p.responsible.relationship ?? "familiar",
+            phone: p.responsible.phone ?? "",
+            is_primary: true,
+          },
+        ]
+      : [],
+    active: p.active,
+    created_at: p.created_at,
+    updated_at: p.updated_at,
+  };
+}
+
+function adaptApiReport(r: ApiReport): Report {
+  return {
+    id: r.id,
+    patient_id: r.patient_id ?? "",
+    caregiver_name_claimed: r.caregiver_name_claimed ?? undefined,
+    caregiver_phone: "",
+    transcription: r.transcription ?? "",
+    classification: (r.classification as Report["classification"]) ?? "routine",
+    needs_medical_attention: false,
+    status: "analyzed",
+    received_at: (r as unknown as { received_at?: string }).received_at ?? new Date().toISOString(),
+    analysis: r.analysis as Report["analysis"],
+  };
+}
+
+function adaptApiCareEvent(e: unknown): CareEvent {
+  const raw = e as Record<string, unknown>;
+  return {
+    id: String(raw.id ?? ""),
+    human_id: Number(raw.human_id ?? 0),
+    patient_id: "",
+    caregiver_phone: "",
+    initial_classification: (raw.classification ?? "routine") as CareEvent["initial_classification"],
+    current_classification: (raw.classification ?? "routine") as CareEvent["current_classification"],
+    event_type: raw.event_type ? String(raw.event_type) : undefined,
+    event_tags: [],
+    status: (raw.status ?? "analyzing") as CareEvent["status"],
+    summary: raw.summary ? String(raw.summary) : undefined,
+    opened_at: raw.opened_at ? String(raw.opened_at) : new Date().toISOString(),
+  };
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -124,11 +218,7 @@ function buildMariaInsights(): SofiaInsight[] {
       description:
         "Nos últimos 30 dias, a PA sistólica mediana subiu 12 mmHg em dias de visita familiar (78% dos casos). Pode sugerir estresse social ou interação com tema emocional não processado.",
       confidence: 0.78,
-      sources: [
-        "vital_signs_30d",
-        "care_event_ce-001",
-        "transcriptions_similarity",
-      ],
+      sources: ["vital_signs_30d", "care_event_ce-001", "transcriptions_similarity"],
       cfm_disclaimer: true,
       created_at: "2026-04-22T22:00:00Z",
     },
@@ -190,7 +280,6 @@ export function computeVitalTrend(
     return { values, delta7d: 0, direction: "stable" };
   }
 
-  // Delta: último - primeiro
   const first = values[0];
   const last = values[values.length - 1];
   const delta = last - first;
