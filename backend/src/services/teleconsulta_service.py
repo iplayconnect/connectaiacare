@@ -177,6 +177,46 @@ class TeleconsultaService:
             "expires_at": expires_at.isoformat(),
         }
 
+    def generate_quick_token(
+        self,
+        room_name: str,
+        role: str = "patient",
+        display_name: str | None = None,
+    ) -> dict:
+        """Gera token LiveKit on-demand pra uma sala (usado em links agendados).
+
+        Ao contrário de start_for_event (que cria sala completa + persiste em
+        care_event), este apenas gera JWT para uma room_name dada. Ideal pro
+        fluxo /teleconsulta/agendar que gera link `/consulta/<id>` sem evento
+        ativo associado.
+
+        Args:
+            room_name: nome único da sala (ex: 'tc-abc123')
+            role: 'doctor' | 'patient' | 'family'
+            display_name: nome exibido no participant (fallback: role.title())
+        """
+        identity = f"{role}-{uuid.uuid4().hex[:8]}"
+        name = display_name or role.capitalize()
+        # Médico e família podem publicar áudio+vídeo; paciente padrão também
+        can_publish = True
+        can_subscribe = True
+
+        token = self._make_token(
+            room_name=room_name,
+            identity=identity,
+            display_name=name,
+            can_publish=can_publish,
+            can_subscribe=can_subscribe,
+        )
+        return {
+            "token": token,
+            "ws_url": settings.livekit_ws_url,
+            "room_name": room_name,
+            "identity": identity,
+            "role": role,
+            "expires_in_hours": PARTICIPANT_TOKEN_TTL_HOURS,
+        }
+
     def _make_token(
         self,
         room_name: str,

@@ -41,9 +41,14 @@ type ConnectionState =
   | "disconnected"
   | "error";
 
+const API_BASE =
+  typeof window === "undefined"
+    ? process.env.INTERNAL_API_URL || "http://api:5055"
+    : process.env.NEXT_PUBLIC_API_URL || "http://localhost:5055";
+
 export function ConsultaRoom({
   roomName,
-  token,
+  token: initialToken,
   role,
   teleconsultaId,
 }: {
@@ -58,6 +63,56 @@ export function ConsultaRoom({
   const [elapsed, setElapsed] = useState<number>(0);
   const [micEnabled, setMicEnabled] = useState(true);
   const [camEnabled, setCamEnabled] = useState(true);
+
+  // Token pode vir direto na URL (fluxo /events/:id/start) OU ser fetched
+  // on-demand (fluxo /teleconsulta/agendar que gera link sem token).
+  const [token, setToken] = useState<string>(initialToken);
+  const [fetchingToken, setFetchingToken] = useState<boolean>(!initialToken);
+
+  // Busca token automaticamente quando o link vem sem
+  useEffect(() => {
+    if (initialToken) return; // já tem token, nada a fazer
+    if (!roomName) return;
+
+    let mounted = true;
+    (async () => {
+      try {
+        const res = await fetch(
+          `${API_BASE}/api/teleconsulta/${encodeURIComponent(roomName)}/token?role=${role}`,
+        );
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          if (mounted) {
+            setError(
+              body.message || `Não foi possível acessar a sala (HTTP ${res.status})`,
+            );
+            setConnState("error");
+            setFetchingToken(false);
+          }
+          return;
+        }
+        const data = await res.json();
+        if (mounted && data.token) {
+          setToken(data.token);
+          setFetchingToken(false);
+        }
+      } catch (err) {
+        if (mounted) {
+          setError(
+            err instanceof Error
+              ? `Erro de rede: ${err.message}`
+              : "Erro de rede ao buscar token",
+          );
+          setConnState("error");
+          setFetchingToken(false);
+        }
+      }
+    })();
+
+    return () => {
+      mounted = false;
+    };
+  }, [initialToken, roomName, role]);
 
   const roomRef = useRef<Room | null>(null);
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
@@ -79,11 +134,16 @@ export function ConsultaRoom({
     return () => clearInterval(id);
   }, [connState]);
 
-  // Conecta quando token estiver disponível
+  // Conecta quando token estiver disponível.
+  // Se ainda estamos buscando token (quick-token), aguarda.
   useEffect(() => {
+    if (fetchingToken) return; // aguarda fetch
     if (!token) {
-      setError("Token ausente — link inválido ou expirado");
-      setConnState("error");
+      // Só considera erro se o fetch terminou e mesmo assim não temos token
+      if (connState !== "error") {
+        setError("Token ausente — link inválido ou expirado");
+        setConnState("error");
+      }
       return;
     }
 
@@ -164,7 +224,8 @@ export function ConsultaRoom({
       mounted = false;
       room.disconnect();
     };
-  }, [token]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, fetchingToken]);
 
   function attachRemoteTracks(p: RemoteParticipant) {
     for (const pub of p.trackPublications.values()) {

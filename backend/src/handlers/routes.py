@@ -8,6 +8,7 @@ from flask import Blueprint, jsonify, request
 from src.handlers.pipeline import get_pipeline
 from src.services.patient_service import get_patient_service
 from src.services.report_service import get_report_service
+from src.services.teleconsulta_service import get_teleconsulta_service
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -244,6 +245,48 @@ def get_report_audio(report_id: str):
 # ==============================================================
 # Teleconsulta via LiveKit (ADR-012, módulo novo 2026-04-22)
 # ==============================================================
+
+@bp.get("/api/teleconsulta/<room_name>/token")
+def teleconsulta_quick_token(room_name: str):
+    """Gera token LiveKit on-demand pra uma sala (fluxo /cadastro/agendar).
+
+    Usado quando um link foi gerado pelo formulário de agendamento e não tem
+    token embutido. O frontend (ConsultaRoom) chama este endpoint ao abrir.
+
+    Query params:
+        ?role=doctor|patient|family  (default: patient)
+        ?name=<display_name>         (default: role capitalizado)
+
+    Segurança básica: aceita room_name com prefixo 'tc-' ou 'care-event-'
+    pra evitar invitação indevida em salas arbitrárias. Tokens expiram em 2h.
+    """
+    if not (room_name.startswith("tc-") or room_name.startswith("care-event-")):
+        return jsonify({
+            "error": "invalid_room_format",
+            "message": "Room name deve começar com 'tc-' ou 'care-event-'",
+        }), 400
+
+    role = (request.args.get("role") or "patient").lower()
+    if role not in ("doctor", "patient", "family", "nurse"):
+        role = "patient"
+    display_name = request.args.get("name") or role.capitalize()
+
+    try:
+        result = get_teleconsulta_service().generate_quick_token(
+            room_name=room_name,
+            role=role,
+            display_name=display_name,
+        )
+        return jsonify({"status": "ok", **result}), 200
+    except Exception as exc:
+        logger.error("quick_token_error", room=room_name, role=role, error=str(exc))
+        return jsonify({
+            "status": "error",
+            "message": "Não foi possível gerar token LiveKit",
+            "detail": str(exc),
+        }), 500
+
+
 @bp.post("/api/events/<event_id>/teleconsulta/start")
 def start_teleconsultation(event_id: str):
     """Inicia sala LiveKit para teleconsulta, associada ao care_event.
