@@ -92,9 +92,33 @@ Relatório completo: `docs/testes/gemini/report.md`
 - Deepgram: "Olá, aqui é Milene, eu sou cuidadora do senhor Armindo Trevisan." ✅
 - Gemini: "Olá, aqui é a Milene. Sou cuidadora do senhor **Arlindo Trevizan**." ❌ (2 nomes errados)
 
-### TTS com audio tags
+### TTS — testado via REST (sucesso)
 
-**Falhou em teste inicial** — `google-generativeai` SDK atual não expõe `response_modalities`. Próximo passo: testar via `vertexai.preview.generative_models` ou REST direto.
+**Descoberta**: SDK `google-generativeai` Python não expõe `responseModalities: ["AUDIO"]`. Solução: chamar endpoint REST `v1beta/models/gemini-3.1-flash-tts-preview:generateContent` direto via `httpx`.
+
+**Importante**: o modelo **NÃO aceita** tags inline `[warm] [urgent]` como a análise original do Opus Chat sugeriu. Controle de estilo é via **prefixos em inglês** no início do texto:
+
+| Classification | Prefixo TTS |
+|---------------|-------------|
+| `routine` | `Say warmly and gently:` |
+| `attention` | `Say in a calm but serious tone:` |
+| `urgent` | `Say firmly and directly:` |
+| `critical` | `Say urgently with clear authority:` |
+| Reassurance | `Say gently and reassuringly:` |
+
+**4 samples pt-BR gerados** (commit deste ADR) — `docs/testes/gemini/audios/`:
+- `tts_checkin_warm.mp3` (80KB)
+- `tts_attention_change.mp3` (108KB)
+- `tts_urgent_fall.mp3` (85KB)
+- `tts_reassurance.mp3` (116KB)
+
+**Métricas técnicas**:
+- Formato retornado: PCM raw L16 mono 24kHz (envolvi em WAV RIFF manualmente)
+- Voz: `Kore` (feminina pt-BR padrão; Gemini oferece 30+ vozes)
+- Latência geração: 5-11s (preview endpoint, pode variar)
+- Tamanho MP3 96kbps: 80-120KB por trecho de ~7-10s falados
+
+**Validação qualitativa pendente**: Alexandre + Murilo escutam e julgam naturalidade pt-BR geriátrico antes de aprovar migração vs manter ElevenLabs.
 
 ### Flash Live
 
