@@ -34,6 +34,8 @@ bp = Blueprint("voip", __name__)
 # ══════════════════════════════════════════════════════════════════
 
 VOIP_SERVICE_URL = os.getenv("VOIP_SERVICE_URL", "http://voip-service:5010")
+# Blueprint do voip-service está montado em /api/v1/voip (ver voip_app.py)
+VOIP_API_PREFIX = os.getenv("VOIP_API_PREFIX", "/api/v1/voip")
 VOIP_TENANT_ID = os.getenv("VOIP_TENANT_ID", "connectaiacare_demo")
 VOIP_TIMEOUT_S = 15.0
 
@@ -88,7 +90,7 @@ def make_call():
     }
 
     try:
-        resp = _client.post(f"{VOIP_SERVICE_URL}/call", json=payload)
+        resp = _client.post(f"{VOIP_SERVICE_URL}{VOIP_API_PREFIX}/call", json=payload)
     except httpx.RequestError as exc:
         logger.error("voip_call_network_error", error=str(exc), destination=destination[-4:])
         return jsonify({
@@ -136,7 +138,7 @@ def make_call():
 def call_status(call_id: str):
     """Consulta status de uma chamada em andamento."""
     try:
-        resp = _client.get(f"{VOIP_SERVICE_URL}/call-status/{call_id}")
+        resp = _client.get(f"{VOIP_SERVICE_URL}{VOIP_API_PREFIX}/call-status/{call_id}")
     except httpx.RequestError as exc:
         logger.debug("voip_status_network_error", error=str(exc))
         return jsonify({"status": "error", "message": "VoIP indisponível"}), 502
@@ -165,7 +167,7 @@ def call_status(call_id: str):
 def hangup_call(call_id: str):
     """Encerra chamada em andamento."""
     try:
-        resp = _client.post(f"{VOIP_SERVICE_URL}/hangup", json={"call_id": call_id})
+        resp = _client.post(f"{VOIP_SERVICE_URL}{VOIP_API_PREFIX}/hangup", json={"call_id": call_id})
     except httpx.RequestError as exc:
         logger.debug("voip_hangup_network_error", error=str(exc))
         return jsonify({"status": "error", "message": "VoIP indisponível"}), 502
