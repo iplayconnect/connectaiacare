@@ -1,15 +1,18 @@
 import { AlertCircle, HeartPulse, MapPin, Users } from "lucide-react";
 
 import {
+  type CareEvent,
   type Condition,
   type Patient,
   patientAge,
   type ResponsibleFamily,
 } from "../../../../exploracoes/mocks/patients";
+import { PatientActions } from "./patient-actions";
 
 interface Props {
   patient: Patient;
   acgScore?: { value: number; label: string };
+  care_events?: CareEvent[];
 }
 
 /**
@@ -24,7 +27,7 @@ interface Props {
  *
  * Não depende de hooks — recebe tudo via props.
  */
-export function PatientHero({ patient, acgScore }: Props) {
+export function PatientHero({ patient, acgScore, care_events = [] }: Props) {
   const age = patientAge(patient);
   const primaryResp = patient.responsible.find((r) => r.is_primary);
 
@@ -95,6 +98,10 @@ export function PatientHero({ patient, acgScore }: Props) {
           {acgScore && <ACGBlock score={acgScore} />}
           {primaryResp && <CaregiverBlock caregiver={primaryResp} />}
         </div>
+
+        {/* Actions (teleconsulta + histórico + Sofia) — sempre no canto direito em desktop */}
+        <div className="hidden lg:block w-px bg-gradient-to-b from-transparent via-white/10 to-transparent" />
+        <PatientActions patient={patient} care_events={care_events} />
       </div>
     </section>
   );

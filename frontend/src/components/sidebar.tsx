@@ -7,8 +7,10 @@ import {
   FileText,
   HeartPulse,
   Settings,
+  Sparkles,
   UsersRound,
   UserCog,
+  Video,
 } from "lucide-react";
 
 // ═══════════════════════════════════════════════════════════════
@@ -27,6 +29,8 @@ const NAV_ITEMS: NavItem[] = [
   { href: "/", label: "Dashboard", icon: Activity },
   { href: "/reports", label: "Relatos", icon: FileText },
   { href: "/patients", label: "Pacientes", icon: UsersRound },
+  { href: "/teleconsulta", label: "Teleconsulta", icon: Video },
+  { href: "/demo/onboarding", label: "Sofia ao vivo", icon: Sparkles },
   { href: "/equipe", label: "Equipe", icon: UserCog },
   { href: "/configuracoes", label: "Configurações", icon: Settings },
 ];

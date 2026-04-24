@@ -44,7 +44,7 @@ export default async function PatientDetailPage({
 
   return (
     <div className="space-y-5 max-w-[1400px] animate-fade-up">
-      <PatientHero patient={patient} acgScore={acgScore} />
+      <PatientHero patient={patient} acgScore={acgScore} care_events={care_events} />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         <div className="lg:col-span-2 space-y-5">
