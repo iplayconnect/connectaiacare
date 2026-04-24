@@ -1,0 +1,10 @@
+=== REPORT aff1c0e1-a4ed-40a8-831d-28b0ac6b072b (11s) ===
+
+--- Deepgram nova-2 ---
+Olá, aqui é Milene, eu sou cuidadora do senhor Armindo Trevisan. Ele acabou de cair da cama e está, está se sentindo muito tonto.
+
+--- Gemini ---
+Olá, aqui é a Milene. Sou cuidadora do senhor Arlindo Trevizan. Ele acabou de cair da cama e está e está se sentindo muito tonto.
+
+Similaridade: 78.26%
+Latência Gemini: 1639ms

@@ -1,0 +1,10 @@
+=== REPORT b93b8c7e-1eb9-42bf-b0ae-57a6b9ba438d (3s) ===
+
+--- Deepgram nova-2 ---
+Ok, o caso seu armindo já foi finalizado.
+
+--- Gemini ---
+O caso do Armindo já foi finalizado.
+
+Similaridade: 62.50%
+Latência Gemini: 1606ms

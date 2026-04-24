@@ -1,0 +1,10 @@
+=== REPORT 6f8cfc5e-7e49-49e6-afbe-eb3976d205f7 (12s) ===
+
+--- Deepgram nova-2 ---
+Olá aqui é a cuidadora da do senhor Armindo Trevisan. Só pra informar que foi só 1 susto tá ele está ok ele está muito bem já se levantou está sentado e está tudo bem com o senhor Armindo.
+
+--- Gemini ---
+Olá, aqui é a cuidadora da do senhor Armindo Trevisã. Só para informar que foi só um susto, tá? Ele tá OK, ele tá muito bem, já se levantou, tá sentado e tá tudo bem com o senhor Armindo.
+
+Similaridade: 79.31%
+Latência Gemini: 1539ms
