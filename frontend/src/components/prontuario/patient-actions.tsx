@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { FileText, MessageSquare, Video } from "lucide-react";
 
-import type { CareEvent, Patient } from "../../../../exploracoes/mocks/patients";
+import type { CareEvent, Patient } from "@/mocks/patients";
 
 interface Props {
   patient: Patient;

@@ -13,11 +13,7 @@ import {
   Video,
 } from "lucide-react";
 
-import type {
-  CareEvent,
-  MedicationEvent,
-  Report,
-} from "../../../../exploracoes/mocks/patients";
+import type { CareEvent, MedicationEvent, Report } from "@/mocks/patients";
 
 // ══════════════════════════════════════════════════════════════════
 // Unified event model (combina reports + care_events + medication_events)

@@ -1,9 +1,6 @@
 import { VitalSparkline } from "./vital-sparkline";
 
-import type {
-  MedicationEvent,
-  VitalSign,
-} from "../../../../exploracoes/mocks/patients";
+import type { MedicationEvent, VitalSign } from "@/mocks/patients";
 
 interface Props {
   vital_signs: VitalSign[];

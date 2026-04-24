@@ -6,7 +6,7 @@ import {
   type Patient,
   patientAge,
   type ResponsibleFamily,
-} from "../../../../exploracoes/mocks/patients";
+} from "@/mocks/patients";
 import { PatientActions } from "./patient-actions";
 
 interface Props {

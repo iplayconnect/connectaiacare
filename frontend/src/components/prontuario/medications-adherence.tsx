@@ -1,9 +1,6 @@
 import { Pill } from "lucide-react";
 
-import type {
-  MedicationEvent,
-  Patient,
-} from "../../../../exploracoes/mocks/patients";
+import type { MedicationEvent, Patient } from "@/mocks/patients";
 
 interface Props {
   medications: Patient["medications"];

@@ -28,7 +28,7 @@ import {
   type Patient,
   type Report,
   type VitalSign,
-} from "../../../exploracoes/mocks/patients";
+} from "@/mocks/patients";
 
 // ══════════════════════════════════════════════════════════════════
 // Tipos consolidados
