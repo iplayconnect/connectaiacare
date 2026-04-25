@@ -900,19 +900,56 @@ _VITAL_OP = {
 
 
 def _latest_vitals(patient_id: str | None, window_minutes: int) -> dict | None:
+    """Retorna dict com bp_systolic, bp_diastolic, heart_rate,
+    temperature_celsius, oxygen_saturation, glucose_mg_dl. Busca em
+    aia_health_vital_signs (modelo EAV: vital_type+value_numeric).
+
+    Mapping vital_type → field:
+        blood_pressure_composite → bp_systolic (value_numeric) +
+                                   bp_diastolic (value_secondary)
+        heart_rate              → heart_rate
+        temperature             → temperature_celsius
+        oxygen_saturation       → oxygen_saturation
+        blood_glucose           → glucose_mg_dl
+    Retorna a leitura mais recente de cada tipo dentro da janela.
+    """
     if not patient_id:
         return None
-    return get_postgres().fetch_one(
+    rows = get_postgres().fetch_all(
         """
-        SELECT bp_systolic, bp_diastolic, heart_rate, temperature_celsius,
-               oxygen_saturation, glucose_mg_dl, recorded_at
+        SELECT vital_type, value_numeric, value_secondary, measured_at
         FROM aia_health_vital_signs
         WHERE patient_id = %s
-          AND recorded_at >= NOW() - (%s || ' minutes')::interval
-        ORDER BY recorded_at DESC LIMIT 1
+          AND measured_at >= NOW() - (%s || ' minutes')::interval
+          AND vital_type IN ('blood_pressure_composite','heart_rate',
+                             'temperature','oxygen_saturation','blood_glucose')
+        ORDER BY measured_at DESC
         """,
         (patient_id, str(window_minutes)),
     )
+    if not rows:
+        return None
+    out: dict = {}
+    most_recent_at = None
+    for r in rows:
+        vt = r["vital_type"]
+        if vt == "blood_pressure_composite":
+            out.setdefault("bp_systolic", float(r["value_numeric"]))
+            if r.get("value_secondary") is not None:
+                out.setdefault("bp_diastolic", float(r["value_secondary"]))
+        elif vt == "heart_rate":
+            out.setdefault("heart_rate", float(r["value_numeric"]))
+        elif vt == "temperature":
+            out.setdefault("temperature_celsius", float(r["value_numeric"]))
+        elif vt == "oxygen_saturation":
+            out.setdefault("oxygen_saturation", float(r["value_numeric"]))
+        elif vt == "blood_glucose":
+            out.setdefault("glucose_mg_dl", float(r["value_numeric"]))
+        if most_recent_at is None:
+            most_recent_at = r["measured_at"]
+    if most_recent_at is not None:
+        out["recorded_at"] = most_recent_at
+    return out or None
 
 
 def check_vital_constraints(
