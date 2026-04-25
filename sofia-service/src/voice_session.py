@@ -181,25 +181,30 @@ class VoiceSession:
             "Não diga 'olá' duas vezes nem se apresente como Sofia."
         )
         try:
-            await self._live_session.send_client_content(
-                turns=types.Content(role="user", parts=[types.Part(text=kickoff)]),
-                turn_complete=True,
-            )
+            await self._live_session.send(input=kickoff, end_of_turn=True)
         except Exception as exc:
-            logger.warning("voice_kickoff_failed", extra={"error": str(exc)})
+            logger.warning(
+                "voice_kickoff_failed type=%s msg=%s",
+                type(exc).__name__, str(exc),
+            )
 
     async def feed_audio(self, pcm_bytes: bytes) -> None:
-        """Browser enviou um chunk PCM 16kHz."""
+        """Browser enviou um chunk PCM 16kHz.
+
+        Em google-genai 1.73+ a API Live unificou tudo em session.send(input=...).
+        Áudio realtime vai como LiveClientRealtimeInput.media_chunks.
+        """
         if self._closed or not self._live_session:
             return
         try:
-            await self._live_session.send_realtime_input(
-                audio=types.Blob(data=pcm_bytes, mime_type="audio/pcm;rate=16000"),
+            await self._live_session.send(
+                input=types.LiveClientRealtimeInput(
+                    media_chunks=[
+                        types.Blob(data=pcm_bytes, mime_type="audio/pcm;rate=16000")
+                    ]
+                ),
             )
         except Exception as exc:
-            # Logar tipo + msg do erro pra diagnóstico (a key 'error' em
-            # extra do logger é silenciosamente ignorada — usar mensagem
-            # principal do log).
             logger.warning(
                 "voice_feed_failed type=%s msg=%s",
                 type(exc).__name__, str(exc),
@@ -209,10 +214,7 @@ class VoiceSession:
         """Permite digitar texto durante a chamada (modo híbrido)."""
         if self._closed or not self._live_session:
             return
-        await self._live_session.send_client_content(
-            turns=types.Content(role="user", parts=[types.Part(text=text)]),
-            turn_complete=True,
-        )
+        await self._live_session.send(input=text, end_of_turn=True)
 
     async def interrupt(self) -> None:
         """User interrompeu a fala da Sofia. Sinaliza pra Live cortar."""
@@ -357,19 +359,24 @@ class VoiceSession:
         )
         await self.send_to_browser({"type": "tool_call", "name": name, "ok": bool(output.get("ok"))})
 
-        # Devolve pro Live
+        # Devolve pro Live (google-genai 1.73 unificou tudo em send(input=...))
         try:
-            await self._live_session.send_tool_response(
-                function_responses=[
-                    types.FunctionResponse(
-                        id=getattr(fc, "id", None),
-                        name=name,
-                        response=output,
-                    )
-                ]
+            await self._live_session.send(
+                input=types.LiveClientToolResponse(
+                    function_responses=[
+                        types.FunctionResponse(
+                            id=getattr(fc, "id", None),
+                            name=name,
+                            response=output,
+                        )
+                    ]
+                ),
             )
         except Exception as exc:
-            logger.warning("voice_tool_response_failed", extra={"error": str(exc)})
+            logger.warning(
+                "voice_tool_response_failed type=%s msg=%s",
+                type(exc).__name__, str(exc),
+            )
 
 
 def _b64(data: bytes) -> str:
