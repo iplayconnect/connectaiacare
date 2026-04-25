@@ -110,14 +110,14 @@ INSERT INTO aia_health_drug_hepatic_adjustments
     ('ibuprofeno', 'child_c', 'avoid',
      'Hepatopatia grave: AINE CONTRAINDICADO — risco IRA + sangramento varicoso.', 'manual'),
     ('naproxeno', 'child_a', 'caution_monitor', 'Mesma observação.', 'manual'),
-    ('naproxeno', 'child_b', 'avoid', NULL, 'manual'),
-    ('naproxeno', 'child_c', 'avoid', NULL, 'manual'),
+    ('naproxeno', 'child_b', 'avoid', 'Mesma observação clínica.', 'manual'),
+    ('naproxeno', 'child_c', 'avoid', 'Mesma observação clínica.', 'manual'),
     ('diclofenaco', 'child_a', 'caution_monitor', 'Mesma observação.', 'manual'),
-    ('diclofenaco', 'child_b', 'avoid', NULL, 'manual'),
-    ('diclofenaco', 'child_c', 'avoid', NULL, 'manual'),
-    ('cetoprofeno', 'child_a', 'caution_monitor', NULL, 'manual'),
-    ('cetoprofeno', 'child_b', 'avoid', NULL, 'manual'),
-    ('cetoprofeno', 'child_c', 'avoid', NULL, 'manual');
+    ('diclofenaco', 'child_b', 'avoid', 'Mesma observação clínica.', 'manual'),
+    ('diclofenaco', 'child_c', 'avoid', 'Mesma observação clínica.', 'manual'),
+    ('cetoprofeno', 'child_a', 'caution_monitor', 'Mesma observação.', 'manual'),
+    ('cetoprofeno', 'child_b', 'avoid', 'Mesma observação clínica.', 'manual'),
+    ('cetoprofeno', 'child_c', 'avoid', 'Mesma observação clínica.', 'manual');
 
 -- ── AAS ──
 INSERT INTO aia_health_drug_hepatic_adjustments
@@ -141,7 +141,7 @@ INSERT INTO aia_health_drug_hepatic_adjustments
     ('codeina', 'child_a', 'reduce_50pct',
      'Codeína: ativação dependente de CYP2D6 hepático.', 'manual'),
     ('codeina', 'child_b', 'avoid', 'Avoid em hepatopatia mod/grave.', 'manual'),
-    ('codeina', 'child_c', 'avoid', NULL, 'manual');
+    ('codeina', 'child_c', 'avoid', 'Mesma observação clínica.', 'manual');
 
 -- ── BENZODIAZEPÍNICOS ──
 -- Lorazepam é PREFERIDO em hepatopatia (sem metabólitos ativos, glucuronidação)
@@ -149,16 +149,16 @@ INSERT INTO aia_health_drug_hepatic_adjustments
     (principle_active, severity_class, action, rationale, source) VALUES
     ('alprazolam', 'child_a', 'avoid',
      'BZD com metabólito ativo: acumula em hepatopatia. Evitar.', 'beers_2023'),
-    ('alprazolam', 'child_b', 'avoid', NULL, 'beers_2023'),
-    ('alprazolam', 'child_c', 'avoid', NULL, 'beers_2023'),
+    ('alprazolam', 'child_b', 'avoid', 'Mesma observação clínica.', 'beers_2023'),
+    ('alprazolam', 'child_c', 'avoid', 'Mesma observação clínica.', 'beers_2023'),
     ('diazepam', 'child_a', 'avoid',
      'Diazepam: meia-vida prolongada drasticamente em hepatopatia.', 'beers_2023'),
-    ('diazepam', 'child_b', 'avoid', NULL, 'beers_2023'),
-    ('diazepam', 'child_c', 'avoid', NULL, 'beers_2023'),
+    ('diazepam', 'child_b', 'avoid', 'Mesma observação clínica.', 'beers_2023'),
+    ('diazepam', 'child_c', 'avoid', 'Mesma observação clínica.', 'beers_2023'),
     ('clonazepam', 'child_a', 'avoid',
      'Clonazepam: meia-vida longa, acumula.', 'beers_2023'),
-    ('clonazepam', 'child_b', 'avoid', NULL, 'beers_2023'),
-    ('clonazepam', 'child_c', 'avoid', NULL, 'beers_2023'),
+    ('clonazepam', 'child_b', 'avoid', 'Mesma observação clínica.', 'beers_2023'),
+    ('clonazepam', 'child_c', 'avoid', 'Mesma observação clínica.', 'beers_2023'),
     -- Lorazepam é o BZD preferido (glucuronidação, sem metabólito ativo)
     ('lorazepam', 'child_a', 'caution_monitor',
      'Lorazepam: BZD preferido em hepatopatia (sem metabólito ativo).', 'manual'),
@@ -170,7 +170,7 @@ INSERT INTO aia_health_drug_hepatic_adjustments
     ('zolpidem', 'child_a', 'reduce_50pct',
      'Hepatopatia leve: 5mg/dia.', 'manual'),
     ('zolpidem', 'child_b', 'avoid', 'Hepatopatia moderada+: avoid.', 'manual'),
-    ('zolpidem', 'child_c', 'avoid', NULL, 'manual');
+    ('zolpidem', 'child_c', 'avoid', 'Mesma observação clínica.', 'manual');
 
 -- ── ANTICOAGULANTES ──
 INSERT INTO aia_health_drug_hepatic_adjustments
@@ -185,7 +185,7 @@ INSERT INTO aia_health_drug_hepatic_adjustments
      'Hepatopatia leve: dose padrão.', 'fda'),
     ('rivaroxabana', 'child_b', 'avoid',
      'Hepatopatia Child B: contraindicado pelo aumento do efeito anticoagulante.', 'fda'),
-    ('rivaroxabana', 'child_c', 'avoid', NULL, 'fda'),
+    ('rivaroxabana', 'child_c', 'avoid', 'Mesma observação clínica.', 'fda'),
     ('apixabana', 'child_a', 'no_adjustment',
      'Hepatopatia leve: dose padrão.', 'fda'),
     ('apixabana', 'child_b', 'caution_monitor',
@@ -205,7 +205,7 @@ INSERT INTO aia_health_drug_hepatic_adjustments
      'Hepatopatia moderada: dose máxima 40mg.', 'fda'),
     ('atorvastatina', 'child_c', 'avoid',
      'Hepatopatia grave: contraindicada pela hepatotoxicidade.', 'fda'),
-    ('sinvastatina', 'child_a', 'caution_monitor', NULL, 'fda'),
+    ('sinvastatina', 'child_a', 'caution_monitor', 'Mesma observação.', 'fda'),
     ('sinvastatina', 'child_b', 'reduce_50pct',
      'Hepatopatia moderada: máximo 20mg.', 'fda'),
     ('sinvastatina', 'child_c', 'avoid', 'Avoid grave.', 'fda');
@@ -217,10 +217,10 @@ INSERT INTO aia_health_drug_hepatic_adjustments
     ('omeprazol', 'child_b', 'reduce_50pct',
      'Hepatopatia moderada: meia-vida prolonga 5×, máx 20mg/dia.', 'manual'),
     ('omeprazol', 'child_c', 'reduce_50pct', 'Idem moderada.', 'manual'),
-    ('pantoprazol', 'child_a', 'no_adjustment', NULL, 'manual'),
+    ('pantoprazol', 'child_a', 'no_adjustment', 'Sem ajuste necessário.', 'manual'),
     ('pantoprazol', 'child_b', 'reduce_50pct',
      'Hepatopatia moderada: máx 20mg/dia.', 'manual'),
-    ('pantoprazol', 'child_c', 'reduce_50pct', NULL, 'manual');
+    ('pantoprazol', 'child_c', 'reduce_50pct', 'Mesma observação.', 'manual');
 
 -- ── ANTIDEPRESSIVOS ──
 INSERT INTO aia_health_drug_hepatic_adjustments
@@ -229,16 +229,16 @@ INSERT INTO aia_health_drug_hepatic_adjustments
      'Hepatopatia leve: iniciar 25mg/dia, máx 100mg/dia.', 'manual'),
     ('sertralina', 'child_b', 'avoid',
      'Hepatopatia moderada: evitar — meia-vida prolonga.', 'manual'),
-    ('sertralina', 'child_c', 'avoid', NULL, 'manual'),
+    ('sertralina', 'child_c', 'avoid', 'Mesma observação clínica.', 'manual'),
     ('fluoxetina', 'child_a', 'reduce_50pct',
      'Fluoxetina: meia-vida já longa, em hepatopatia prolonga ainda mais.', 'manual'),
     ('fluoxetina', 'child_b', 'avoid',
      'Hepatopatia moderada: evitar fluoxetina (longuíssima meia-vida).', 'manual'),
-    ('fluoxetina', 'child_c', 'avoid', NULL, 'manual'),
+    ('fluoxetina', 'child_c', 'avoid', 'Mesma observação clínica.', 'manual'),
     ('escitalopram', 'child_a', 'reduce_50pct',
      'Hepatopatia leve: dose máxima 10mg/dia.', 'fda'),
     ('escitalopram', 'child_b', 'avoid', 'Avoid moderada.', 'fda'),
-    ('escitalopram', 'child_c', 'avoid', NULL, 'fda'),
+    ('escitalopram', 'child_c', 'avoid', 'Mesma observação clínica.', 'fda'),
     ('mirtazapina', 'child_a', 'caution_monitor', 'Monitorar nível consciência.', 'manual'),
     ('mirtazapina', 'child_b', 'reduce_50pct', 'Reduzir 50%.', 'manual'),
     ('mirtazapina', 'child_c', 'reduce_75pct', 'Reduzir 75%.', 'manual');
@@ -249,7 +249,7 @@ INSERT INTO aia_health_drug_hepatic_adjustments
     ('metoclopramida', 'child_a', 'reduce_50pct',
      'Hepatopatia leve: reduzir 50%.', 'manual'),
     ('metoclopramida', 'child_b', 'avoid', 'Avoid moderada.', 'manual'),
-    ('metoclopramida', 'child_c', 'avoid', NULL, 'manual');
+    ('metoclopramida', 'child_c', 'avoid', 'Mesma observação clínica.', 'manual');
 
 -- ── L-DOPA ──
 INSERT INTO aia_health_drug_hepatic_adjustments
@@ -265,8 +265,8 @@ INSERT INTO aia_health_drug_hepatic_adjustments
     (principle_active, severity_class, action, rationale, source) VALUES
     ('atenolol', 'child_a', 'no_adjustment',
      'Atenolol é renal — sem ajuste hepático.', 'manual'),
-    ('atenolol', 'child_b', 'no_adjustment', NULL, 'manual'),
-    ('atenolol', 'child_c', 'no_adjustment', NULL, 'manual'),
+    ('atenolol', 'child_b', 'no_adjustment', 'Sem ajuste necessário.', 'manual'),
+    ('atenolol', 'child_c', 'no_adjustment', 'Sem ajuste necessário.', 'manual'),
     ('metoprolol', 'child_a', 'reduce_50pct',
      'Metoprolol é hepático: reduzir 50% em leve.', 'manual'),
     ('metoprolol', 'child_b', 'reduce_75pct', 'Reduzir 75%.', 'manual'),
@@ -275,18 +275,18 @@ INSERT INTO aia_health_drug_hepatic_adjustments
      'Propranolol é hepático extensivo. Em hepatopatia leve, reduzir 50%.', 'manual'),
     ('propranolol', 'child_b', 'avoid',
      'Avoid moderada — risco hipotensão prolongada + encefalopatia.', 'manual'),
-    ('propranolol', 'child_c', 'avoid', NULL, 'manual');
+    ('propranolol', 'child_c', 'avoid', 'Mesma observação clínica.', 'manual');
 
 -- ── BCCa ──
 INSERT INTO aia_health_drug_hepatic_adjustments
     (principle_active, severity_class, action, rationale, source) VALUES
     ('anlodipino', 'child_a', 'reduce_50pct',
      'Hepatopatia leve: iniciar 2.5mg/dia.', 'manual'),
-    ('anlodipino', 'child_b', 'reduce_50pct', NULL, 'manual'),
+    ('anlodipino', 'child_b', 'reduce_50pct', 'Mesma observação.', 'manual'),
     ('anlodipino', 'child_c', 'avoid', 'Avoid grave.', 'manual'),
-    ('nifedipino', 'child_a', 'reduce_50pct', NULL, 'manual'),
-    ('nifedipino', 'child_b', 'avoid', NULL, 'manual'),
-    ('nifedipino', 'child_c', 'avoid', NULL, 'manual');
+    ('nifedipino', 'child_a', 'reduce_50pct', 'Mesma observação.', 'manual'),
+    ('nifedipino', 'child_b', 'avoid', 'Mesma observação clínica.', 'manual'),
+    ('nifedipino', 'child_c', 'avoid', 'Mesma observação clínica.', 'manual');
 
 -- ── DIURÉTICOS ──
 INSERT INTO aia_health_drug_hepatic_adjustments
@@ -301,7 +301,7 @@ INSERT INTO aia_health_drug_hepatic_adjustments
      'Hepatopatia leve: monitorar.', 'manual'),
     ('hidroclorotiazida', 'child_b', 'avoid',
      'Hepatopatia moderada: avoid — risco encefalopatia hepática.', 'manual'),
-    ('hidroclorotiazida', 'child_c', 'avoid', NULL, 'manual');
+    ('hidroclorotiazida', 'child_c', 'avoid', 'Mesma observação clínica.', 'manual');
 
 -- ── IECAs/ARAs ──
 INSERT INTO aia_health_drug_hepatic_adjustments
@@ -310,9 +310,9 @@ INSERT INTO aia_health_drug_hepatic_adjustments
      'Pró-droga hepática: ativação reduzida.', 'manual'),
     ('enalapril', 'child_b', 'reduce_50pct', 'Reduzir 50%.', 'manual'),
     ('enalapril', 'child_c', 'avoid', 'Avoid grave.', 'manual'),
-    ('captopril', 'child_a', 'caution_monitor', NULL, 'manual'),
-    ('captopril', 'child_b', 'reduce_50pct', NULL, 'manual'),
-    ('captopril', 'child_c', 'avoid', NULL, 'manual'),
+    ('captopril', 'child_a', 'caution_monitor', 'Mesma observação.', 'manual'),
+    ('captopril', 'child_b', 'reduce_50pct', 'Mesma observação.', 'manual'),
+    ('captopril', 'child_c', 'avoid', 'Mesma observação clínica.', 'manual'),
     ('losartana', 'child_a', 'reduce_50pct',
      'Losartana hepática: reduzir 50%.', 'manual'),
     ('losartana', 'child_b', 'reduce_75pct', 'Reduzir 75%.', 'manual'),
@@ -325,7 +325,7 @@ INSERT INTO aia_health_drug_hepatic_adjustments
      'Excreção renal predominante — sem ajuste hepático específico.', 'manual'),
     ('digoxina', 'child_b', 'caution_monitor',
      'Hepatopatia moderada: monitorar nível sérico digoxina.', 'manual'),
-    ('digoxina', 'child_c', 'caution_monitor', NULL, 'manual');
+    ('digoxina', 'child_c', 'caution_monitor', 'Mesma observação.', 'manual');
 
 -- ── ANTIDIABÉTICOS ──
 INSERT INTO aia_health_drug_hepatic_adjustments
@@ -334,34 +334,34 @@ INSERT INTO aia_health_drug_hepatic_adjustments
      'Hepatopatia leve: monitorar lactato.', 'manual'),
     ('metformina', 'child_b', 'avoid',
      'Hepatopatia moderada: contraindicada — risco acidose lática.', 'kdigo'),
-    ('metformina', 'child_c', 'avoid', NULL, 'kdigo'),
+    ('metformina', 'child_c', 'avoid', 'Mesma observação clínica.', 'kdigo'),
     ('glibenclamida', 'child_a', 'caution_monitor',
      'Hepatopatia leve: monitorar hipoglicemia (Beers AVOID).', 'beers_2023'),
     ('glibenclamida', 'child_b', 'avoid', 'Avoid moderada.', 'beers_2023'),
-    ('glibenclamida', 'child_c', 'avoid', NULL, 'beers_2023'),
+    ('glibenclamida', 'child_c', 'avoid', 'Mesma observação clínica.', 'beers_2023'),
     ('glicazida', 'child_a', 'reduce_50pct', 'Reduzir 50%.', 'manual'),
-    ('glicazida', 'child_b', 'avoid', NULL, 'manual'),
-    ('glicazida', 'child_c', 'avoid', NULL, 'manual');
+    ('glicazida', 'child_b', 'avoid', 'Mesma observação clínica.', 'manual'),
+    ('glicazida', 'child_c', 'avoid', 'Mesma observação clínica.', 'manual');
 
 -- ── DEMÊNCIA ──
 INSERT INTO aia_health_drug_hepatic_adjustments
     (principle_active, severity_class, action, rationale, source) VALUES
-    ('donepezila', 'child_a', 'no_adjustment', NULL, 'manual'),
+    ('donepezila', 'child_a', 'no_adjustment', 'Sem ajuste necessário.', 'manual'),
     ('donepezila', 'child_b', 'caution_monitor', 'Monitorar nível consciência.', 'manual'),
-    ('donepezila', 'child_c', 'reduce_50pct', NULL, 'manual'),
-    ('rivastigmina', 'child_a', 'no_adjustment', NULL, 'manual'),
-    ('rivastigmina', 'child_b', 'caution_monitor', NULL, 'manual'),
-    ('rivastigmina', 'child_c', 'reduce_50pct', NULL, 'manual'),
+    ('donepezila', 'child_c', 'reduce_50pct', 'Mesma observação.', 'manual'),
+    ('rivastigmina', 'child_a', 'no_adjustment', 'Sem ajuste necessário.', 'manual'),
+    ('rivastigmina', 'child_b', 'caution_monitor', 'Mesma observação.', 'manual'),
+    ('rivastigmina', 'child_c', 'reduce_50pct', 'Mesma observação.', 'manual'),
     ('memantina', 'child_a', 'no_adjustment', 'Excreção renal — sem ajuste hepático.', 'manual'),
-    ('memantina', 'child_b', 'no_adjustment', NULL, 'manual'),
+    ('memantina', 'child_b', 'no_adjustment', 'Sem ajuste necessário.', 'manual'),
     ('memantina', 'child_c', 'caution_monitor', 'Monitorar.', 'manual');
 
 -- ── HORMÔNIO TIREOIDE ──
 INSERT INTO aia_health_drug_hepatic_adjustments
     (principle_active, severity_class, action, rationale, source) VALUES
-    ('levotiroxina', 'child_a', 'no_adjustment', NULL, 'manual'),
+    ('levotiroxina', 'child_a', 'no_adjustment', 'Sem ajuste necessário.', 'manual'),
     ('levotiroxina', 'child_b', 'caution_monitor', 'Monitorar TSH mais frequente.', 'manual'),
-    ('levotiroxina', 'child_c', 'caution_monitor', NULL, 'manual');
+    ('levotiroxina', 'child_c', 'caution_monitor', 'Mesma observação.', 'manual');
 
 -- ── CORTICOIDE ──
 INSERT INTO aia_health_drug_hepatic_adjustments
