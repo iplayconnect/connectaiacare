@@ -36,8 +36,13 @@ from src.orchestrator import PERSONA_AGENT, get_agent_for_persona
 
 logger = logging.getLogger(__name__)
 
+# gemini-3.1-flash-live-preview rejeita combinações comuns (tools+áudio).
+# native-audio-dialog é o modelo Live mais maduro em produção (meses de
+# rodagem). Trocar via SOFIA_VOICE_MODEL pra preview de família 3 quando
+# forem GA + suportarem tool-use bidirecional.
 DEFAULT_VOICE_MODEL = (
-    os.getenv("SOFIA_VOICE_MODEL") or "gemini-3.1-flash-live-preview"
+    os.getenv("SOFIA_VOICE_MODEL")
+    or "gemini-2.5-flash-preview-native-audio-dialog"
 )
 DEFAULT_VOICE_NAME = os.getenv("SOFIA_TTS_VOICE") or "Kore"
 
@@ -134,11 +139,12 @@ class VoiceSession:
             system_instruction=types.Content(
                 parts=[types.Part(text=_build_system_instruction(self.persona_ctx))]
             ),
-            tools=_build_tools(self.persona),
-            # input_audio_transcription / output_audio_transcription só
-            # disponíveis em google-genai >= 1.x. Versão atual entrega só
-            # audio raw — UI mostra "ouvindo" sem texto até atualizarmos
-            # o SDK na próxima onda.
+            # Tools temporariamente desabilitadas — alguns modelos Live
+            # rejeitam (1008) quando combinam tools com audio response.
+            # Volta quando o Live SDK + modelos estabilizarem o suporte.
+            # Por agora a Sofia voz é conversacional pura; tools acessadas
+            # via /sofia chat texto.
+            # tools=_build_tools(self.persona),
         )
 
         # Sessão de DB (continua a mesma do chat texto se existir)
