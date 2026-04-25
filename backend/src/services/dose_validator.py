@@ -353,12 +353,51 @@ def _list_active_schedules(patient_id: str | None) -> list[dict]:
         return []
     return get_postgres().fetch_all(
         """
-        SELECT id, medication_name
+        SELECT id, medication_name, times_of_day
         FROM aia_health_medication_schedules
         WHERE patient_id = %s AND active = TRUE
         """,
         (patient_id,),
     )
+
+
+def _times_to_minutes(times: list | None) -> list[int]:
+    """Converte ['08:00','14:00'] ou [datetime.time(...)] em minutos do dia."""
+    if not times:
+        return []
+    out: list[int] = []
+    for t in times:
+        try:
+            if hasattr(t, "hour") and hasattr(t, "minute"):
+                out.append(t.hour * 60 + t.minute)
+            elif isinstance(t, str):
+                parts = t.strip().split(":")
+                hh = int(parts[0])
+                mm = int(parts[1]) if len(parts) > 1 else 0
+                out.append(hh * 60 + mm)
+        except Exception:
+            continue
+    return out
+
+
+def _min_circular_diff(a_minutes: list[int], b_minutes: list[int]) -> int | None:
+    """Menor diferença em minutos entre qualquer par de horários (24h cíclico)."""
+    if not a_minutes or not b_minutes:
+        return None
+    best = None
+    for a in a_minutes:
+        for b in b_minutes:
+            d = abs(a - b)
+            d = min(d, 1440 - d)  # circular: 23:00 vs 01:00 = 2h
+            if best is None or d < best:
+                best = d
+    return best
+
+
+def _format_minutes(m: int) -> str:
+    if m % 60 == 0:
+        return f"{m // 60}h"
+    return f"{m // 60}h{m % 60:02d}"
 
 
 def check_duplicate_therapy(
@@ -453,7 +492,8 @@ def _query_interactions_pair(
             """
             SELECT severity, mechanism, clinical_effect, recommendation,
                    source, source_ref, confidence,
-                   principle_a, principle_b, class_a, class_b
+                   principle_a, principle_b, class_a, class_b,
+                   time_separation_minutes, separation_strategy, food_warning
             FROM aia_health_drug_interactions
             WHERE active = TRUE
               AND ((principle_a = %s AND principle_b = %s)
@@ -467,7 +507,8 @@ def _query_interactions_pair(
             """
             SELECT severity, mechanism, clinical_effect, recommendation,
                    source, source_ref, confidence,
-                   principle_a, principle_b, class_a, class_b
+                   principle_a, principle_b, class_a, class_b,
+                   time_separation_minutes, separation_strategy, food_warning
             FROM aia_health_drug_interactions
             WHERE active = TRUE
               AND ((principle_a = %s AND class_b = %s)
@@ -480,7 +521,8 @@ def _query_interactions_pair(
             """
             SELECT severity, mechanism, clinical_effect, recommendation,
                    source, source_ref, confidence,
-                   principle_a, principle_b, class_a, class_b
+                   principle_a, principle_b, class_a, class_b,
+                   time_separation_minutes, separation_strategy, food_warning
             FROM aia_health_drug_interactions
             WHERE active = TRUE
               AND ((principle_a = %s AND class_b = %s)
@@ -495,7 +537,8 @@ def _query_interactions_pair(
             """
             SELECT severity, mechanism, clinical_effect, recommendation,
                    source, source_ref, confidence,
-                   principle_a, principle_b, class_a, class_b
+                   principle_a, principle_b, class_a, class_b,
+                   time_separation_minutes, separation_strategy, food_warning
             FROM aia_health_drug_interactions
             WHERE active = TRUE
               AND ((class_a = %s AND class_b = %s)
@@ -520,8 +563,16 @@ def check_drug_interactions(
     new_class: str | None,
     new_med_name: str,
     patient_id: str | None,
+    new_times_of_day: list | None = None,
 ) -> list[DoseIssue]:
-    """Cruza nova prescrição com schedules ativos do paciente."""
+    """Cruza nova prescrição com schedules ativos do paciente.
+
+    Para interações com `time_separation_minutes`:
+      - Compara horários da nova prescrição vs schedule existente.
+      - Se diff >= threshold → SILENCIA (resolvido por espaçamento).
+      - Se diff < threshold → emite warning específico de espaçamento.
+    Para interações sistêmicas (sem time_separation) → comportamento original.
+    """
     if not new_principle and not new_class:
         return []
     if not patient_id:
@@ -531,6 +582,8 @@ def check_drug_interactions(
         return []
     issues: list[DoseIssue] = []
     seen_pairs: set[tuple] = set()
+    new_minutes = _times_to_minutes(new_times_of_day or [])
+
     for sch in actives:
         existing_principle = resolve_principle_active(sch["medication_name"])
         if not existing_principle:
@@ -550,6 +603,68 @@ def check_drug_interactions(
             seen_pairs.add(sig)
             mapped = _INTERACTION_SEVERITY_MAP.get(r["severity"], "warning")
             label_existing = sch["medication_name"]
+            sep_min = r.get("time_separation_minutes")
+
+            # ── Caso 1: interação resolvível por espaçamento ──
+            if sep_min:
+                existing_minutes = _times_to_minutes(sch.get("times_of_day"))
+                diff = _min_circular_diff(new_minutes, existing_minutes)
+                if diff is not None and diff >= sep_min:
+                    # Bem espaçado — silencia (informativo apenas pra audit)
+                    issues.append(DoseIssue(
+                        severity="info",
+                        code="time_separation_ok",
+                        message=(
+                            f"✅ {new_med_name} × {label_existing}: já espaçados "
+                            f"({_format_minutes(diff)} de diferença, mínimo "
+                            f"{_format_minutes(sep_min)}). Sem alerta necessário."
+                        ),
+                        detail={
+                            "existing": label_existing,
+                            "diff_minutes": diff,
+                            "required_minutes": sep_min,
+                        },
+                    ))
+                    continue
+                # Não espaçados o suficiente → emite warning específico
+                strategy = r.get("separation_strategy") or "any"
+                strategy_text = ""
+                if strategy == "a_first":
+                    first = r.get("principle_a") or r.get("class_a")
+                    if first == new_principle:
+                        strategy_text = f" Tome {new_med_name} primeiro, depois {label_existing}."
+                    else:
+                        strategy_text = f" Tome {label_existing} primeiro, depois {new_med_name}."
+                elif strategy == "b_first":
+                    second = r.get("principle_b") or r.get("class_b")
+                    if second == new_principle:
+                        strategy_text = f" Tome {label_existing} primeiro, depois {new_med_name}."
+                    else:
+                        strategy_text = f" Tome {new_med_name} primeiro, depois {label_existing}."
+                food_extra = f" {r['food_warning']}" if r.get("food_warning") else ""
+                # Mantém severity moderada/major mas com mensagem orientada
+                msg_severity = "warning_strong" if r["severity"] in ("major","contraindicated") else "warning"
+                issues.append(DoseIssue(
+                    severity=msg_severity,
+                    code="time_separation_required",
+                    message=(
+                        f"⏰ {new_med_name} × {label_existing}: "
+                        f"{r['clinical_effect']} "
+                        f"Espaçar pelo menos {_format_minutes(sep_min)}.{strategy_text}"
+                        f"{food_extra} Fonte: {r['source']}."
+                    ),
+                    detail={
+                        "existing": label_existing,
+                        "current_diff_minutes": diff,
+                        "required_minutes": sep_min,
+                        "strategy": strategy,
+                        "mechanism": r["mechanism"],
+                        "source": r["source"],
+                    },
+                ))
+                continue
+
+            # ── Caso 2: interação sistêmica (sem espaçamento possível) ──
             issues.append(DoseIssue(
                 severity=mapped,
                 code="drug_interaction",
@@ -1210,6 +1325,7 @@ def validate(
     issues.extend(check_narrow_therapeutic_index(limit))
     issues.extend(check_drug_interactions(
         principle, therapeutic_class, medication_name, patient_id,
+        new_times_of_day=times_of_day,
     ))
     issues.extend(check_condition_contraindications(principle, therapeutic_class, patient))
     issues.extend(check_anticholinergic_burden(principle, patient_id))

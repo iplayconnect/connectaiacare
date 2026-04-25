@@ -324,7 +324,9 @@ export interface DoseIssue {
     | "renal_adjust_no_data"
     | "hepatic_adjustment"
     | "hepatic_severity_unknown"
-    | "vital_constraint";
+    | "vital_constraint"
+    | "time_separation_required"
+    | "time_separation_ok";
   message: string;
   detail?: Record<string, unknown>;
 }
