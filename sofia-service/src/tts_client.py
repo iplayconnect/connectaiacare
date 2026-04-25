@@ -1,41 +1,42 @@
 """TTS client — síntese de voz via Gemini.
 
-Modelo padrão: gemini-2.5-flash-preview-tts (capacidade nativa de TTS).
-Cai pra fallback se o tenant não tiver acesso ao preview.
+google-generativeai (0.8.x) NÃO suporta `response_modalities=["AUDIO"]`.
+Precisamos do novo SDK `google-genai` (>=0.5) que tem suporte oficial.
 
-Retorna áudio raw (PCM 24kHz mono) base64 + metadata.
+Modelo padrão: gemini-2.5-flash-preview-tts
+Voz padrão: "Kore" (feminina pt-BR neutra calorosa)
+
+Retorna WAV (PCM 24kHz mono → wav container) base64 + metadata.
 ADR-028 documenta o roadmap de migração ElevenLabs → Gemini TTS.
 """
 from __future__ import annotations
 
 import base64
+import io
 import logging
 import os
 import wave
-import io
 
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_TTS_MODEL = os.getenv("SOFIA_TTS_MODEL") or "gemini-2.5-flash-preview-tts"
-# Voz: lista oficial Gemini TTS (2026). "Kore" = feminina pt-BR neutra calorosa.
 DEFAULT_VOICE = os.getenv("SOFIA_TTS_VOICE") or "Kore"
 SAMPLE_RATE_HZ = 24000
 
+_client: genai.Client | None = None
 
-_configured = False
 
-
-def _ensure_configured() -> None:
-    global _configured
-    if _configured:
-        return
-    key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
-    if not key:
-        raise RuntimeError("GOOGLE_API_KEY required for TTS")
-    genai.configure(api_key=key)
-    _configured = True
+def _get_client() -> genai.Client:
+    global _client
+    if _client is None:
+        api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+        if not api_key:
+            raise RuntimeError("GOOGLE_API_KEY required for TTS")
+        _client = genai.Client(api_key=api_key)
+    return _client
 
 
 def _pcm_to_wav(pcm_bytes: bytes, sample_rate: int = SAMPLE_RATE_HZ) -> bytes:
@@ -50,32 +51,35 @@ def _pcm_to_wav(pcm_bytes: bytes, sample_rate: int = SAMPLE_RATE_HZ) -> bytes:
 
 
 def synthesize(text: str, voice: str | None = None) -> dict:
-    """Gera áudio. Retorna {audio_base64, mime_type, duration_seconds, model}."""
-    _ensure_configured()
-    voice = voice or DEFAULT_VOICE
+    """Gera áudio. Retorna {audio_base64, mime_type, duration_seconds, model, voice}."""
+    client = _get_client()
+    voice_name = voice or DEFAULT_VOICE
 
-    model = genai.GenerativeModel(model_name=DEFAULT_TTS_MODEL)
+    config = types.GenerateContentConfig(
+        response_modalities=["AUDIO"],
+        speech_config=types.SpeechConfig(
+            voice_config=types.VoiceConfig(
+                prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=voice_name)
+            )
+        ),
+    )
+
     try:
-        resp = model.generate_content(
-            text,
-            generation_config={
-                "response_modalities": ["AUDIO"],
-                "speech_config": {
-                    "voice_config": {
-                        "prebuilt_voice_config": {"voice_name": voice}
-                    }
-                },
-            },
+        resp = client.models.generate_content(
+            model=DEFAULT_TTS_MODEL,
+            contents=text,
+            config=config,
         )
     except Exception as exc:
         logger.warning("tts_generate_failed", extra={"error": str(exc), "model": DEFAULT_TTS_MODEL})
         raise
 
-    # Extrai PCM dos parts
     pcm_chunks: list[bytes] = []
-    for cand in getattr(resp, "candidates", None) or []:
-        content = getattr(cand, "content", None)
-        for part in (getattr(content, "parts", None) or []):
+    for cand in (resp.candidates or []):
+        content = cand.content
+        if not content:
+            continue
+        for part in (content.parts or []):
             inline = getattr(part, "inline_data", None)
             if inline and getattr(inline, "data", None):
                 pcm_chunks.append(inline.data)
@@ -92,5 +96,5 @@ def synthesize(text: str, voice: str | None = None) -> dict:
         "mime_type": "audio/wav",
         "duration_seconds": round(duration_seconds, 2),
         "model": DEFAULT_TTS_MODEL,
-        "voice": voice,
+        "voice": voice_name,
     }

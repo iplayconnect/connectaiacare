@@ -63,6 +63,37 @@ class GenerationResult:
     finish_reason: str | None = None
 
 
+_GEMINI_SCHEMA_ALLOWED_KEYS = {
+    "type", "properties", "required", "description",
+    "enum", "items", "format", "nullable",
+}
+
+
+def _clean_schema(node):
+    """Remove campos do JSON Schema não suportados pelo Gemini.
+
+    Gemini Function Declarations aceita um subset enxuto: type, properties,
+    required, description, enum, items, format (limitado), nullable. Coisas
+    como minimum, maximum, pattern, minLength, default são rejeitadas com
+    'Unknown field for Schema: <campo>'.
+    """
+    if isinstance(node, list):
+        return [_clean_schema(x) for x in node]
+    if not isinstance(node, dict):
+        return node
+    cleaned = {}
+    for k, v in node.items():
+        if k not in _GEMINI_SCHEMA_ALLOWED_KEYS:
+            continue
+        if k == "properties" and isinstance(v, dict):
+            cleaned[k] = {pk: _clean_schema(pv) for pk, pv in v.items()}
+        elif k == "items":
+            cleaned[k] = _clean_schema(v)
+        else:
+            cleaned[k] = v
+    return cleaned
+
+
 def _convert_tools(tools: list[ToolDefinition]) -> list[dict]:
     """Converte ToolDefinition para o formato do google-generativeai."""
     return [
@@ -71,7 +102,7 @@ def _convert_tools(tools: list[ToolDefinition]) -> list[dict]:
                 {
                     "name": t.name,
                     "description": t.description,
-                    "parameters": t.parameters,
+                    "parameters": _clean_schema(t.parameters),
                 }
                 for t in tools
             ]

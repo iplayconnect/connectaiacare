@@ -5,6 +5,9 @@ python-dotenv==1.0.1
 psycopg2-binary==2.9.9
 
 google-generativeai==0.8.3
+# google-genai (SDK novo) — usado APENAS pra TTS (response_modalities=AUDIO),
+# que o google-generativeai 0.8.x não suporta. LLM continua no antigo.
+google-genai>=0.6.0,<2.0.0
 httpx==0.27.2
 requests==2.32.3
 
