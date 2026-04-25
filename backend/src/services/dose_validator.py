@@ -175,7 +175,8 @@ def get_dose_limit(principle_active: str, route: str, patient_age: int | None) -
         """
         SELECT id, principle_active, route, max_daily_dose_value, max_daily_dose_unit,
                age_group_min, age_group_max, beers_avoid, beers_rationale,
-               source, source_ref, confidence, notes
+               source, source_ref, confidence, notes,
+               therapeutic_class, narrow_therapeutic_index, nti_monitoring
         FROM aia_health_drug_dose_limits
         WHERE principle_active = %s AND route = %s AND active = TRUE
           AND %s >= age_group_min
@@ -184,6 +185,20 @@ def get_dose_limit(principle_active: str, route: str, patient_age: int | None) -
         LIMIT 1
         """,
         (principle_active, route, age, age),
+    )
+
+
+def get_principle_meta(principle_active: str) -> dict | None:
+    """Metadata sem filtro de via/idade — pra duplicidade/polifarmácia."""
+    return get_postgres().fetch_one(
+        """
+        SELECT principle_active, therapeutic_class, narrow_therapeutic_index,
+               nti_monitoring, beers_avoid
+        FROM aia_health_drug_dose_limits
+        WHERE principle_active = %s AND active = TRUE
+        ORDER BY confidence DESC LIMIT 1
+        """,
+        (principle_active,),
     )
 
 
@@ -263,6 +278,175 @@ def _max_severity(issues: list[DoseIssue]) -> str | None:
     return max(issues, key=lambda i: _SEVERITY_RANK.get(i.severity, 0)).severity
 
 
+# ─── Cruzamento ALERGIAS ──────────────────────────────────
+
+def _normalize_allergy(term: str | None) -> str | None:
+    """Normaliza alergia + tenta resolver pelo aliases."""
+    if not term:
+        return None
+    norm = normalize(term)
+    if not norm:
+        return None
+    row = get_postgres().fetch_one(
+        "SELECT canonical_term FROM aia_health_allergy_aliases WHERE lower(alias) = %s LIMIT 1",
+        (norm,),
+    )
+    if row:
+        return row["canonical_term"]
+    return norm
+
+
+def check_allergies(
+    principle_active: str | None,
+    therapeutic_class: str | None,
+    patient_allergies: list | None,
+) -> list[DoseIssue]:
+    """Bloqueia/avisa baseado em allergy_mappings + cross-reactivity."""
+    if not patient_allergies:
+        return []
+    issues: list[DoseIssue] = []
+    pg = get_postgres()
+    for raw in patient_allergies:
+        term = raw if isinstance(raw, str) else (raw or {}).get("term") or (raw or {}).get("name")
+        canonical = _normalize_allergy(term)
+        if not canonical:
+            continue
+        # Match exato por princípio_active OU por classe
+        rows = pg.fetch_all(
+            """
+            SELECT severity, rationale, source, source_ref,
+                   affected_principle_active, affected_therapeutic_class
+            FROM aia_health_allergy_mappings
+            WHERE active = TRUE AND allergy_term = %s
+              AND ((affected_principle_active IS NOT NULL AND affected_principle_active = %s)
+                OR (affected_therapeutic_class IS NOT NULL AND affected_therapeutic_class = %s))
+            """,
+            (canonical, principle_active, therapeutic_class),
+        )
+        for r in rows:
+            sev = r["severity"]
+            mapped_sev = (
+                "block" if sev == "block"
+                else "warning_strong" if sev == "warning"
+                else "info"
+            )
+            issues.append(DoseIssue(
+                severity=mapped_sev,
+                code="allergy_match",
+                message=(
+                    f"⚠️ Paciente alergia a '{term}'. {r['rationale']} "
+                    f"Fonte: {r['source']}."
+                ),
+                detail={
+                    "allergy": term,
+                    "matched_via": "principle" if r.get("affected_principle_active") else "class",
+                    "source": r["source"],
+                },
+            ))
+    return issues
+
+
+# ─── Cruzamento DUPLICIDADE TERAPÊUTICA + POLIFARMÁCIA + NTI ──
+
+def _list_active_schedules(patient_id: str | None) -> list[dict]:
+    if not patient_id:
+        return []
+    return get_postgres().fetch_all(
+        """
+        SELECT id, medication_name
+        FROM aia_health_medication_schedules
+        WHERE patient_id = %s AND active = TRUE
+        """,
+        (patient_id,),
+    )
+
+
+def check_duplicate_therapy(
+    principle_active: str | None,
+    therapeutic_class: str | None,
+    patient_id: str | None,
+) -> list[DoseIssue]:
+    """Detecta 2+ medicamentos da mesma classe ativos pro paciente."""
+    if not principle_active or not therapeutic_class or not patient_id:
+        return []
+    actives = _list_active_schedules(patient_id)
+    if not actives:
+        return []
+    duplicates = []
+    for sch in actives:
+        existing_principle = resolve_principle_active(sch["medication_name"])
+        if not existing_principle or existing_principle == principle_active:
+            continue
+        meta = get_principle_meta(existing_principle)
+        if meta and meta.get("therapeutic_class") == therapeutic_class:
+            duplicates.append({
+                "name": sch["medication_name"],
+                "principle": existing_principle,
+            })
+    if not duplicates:
+        return []
+    list_str = ", ".join(d["name"] for d in duplicates)
+    return [DoseIssue(
+        severity="warning_strong",
+        code="duplicate_therapy",
+        message=(
+            f"⚠️ Duplicidade terapêutica: paciente já usa "
+            f"{list_str} (mesma classe: {therapeutic_class}). "
+            "Risco de potencialização e efeitos cumulativos."
+        ),
+        detail={
+            "therapeutic_class": therapeutic_class,
+            "existing": duplicates,
+        },
+    )]
+
+
+def check_polypharmacy(
+    patient_id: str | None,
+    threshold: int = 5,
+) -> list[DoseIssue]:
+    """Beers: ≥5 medicamentos simultâneos = warning."""
+    if not patient_id:
+        return []
+    actives = _list_active_schedules(patient_id)
+    count = len(actives)
+    # +1 pra contar a prescrição que está sendo adicionada agora
+    new_total = count + 1
+    if new_total < threshold:
+        return []
+    return [DoseIssue(
+        severity="warning",
+        code="polypharmacy",
+        message=(
+            f"Polifarmácia: paciente terá {new_total} medicamentos ativos. "
+            "Beers 2023 recomenda revisar prescrições periódicamente "
+            f"(≥{threshold} meds). Considere desprescrição."
+        ),
+        detail={"current_count": count, "after": new_total, "threshold": threshold},
+    )]
+
+
+def check_narrow_therapeutic_index(limit: dict | None) -> list[DoseIssue]:
+    """NTI = janela terapêutica estreita (digoxina, varfarina, levotiroxina)."""
+    if not limit or not limit.get("narrow_therapeutic_index"):
+        return []
+    return [DoseIssue(
+        severity="warning",
+        code="narrow_therapeutic_index",
+        message=(
+            f"📊 {limit['principle_active'].title()} tem janela terapêutica estreita. "
+            f"{limit.get('nti_monitoring') or 'Monitorização sérica/laboratorial obrigatória.'}"
+        ),
+        detail={
+            "principle_active": limit["principle_active"],
+            "monitoring": limit.get("nti_monitoring"),
+        },
+    )]
+
+
+# ─── Validação central ───────────────────────────────────
+
+
 def validate(
     *,
     medication_name: str,
@@ -313,6 +497,17 @@ def validate(
     daily = DoseAmount(value=parsed_dose.value * times, unit=parsed_dose.unit)
 
     limit = get_dose_limit(principle, route, age)
+
+    # Cruzamentos de contexto (rodam mesmo sem limit registrado pra essa via)
+    therapeutic_class = (limit or {}).get("therapeutic_class")
+    patient_id = (patient or {}).get("id")
+    patient_allergies = (patient or {}).get("allergies") or []
+
+    issues.extend(check_allergies(principle, therapeutic_class, patient_allergies))
+    issues.extend(check_duplicate_therapy(principle, therapeutic_class, patient_id))
+    issues.extend(check_polypharmacy(patient_id))
+    issues.extend(check_narrow_therapeutic_index(limit))
+
     if not limit:
         issues.append(DoseIssue(
             severity="info",

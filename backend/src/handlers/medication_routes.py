@@ -61,7 +61,8 @@ def create_schedule(patient_id: str):
     from src.services import dose_validator
     from src.services.postgres import get_postgres
     patient_row = get_postgres().fetch_one(
-        "SELECT id, full_name, birth_date FROM aia_health_patients WHERE id = %s",
+        "SELECT id, full_name, birth_date, allergies, conditions "
+        "FROM aia_health_patients WHERE id = %s",
         (patient_id,),
     )
     validation = dose_validator.validate(

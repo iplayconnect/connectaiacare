@@ -311,7 +311,11 @@ export interface DoseIssue {
     | "unknown_drug"
     | "dose_unparseable"
     | "no_limit_for_route"
-    | "unit_mismatch";
+    | "unit_mismatch"
+    | "allergy_match"
+    | "duplicate_therapy"
+    | "polypharmacy"
+    | "narrow_therapeutic_index";
   message: string;
   detail?: Record<string, unknown>;
 }
