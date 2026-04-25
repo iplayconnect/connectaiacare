@@ -15,6 +15,7 @@ import {
   ClipboardList,
   Users,
   KeyRound,
+  Stethoscope,
 } from "lucide-react";
 
 import { useAuth } from "@/context/auth-context";
@@ -60,6 +61,13 @@ const NAV_ITEMS: NavItem[] = [
     label: "Papéis & Permissões",
     icon: KeyRound,
     permissions: ["profiles:read"],
+    group: "admin",
+  },
+  {
+    href: "/admin/regras-clinicas",
+    label: "Regras Clínicas",
+    icon: Stethoscope,
+    roles: ["super_admin", "admin_tenant"],
     group: "admin",
   },
   {

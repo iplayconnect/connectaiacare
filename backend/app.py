@@ -11,6 +11,7 @@ from src.handlers.auth_routes import (
     is_public_path,
 )
 from src.handlers.caregivers_routes import bp as caregivers_bp
+from src.handlers.clinical_rules_routes import bp as clinical_rules_bp
 from src.handlers.disease_routes import bp as disease_bp
 from src.handlers.medication_routes import bp as medication_bp
 from src.handlers.onboarding_web_routes import bp as onboarding_web_bp
@@ -61,6 +62,7 @@ def create_app() -> Flask:
     app.register_blueprint(auth_bp)
     app.register_blueprint(users_bp)
     app.register_blueprint(profiles_bp)
+    app.register_blueprint(clinical_rules_bp)
     app.register_blueprint(sofia_bp)
     app.register_blueprint(api_bp)
     app.register_blueprint(teleconsulta_bp)

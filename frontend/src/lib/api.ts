@@ -520,6 +520,56 @@ export const api = {
       body: JSON.stringify({}),
     }),
 
+  // ─── Regras Clínicas (motor de cruzamentos) ────
+  clinicalRulesStats: () =>
+    request<{ status: "ok"; stats: Record<string, number> }>(
+      "/api/clinical-rules/stats",
+    ),
+  clinicalRulesList: (table: string) =>
+    request<{ status: "ok"; items: any[] }>(
+      `/api/clinical-rules/${table}`,
+    ),
+  doseLimitCreate: (body: any) =>
+    request<{ status: "ok"; item: any }>(
+      "/api/clinical-rules/dose-limits",
+      { method: "POST", body: JSON.stringify(body) },
+    ),
+  doseLimitUpdate: (id: string, body: any) =>
+    request<{ status: "ok"; item: any }>(
+      `/api/clinical-rules/dose-limits/${id}`,
+      { method: "PATCH", body: JSON.stringify(body) },
+    ),
+  doseLimitDelete: (id: string) =>
+    request<{ status: "ok" }>(
+      `/api/clinical-rules/dose-limits/${id}`,
+      { method: "DELETE" },
+    ),
+  aliasCreate: (body: any) =>
+    request<{ status: "ok"; item: any }>(
+      "/api/clinical-rules/aliases",
+      { method: "POST", body: JSON.stringify(body) },
+    ),
+  aliasDelete: (id: string) =>
+    request<{ status: "ok" }>(
+      `/api/clinical-rules/aliases/${id}`,
+      { method: "DELETE" },
+    ),
+  interactionCreate: (body: any) =>
+    request<{ status: "ok"; item: any }>(
+      "/api/clinical-rules/interactions",
+      { method: "POST", body: JSON.stringify(body) },
+    ),
+  interactionUpdate: (id: string, body: any) =>
+    request<{ status: "ok"; item: any }>(
+      `/api/clinical-rules/interactions/${id}`,
+      { method: "PATCH", body: JSON.stringify(body) },
+    ),
+  interactionDelete: (id: string) =>
+    request<{ status: "ok" }>(
+      `/api/clinical-rules/interactions/${id}`,
+      { method: "DELETE" },
+    ),
+
   // Profiles (Bloco C)
   listProfiles: () =>
     request<{ status: "ok"; profiles: ProfileRecord[] }>("/api/profiles"),
