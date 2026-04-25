@@ -370,6 +370,38 @@ export interface ProfileRecord {
   updatedAt: string | null;
 }
 
+export interface ClinicalAlertIssue {
+  code: string;
+  severity?: "low" | "medium" | "high" | "critical";
+  message: string;
+  details?: Record<string, unknown>;
+}
+
+export interface ClinicalAlertRow {
+  id: string;
+  level: "low" | "medium" | "high" | "critical";
+  title: string;
+  description: string | null;
+  recommended_actions: string[];
+  status: "open" | "acknowledged" | "resolved";
+  acknowledged_by: string | null;
+  acknowledged_at: string | null;
+  resolved_at: string | null;
+  created_at: string | null;
+  patient_id: string | null;
+  patient_name: string | null;
+  patient_nickname: string | null;
+  patient_unit: string | null;
+  patient_room: string | null;
+  kinds: string[];
+  validation: {
+    issues?: ClinicalAlertIssue[];
+    medication_name?: string;
+    dose?: string;
+    [k: string]: unknown;
+  } | null;
+}
+
 export const api = {
   // Auth
   me: () => request<{ status: "ok"; user: AuthUser }>("/api/auth/me"),
@@ -516,6 +548,36 @@ export const api = {
         format: string;
       };
     }>("/api/sofia/voice/token", {
+      method: "POST",
+      body: JSON.stringify({}),
+    }),
+
+  // ─── Alertas clínicos (dose validator + cruzamentos) ────
+  listClinicalAlerts: (params?: {
+    level?: string;
+    status?: "open" | "acknowledged" | "resolved" | "active" | "all";
+    kind?: string;
+    limit?: number;
+  }) => {
+    const qs = new URLSearchParams();
+    if (params?.level) qs.set("level", params.level);
+    if (params?.status) qs.set("status", params.status);
+    if (params?.kind) qs.set("kind", params.kind);
+    if (params?.limit) qs.set("limit", String(params.limit));
+    const q = qs.toString();
+    return request<{
+      status: "ok";
+      alerts: ClinicalAlertRow[];
+      count: number;
+    }>(`/api/alerts/clinical${q ? `?${q}` : ""}`);
+  },
+  acknowledgeClinicalAlert: (id: string, by?: string) =>
+    request<{ status: "ok" }>(`/api/alerts/${id}/acknowledge`, {
+      method: "POST",
+      body: JSON.stringify({ by: by || null }),
+    }),
+  resolveClinicalAlert: (id: string) =>
+    request<{ status: "ok" }>(`/api/alerts/${id}/resolve`, {
       method: "POST",
       body: JSON.stringify({}),
     }),

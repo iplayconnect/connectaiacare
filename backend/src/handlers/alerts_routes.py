@@ -16,7 +16,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from flask import Blueprint, jsonify
+from flask import Blueprint, jsonify, request
 
 from config.settings import settings
 from src.services.postgres import get_postgres
@@ -25,6 +25,125 @@ from src.utils.logger import get_logger
 logger = get_logger(__name__)
 
 bp = Blueprint("alerts", __name__)
+
+
+@bp.get("/alerts/clinical")
+def list_clinical_alerts():
+    """Alertas escritos em aia_health_alerts pelo motor de cruzamentos
+    (dose validator) + outras fontes. Diferente de /alerts (care_events).
+
+    Query params:
+      level: low|medium|high|critical (multi via vírgula)
+      status: open|acknowledged|resolved|active (default)|all
+      kind: dose_validation
+      limit: default 100
+    """
+    db = get_postgres()
+    tenant_id = settings.tenant_id
+    args = request.args
+
+    levels = [s.strip() for s in (args.get("level") or "").split(",") if s.strip()]
+    status_param = args.get("status") or "active"
+    kind = args.get("kind")
+    limit = max(1, min(int(args.get("limit") or 100), 500))
+
+    where_parts = ["a.tenant_id = %s"]
+    params: list = [tenant_id]
+
+    if levels:
+        placeholders = ",".join(["%s"] * len(levels))
+        where_parts.append(f"a.level IN ({placeholders})")
+        params.extend(levels)
+
+    if status_param == "open":
+        where_parts.append("a.acknowledged_at IS NULL AND a.resolved_at IS NULL")
+    elif status_param == "acknowledged":
+        where_parts.append("a.acknowledged_at IS NOT NULL AND a.resolved_at IS NULL")
+    elif status_param == "resolved":
+        where_parts.append("a.resolved_at IS NOT NULL")
+    elif status_param == "active":
+        where_parts.append("a.resolved_at IS NULL")
+    # status=all → sem filtro
+
+    if kind == "dose_validation":
+        where_parts.append("a.metadata ? 'validation'")
+
+    where_sql = " AND ".join(where_parts)
+    rows = db.fetch_all(
+        f"""
+        SELECT a.id, a.level, a.title, a.description,
+               a.recommended_actions, a.acknowledged_by, a.acknowledged_at,
+               a.resolved_at, a.metadata, a.created_at, a.patient_id,
+               p.full_name AS patient_name, p.nickname AS patient_nickname,
+               p.care_unit AS patient_unit, p.room_number AS patient_room
+        FROM aia_health_alerts a
+        LEFT JOIN aia_health_patients p ON p.id = a.patient_id
+        WHERE {where_sql}
+        ORDER BY
+            CASE a.level
+                WHEN 'critical' THEN 0 WHEN 'high' THEN 1
+                WHEN 'medium' THEN 2 ELSE 3 END,
+            a.created_at DESC
+        LIMIT %s
+        """,
+        tuple(params + [limit]),
+    )
+    out = []
+    for r in rows:
+        meta = r.get("metadata") or {}
+        validation = meta.get("validation")
+        kinds: set[str] = set()
+        if validation:
+            kinds.add("dose_validation")
+            for issue in (validation.get("issues") or []):
+                if issue.get("code"):
+                    kinds.add(issue["code"])
+        status_str = (
+            "resolved" if r.get("resolved_at")
+            else "acknowledged" if r.get("acknowledged_at")
+            else "open"
+        )
+        out.append({
+            "id": str(r["id"]),
+            "level": r["level"],
+            "title": r["title"],
+            "description": r.get("description"),
+            "recommended_actions": r.get("recommended_actions") or [],
+            "status": status_str,
+            "acknowledged_by": r.get("acknowledged_by"),
+            "acknowledged_at": r["acknowledged_at"].isoformat() if r.get("acknowledged_at") else None,
+            "resolved_at": r["resolved_at"].isoformat() if r.get("resolved_at") else None,
+            "created_at": r["created_at"].isoformat() if r.get("created_at") else None,
+            "patient_id": str(r["patient_id"]) if r.get("patient_id") else None,
+            "patient_name": r.get("patient_name"),
+            "patient_nickname": r.get("patient_nickname"),
+            "patient_unit": r.get("patient_unit"),
+            "patient_room": r.get("patient_room"),
+            "kinds": sorted(kinds),
+            "validation": validation,
+        })
+    return jsonify({"status": "ok", "alerts": out, "count": len(out)})
+
+
+@bp.post("/alerts/<alert_id>/acknowledge")
+def acknowledge_alert(alert_id: str):
+    body = request.get_json(silent=True) or {}
+    by = body.get("by") or "admin"
+    get_postgres().execute(
+        "UPDATE aia_health_alerts SET acknowledged_by = %s, acknowledged_at = NOW() "
+        "WHERE id = %s AND acknowledged_at IS NULL",
+        (by, alert_id),
+    )
+    return jsonify({"status": "ok"})
+
+
+@bp.post("/alerts/<alert_id>/resolve")
+def resolve_alert(alert_id: str):
+    get_postgres().execute(
+        "UPDATE aia_health_alerts SET resolved_at = NOW() WHERE id = %s AND resolved_at IS NULL",
+        (alert_id,),
+    )
+    return jsonify({"status": "ok"})
 
 
 @bp.get("/alerts")

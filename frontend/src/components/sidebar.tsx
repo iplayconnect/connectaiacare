@@ -43,6 +43,7 @@ type NavItem = {
 const NAV_ITEMS: NavItem[] = [
   { href: "/", label: "Dashboard", icon: Activity },
   { href: "/alertas", label: "Alertas", icon: ShieldAlert, permissions: ["alerts:read"] },
+  { href: "/alertas/clinicos", label: "Alertas Clínicos", icon: ShieldAlert, permissions: ["alerts:read"] },
   { href: "/reports", label: "Relatos", icon: FileText, permissions: ["reports:read"] },
   { href: "/patients", label: "Pacientes", icon: UsersRound, permissions: ["patients:read"] },
   { href: "/teleconsulta", label: "Teleconsulta", icon: Video, permissions: ["teleconsulta:read"] },
@@ -150,10 +151,19 @@ function NavGroup({ items, pathname }: { items: NavItem[]; pathname: string }) {
     <ul className="space-y-0.5">
       {items.map((item) => {
         const Icon = item.icon;
+        // Longest-prefix-wins: /alertas não fica ativo quando estamos em
+        // /alertas/clinicos (que é um item próprio).
+        const isPrefix =
+          pathname === item.href || pathname.startsWith(item.href + "/");
+        const hasMoreSpecific = items.some(
+          (other) =>
+            other.href !== item.href &&
+            other.href.startsWith(item.href + "/") &&
+            (pathname === other.href ||
+              pathname.startsWith(other.href + "/")),
+        );
         const active =
-          item.href === "/"
-            ? pathname === "/"
-            : pathname.startsWith(item.href);
+          item.href === "/" ? pathname === "/" : isPrefix && !hasMoreSpecific;
         return (
           <li key={item.href}>
             <Link
