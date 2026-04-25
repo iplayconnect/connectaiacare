@@ -19,6 +19,9 @@ pydantic==2.9.2
 
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
+# bcrypt explicit — chamado diretamente em src/services/user_service.py
+# (passlib 1.7.4 tem bug de compat com bcrypt 5.x: detect_wrap_bug).
+bcrypt==5.0.0
 
 pillow==10.4.0
 pydub==0.25.1

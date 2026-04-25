@@ -10,7 +10,7 @@ import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from passlib.hash import bcrypt
+import bcrypt
 
 from src.services.postgres import get_postgres
 from src.utils.logger import get_logger
@@ -23,15 +23,16 @@ def _now_utc() -> datetime:
 
 
 def hash_password(password: str) -> str:
-    """bcrypt com cost 12 (padrão passlib)."""
-    return bcrypt.hash(password)
+    """bcrypt com cost 12. Usa lib `bcrypt` direto — passlib 1.7.4 tem
+    bug de compatibilidade com bcrypt 5.x (detect_wrap_bug)."""
+    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt(rounds=12)).decode("utf-8")
 
 
 def verify_password(password: str, password_hash: str) -> bool:
     if not password or not password_hash:
         return False
     try:
-        return bcrypt.verify(password, password_hash)
+        return bcrypt.checkpw(password.encode("utf-8"), password_hash.encode("utf-8"))
     except (ValueError, TypeError):
         return False
 
