@@ -314,6 +314,16 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ currentPassword, newPassword }),
     }),
+  forgotPassword: (email: string) =>
+    request<{ status: "ok"; channel?: string; hint?: string }>(
+      "/api/auth/forgot-password",
+      { method: "POST", body: JSON.stringify({ email }) },
+    ),
+  resetPassword: (token: string, newPassword: string) =>
+    request<{ status: "ok" }>("/api/auth/reset-password", {
+      method: "POST",
+      body: JSON.stringify({ token, newPassword }),
+    }),
 
   // Users (admin)
   listUsers: (includeInactive = false) =>

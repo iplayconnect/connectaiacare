@@ -35,6 +35,8 @@ PUBLIC_PATHS = (
     "/health",
     "/api/auth/login",
     "/api/auth/refresh",
+    "/api/auth/forgot-password",
+    "/api/auth/reset-password",
 )
 
 # Prefixos públicos: rotas que servem fluxos não-autenticados (webhook,
@@ -197,17 +199,55 @@ def login():
         )
         return jsonify({"status": "error", "reason": "invalid_credentials"}), 401
 
+    # Brute-force guard (D.3) — checa lock antes de validar senha pra evitar
+    # leak por timing e mensagem de "tentativas restantes".
+    if user_service.is_user_locked(user):
+        audit_log(
+            action=AuditAction.LOGIN_LOCKED,
+            resource_type="user",
+            resource_id=str(user["id"]),
+            payload={"email": email},
+            tenant_id=tenant_id,
+            actor=str(user["id"]),
+        )
+        return (
+            jsonify({
+                "status": "error",
+                "reason": "account_locked",
+                "detail": "Conta bloqueada temporariamente após múltiplas tentativas. Aguarde 15 minutos.",
+            }),
+            423,  # Locked
+        )
+
     if not user_service.verify_password(password, user.get("password_hash") or ""):
-        logger.info("login_failed_wrong_password", email=email, tenant_id=tenant_id)
+        attempts = user_service.increment_failed_login(user["id"])
+        logger.info(
+            "login_failed_wrong_password",
+            email=email,
+            tenant_id=tenant_id,
+            attempts=attempts,
+        )
         audit_log(
             action=AuditAction.LOGIN_FAILED,
             resource_type="user",
             resource_id=str(user["id"]),
-            payload={"email": email, "reason": "wrong_password"},
+            payload={"email": email, "reason": "wrong_password", "attempts": attempts},
             tenant_id=tenant_id,
             actor=str(user["id"]),
         )
+        if attempts >= user_service.FAILED_LOGIN_THRESHOLD:
+            audit_log(
+                action=AuditAction.ACCOUNT_LOCKED,
+                resource_type="user",
+                resource_id=str(user["id"]),
+                payload={"email": email, "lockout_minutes": user_service.LOCKOUT_MINUTES},
+                tenant_id=tenant_id,
+                actor=str(user["id"]),
+            )
         return jsonify({"status": "error", "reason": "invalid_credentials"}), 401
+
+    # Senha OK — limpa contador de falhas
+    user_service.reset_failed_login(user["id"])
 
     user_service.record_login(user["id"])
     permissions = _resolve_user_permissions(user)
@@ -386,5 +426,154 @@ def change_password():
         resource_type="user",
         resource_id=str(user["id"]),
         actor=str(user["id"]),
+    )
+    return jsonify({"status": "ok"})
+
+
+# ══════════════════════════════════════════════════════════════════
+# POST /api/auth/forgot-password   (público — Bloco D.1)
+# ══════════════════════════════════════════════════════════════════
+
+def _normalize_phone_br(raw: str | None) -> str | None:
+    """Normaliza pra formato Evolution: dígitos, prefixo 55 BR.
+    None se inválido."""
+    if not raw:
+        return None
+    digits = "".join(c for c in raw if c.isdigit())
+    if len(digits) < 10:
+        return None
+    if not digits.startswith("55"):
+        digits = "55" + digits
+    return digits
+
+
+def _frontend_base_url() -> str:
+    """Origem do frontend pra montar links de reset."""
+    base = os.getenv("FRONTEND_URL") or os.getenv("PUBLIC_FRONTEND_URL")
+    if base:
+        return base.rstrip("/")
+    return "https://care.connectaia.com.br"
+
+
+def _send_reset_link_whatsapp(phone: str, full_name: str, link: str) -> bool:
+    """Envia link de redefinição via Evolution. Retorna True se enviou."""
+    try:
+        from src.services.evolution import get_evolution
+        msg = (
+            f"Olá, {full_name.split(' ')[0]}!\n\n"
+            "Recebemos uma solicitação para redefinir sua senha do "
+            "ConnectaIACare.\n\n"
+            f"Acesse este link (válido por 1 hora): {link}\n\n"
+            "Se não foi você, ignore esta mensagem — nada será alterado."
+        )
+        get_evolution().send_text(phone, msg)
+        return True
+    except Exception as exc:
+        logger.warning("reset_link_whatsapp_failed", phone=phone, error=str(exc))
+        return False
+
+
+@bp.post("/api/auth/forgot-password")
+def forgot_password():
+    """Inicia reset de senha. Sempre retorna 200 (anti-enumeration de email).
+
+    Body: { email: "..." }
+    Resposta: { status, channel? }
+    """
+    body = request.get_json(silent=True) or {}
+    email = (body.get("email") or "").strip().lower()
+    if not email:
+        return jsonify({"status": "error", "reason": "missing_email"}), 400
+
+    user = user_service.find_user_any_tenant(email)
+    if not user:
+        # Não revelamos que email não existe (anti-enumeration). Audit log
+        # registra a tentativa pra investigação posterior.
+        logger.info("forgot_password_unknown_email", email=email)
+        audit_log(
+            action=AuditAction.PASSWORD_RESET_REQUESTED,
+            resource_type="user",
+            payload={"email": email, "outcome": "user_not_found"},
+            actor=email,
+        )
+        return jsonify({"status": "ok"})
+
+    tenant_id = user["tenant_id"]
+    ip = request.headers.get("X-Forwarded-For") or request.remote_addr
+    token, expires_at = user_service.create_reset_token(
+        tenant_id=tenant_id,
+        user_id=user["id"],
+        ip=ip,
+    )
+    link = f"{_frontend_base_url()}/reset-password?token={token}"
+
+    channel: str | None = None
+    phone = _normalize_phone_br(user.get("phone"))
+    if phone and _send_reset_link_whatsapp(phone, user.get("full_name") or "", link):
+        channel = "whatsapp"
+
+    logger.info(
+        "forgot_password_token_issued",
+        user_id=str(user["id"]),
+        email=email,
+        channel=channel or "none",
+        expires_at=expires_at.isoformat(),
+    )
+    audit_log(
+        action=AuditAction.PASSWORD_RESET_REQUESTED,
+        resource_type="user",
+        resource_id=str(user["id"]),
+        payload={"email": email, "channel": channel, "ip": ip},
+        tenant_id=tenant_id,
+        actor=str(user["id"]),
+    )
+
+    response = {"status": "ok"}
+    if channel:
+        response["channel"] = channel
+    else:
+        # Não tem como entregar — admin precisa setar phone do usuário ou
+        # usar o reset manual em /admin/usuarios. Sinaliza isso pro UI.
+        response["channel"] = "none"
+        response["hint"] = "Sem WhatsApp cadastrado. Procure o administrador."
+    return jsonify(response)
+
+
+# ══════════════════════════════════════════════════════════════════
+# POST /api/auth/reset-password   (público — Bloco D.1)
+# ══════════════════════════════════════════════════════════════════
+
+@bp.post("/api/auth/reset-password")
+def reset_password():
+    """Consome token de reset, troca senha, revoga sessões.
+
+    Body: { token, newPassword }
+    """
+    body = request.get_json(silent=True) or {}
+    token = (body.get("token") or "").strip()
+    new_password = body.get("newPassword") or body.get("new_password") or ""
+    if not token or not new_password:
+        return jsonify({"status": "error", "reason": "missing_fields"}), 400
+    if len(new_password) < 8:
+        return jsonify({"status": "error", "reason": "password_too_short"}), 400
+
+    record = user_service.consume_reset_token(token)
+    if not record:
+        return jsonify({"status": "error", "reason": "invalid_or_expired_token"}), 400
+
+    user_id = record["user_id"]
+    tenant_id = record["tenant_id"]
+    user_service.set_password(user_id, new_password)
+    user_service.revoke_all_sessions(user_id)
+    user_service.reset_failed_login(user_id)
+    user_service.mark_reset_token_used(record["id"])
+
+    logger.info("password_reset_used", user_id=str(user_id))
+    audit_log(
+        action=AuditAction.PASSWORD_RESET_USED,
+        resource_type="user",
+        resource_id=str(user_id),
+        tenant_id=tenant_id,
+        actor=str(user_id),
     )
     return jsonify({"status": "ok"})

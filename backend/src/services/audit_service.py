@@ -34,9 +34,13 @@ class AuditAction:
     """Ações canônicas. Adicionar conforme novos endpoints exigirem."""
     LOGIN = "auth.login"
     LOGIN_FAILED = "auth.login_failed"
+    LOGIN_LOCKED = "auth.login_locked"
     LOGOUT = "auth.logout"
     PASSWORD_CHANGED = "auth.password_changed"
     PASSWORD_RESET = "auth.password_reset"
+    PASSWORD_RESET_REQUESTED = "auth.password_reset_requested"
+    PASSWORD_RESET_USED = "auth.password_reset_used"
+    ACCOUNT_LOCKED = "auth.account_locked"
 
     USER_CREATE = "user.create"
     USER_UPDATE = "user.update"

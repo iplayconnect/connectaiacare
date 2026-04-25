@@ -15,6 +15,15 @@ const REASON_MESSAGES: Record<string, string> = {
   jwt_secret_not_configured:
     "Servidor sem JWT_SECRET configurado. Avise o administrador.",
   unauthorized: "Sessão expirada. Faça login novamente.",
+  account_locked:
+    "Conta bloqueada temporariamente após múltiplas tentativas. Aguarde 15 minutos.",
+  http_423:
+    "Conta bloqueada temporariamente após múltiplas tentativas. Aguarde 15 minutos.",
+};
+
+const SUCCESS_MESSAGES: Record<string, string> = {
+  password_reset_ok:
+    "Senha redefinida com sucesso. Entre com sua nova senha.",
 };
 
 export default function LoginPage() {
@@ -44,6 +53,7 @@ function LoginForm() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
 
   // Se já está autenticado, redireciona pra destino (next param) ou home
   useEffect(() => {
@@ -64,10 +74,13 @@ function LoginForm() {
     }
   }, [hydrated, router, searchParams]);
 
-  // Detecta razão pré-existente (ex: redirect de api 401)
+  // Detecta razão pré-existente (ex: redirect de api 401, password_reset_ok)
   useEffect(() => {
     const reason = searchParams.get("reason");
-    if (reason && REASON_MESSAGES[reason]) {
+    if (!reason) return;
+    if (SUCCESS_MESSAGES[reason]) {
+      setSuccess(SUCCESS_MESSAGES[reason]);
+    } else if (REASON_MESSAGES[reason]) {
       setError(REASON_MESSAGES[reason]);
     }
   }, [searchParams]);
@@ -75,6 +88,7 @@ function LoginForm() {
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    setSuccess(null);
     if (!email || !password) {
       setError(REASON_MESSAGES.missing_credentials);
       return;
@@ -120,6 +134,12 @@ function LoginForm() {
             Acesse com o email cadastrado pela sua clínica ou parceiro.
           </p>
         </div>
+
+        {success && (
+          <div className="flex items-start gap-2 p-3 rounded-lg bg-classification-routine/10 border border-classification-routine/20 text-xs text-classification-routine">
+            <span className="leading-relaxed">{success}</span>
+          </div>
+        )}
 
         {error && (
           <div className="flex items-start gap-2 p-3 rounded-lg bg-classification-attention/10 border border-classification-attention/20 text-xs text-classification-attention">
@@ -176,10 +196,16 @@ function LoginForm() {
           )}
         </button>
 
-        <div className="pt-2 border-t border-white/[0.04] flex items-center gap-2 text-[11px] text-muted-foreground">
-          <ShieldCheck className="h-3.5 w-3.5 text-classification-routine" />
-          <span>
-            Acesso autorizado · LGPD Art. 11 · CFM 2.314/2022
+        <div className="flex items-center justify-between gap-2 text-[11px]">
+          <Link
+            href="/forgot-password"
+            className="text-muted-foreground hover:text-accent-cyan transition-colors"
+          >
+            Esqueci a senha
+          </Link>
+          <span className="flex items-center gap-1.5 text-muted-foreground">
+            <ShieldCheck className="h-3 w-3 text-classification-routine" />
+            LGPD · CFM 2.314
           </span>
         </div>
       </form>

@@ -286,6 +286,113 @@ def revoke_all_sessions(user_id: str) -> None:
     )
 
 
+# ─── Brute-force protection (Bloco D.3) ───────────────────
+
+# Threshold: 5 tentativas falhadas → lock 15min. Reseta após login OK.
+FAILED_LOGIN_THRESHOLD = 5
+LOCKOUT_MINUTES = 15
+
+
+def is_user_locked(user: dict) -> bool:
+    """Retorna True se locked_until está no futuro."""
+    locked_until = user.get("locked_until")
+    if not locked_until:
+        return False
+    if locked_until.tzinfo is None:
+        locked_until = locked_until.replace(tzinfo=timezone.utc)
+    return locked_until > _now_utc()
+
+
+def increment_failed_login(user_id: str) -> int:
+    """Incrementa contador. Lockia se cruzar o threshold. Retorna count atual."""
+    pg = get_postgres()
+    row = pg.insert_returning(
+        """
+        UPDATE aia_health_users
+        SET failed_login_attempts = failed_login_attempts + 1,
+            locked_until = CASE
+                WHEN failed_login_attempts + 1 >= %s THEN NOW() + (%s || ' minutes')::interval
+                ELSE locked_until
+            END
+        WHERE id = %s
+        RETURNING failed_login_attempts, locked_until
+        """,
+        (FAILED_LOGIN_THRESHOLD, str(LOCKOUT_MINUTES), user_id),
+    )
+    return int((row or {}).get("failed_login_attempts", 0))
+
+
+def reset_failed_login(user_id: str) -> None:
+    """Zera contador + remove lock após login OK."""
+    get_postgres().execute(
+        """
+        UPDATE aia_health_users
+        SET failed_login_attempts = 0, locked_until = NULL
+        WHERE id = %s AND (failed_login_attempts > 0 OR locked_until IS NOT NULL)
+        """,
+        (user_id,),
+    )
+
+
+# ─── Password reset tokens (Bloco D.1) ────────────────────
+
+RESET_TOKEN_TTL_HOURS = 1
+
+
+def create_reset_token(
+    tenant_id: str,
+    user_id: str,
+    *,
+    ip: str | None = None,
+) -> tuple[str, datetime]:
+    """Gera token (urlsafe 32 bytes), grava SHA256 hash, retorna plaintext.
+    Plaintext só existe nesse retorno — depois só fica o hash em DB."""
+    token = secrets.token_urlsafe(32)
+    token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    expires_at = _now_utc() + timedelta(hours=RESET_TOKEN_TTL_HOURS)
+    get_postgres().execute(
+        """
+        INSERT INTO aia_health_password_reset_tokens
+            (tenant_id, user_id, token_hash, expires_at, requested_ip)
+        VALUES (%s, %s, %s, %s, %s)
+        """,
+        (tenant_id, user_id, token_hash, expires_at, ip),
+    )
+    return token, expires_at
+
+
+def consume_reset_token(token: str) -> dict | None:
+    """Valida token: existe, não usado, não expirado. Retorna {id, user_id}.
+    NÃO marca como usado ainda — caller chama mark_reset_token_used após
+    troca de senha bem-sucedida."""
+    token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    row = get_postgres().fetch_one(
+        """
+        SELECT id, tenant_id, user_id, expires_at, used_at
+        FROM aia_health_password_reset_tokens
+        WHERE token_hash = %s
+        """,
+        (token_hash,),
+    )
+    if not row:
+        return None
+    if row.get("used_at"):
+        return None
+    expires_at = row["expires_at"]
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if expires_at < _now_utc():
+        return None
+    return row
+
+
+def mark_reset_token_used(token_id: int) -> None:
+    get_postgres().execute(
+        "UPDATE aia_health_password_reset_tokens SET used_at = NOW() WHERE id = %s",
+        (token_id,),
+    )
+
+
 # ─── Seed inicial via env vars ────────────────────────────
 
 def ensure_seed_users() -> None:

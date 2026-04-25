@@ -20,6 +20,8 @@ import { useAuth } from "@/context/auth-context";
 
 const CHROMELESS_PREFIXES = [
   "/login",
+  "/forgot-password",
+  "/reset-password",
   "/cadastro",
   "/pitch",
   "/planos",
