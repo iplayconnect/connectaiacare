@@ -156,6 +156,19 @@ def create_app() -> Flask:
         except Exception as exc:
             logger.error("checkin_scheduler_failed_to_start", error=str(exc))
 
+    # Dose Revalidation Scheduler — re-roda o motor de cruzamentos sobre
+    # prescrições ativas a cada 7 dias (cobre regras novas adicionadas pelo
+    # admin via /admin/regras-clinicas).
+    if os.getenv("ENABLE_DOSE_REVALIDATION", "true").lower() == "true":
+        try:
+            from src.services.dose_revalidation_scheduler import (
+                get_dose_revalidation_scheduler,
+            )
+            get_dose_revalidation_scheduler().start()
+            logger.info("dose_revalidation_scheduler_thread_started")
+        except Exception as exc:
+            logger.error("dose_revalidation_failed_to_start", error=str(exc))
+
     # Proactive Scheduler — disparo de check-ins B2C, lembretes, relatórios
     # (independente de care_events). Lock advisory próprio pra não conflitar
     # com o checkin_scheduler.
