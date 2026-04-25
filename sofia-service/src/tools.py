@@ -12,7 +12,10 @@ Erros vão como `ok: false, error: "..."`.
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any, Callable
+
+import requests
 
 from src import persistence
 
@@ -363,6 +366,69 @@ def _tool_get_my_subscription(*, persona_ctx: dict, **_: Any) -> dict:
     return {"ok": True, "subscription": row}
 
 
+def _tool_check_medication_safety(
+    *,
+    persona_ctx: dict,
+    medication_name: str,
+    dose: str,
+    patient_id: str | None = None,
+    times_of_day: list[str] | None = None,
+    route: str = "oral",
+    schedule_type: str | None = None,
+    **_: Any,
+) -> dict:
+    """Roda o motor de cruzamentos da prescrição candidata. Não persiste —
+    apenas retorna risco/issues pra que o profissional decida."""
+    if not medication_name or not dose:
+        return {"ok": False, "error": "medication_name_and_dose_required"}
+    pid = patient_id or persona_ctx.get("patient_id")
+    api_base = os.getenv("BACKEND_API_URL", "http://api:5055")
+    payload = {
+        "medication_name": medication_name,
+        "dose": dose,
+        "route": route,
+    }
+    if times_of_day:
+        payload["times_of_day"] = times_of_day
+    if schedule_type:
+        payload["schedule_type"] = schedule_type
+    if pid:
+        payload["patient_id"] = pid
+    try:
+        r = requests.post(
+            f"{api_base}/api/clinical-rules/validate-prescription",
+            json=payload,
+            timeout=12,
+        )
+    except Exception as exc:
+        logger.exception("check_medication_safety_http_failed")
+        return {"ok": False, "error": f"backend_unreachable:{exc}"}
+    if r.status_code != 200:
+        return {
+            "ok": False,
+            "error": "validator_http_error",
+            "status": r.status_code,
+            "body": r.text[:500],
+        }
+    data = r.json() or {}
+    validation = data.get("validation") or {}
+    issues = validation.get("issues") or []
+    summary = {
+        "severity": validation.get("severity"),
+        "blocked": validation.get("severity") == "block",
+        "issue_count": len(issues),
+        "by_code": sorted({i.get("code") for i in issues if i.get("code")}),
+    }
+    return {
+        "ok": True,
+        "patient_id": pid,
+        "medication_name": medication_name,
+        "dose": dose,
+        "summary": summary,
+        "validation": validation,
+    }
+
+
 # ────────────────────────────── registry ──────────────────────────────
 
 TOOLS: dict[str, dict[str, Any]] = {
@@ -494,6 +560,23 @@ TOOLS: dict[str, dict[str, Any]] = {
         },
         "handler": _tool_send_check_in,
         "allowed_personas": ["medico", "enfermeiro", "admin_tenant"],
+    },
+    "check_medication_safety": {
+        "description": "Valida uma prescrição candidata contra o motor de cruzamentos clínicos: dose máxima diária, alergias, interações medicamentosas (incluindo separação por horário), contraindicações por condição, ajuste renal/hepático, ACB score, risco de queda, NTI e constraints de sinais vitais. NÃO persiste a prescrição — apenas retorna a análise de risco. Use ANTES de criar/atualizar uma medication_schedule, ou quando o médico pergunta 'é seguro prescrever X mg de Y para o paciente Z?'.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "medication_name": {"type": "string", "description": "Nome do medicamento (princípio ativo ou nome comercial — o validador resolve aliases)."},
+                "dose": {"type": "string", "description": "Dose por administração, ex: '10 mg', '0,5 mg', '1 g'."},
+                "patient_id": {"type": "string", "description": "UUID do paciente (opcional se a persona já tem patient_id no contexto)."},
+                "times_of_day": {"type": "array", "items": {"type": "string"}, "description": "Horários do dia em HH:MM, ex: ['08:00','20:00']. Necessário pra checar interações por separação de horário."},
+                "route": {"type": "string", "description": "Via de administração. Default 'oral'."},
+                "schedule_type": {"type": "string", "description": "Ex: 'fixed_daily', 'prn', 'weekly'."},
+            },
+            "required": ["medication_name", "dose"],
+        },
+        "handler": _tool_check_medication_safety,
+        "allowed_personas": ["medico", "enfermeiro", "admin_tenant", "super_admin"],
     },
     "get_my_subscription": {
         "description": "Retorna o plano contratado do próprio user (B2C).",

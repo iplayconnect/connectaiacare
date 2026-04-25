@@ -382,3 +382,65 @@ def list_vital_constraints():
         "ORDER BY vital_field, threshold"
     )
     return jsonify({"status": "ok", "items": [_serialize(r) for r in rows]})
+
+
+# ─────────────────── Validação ad-hoc (sem persistir) ───────────────────
+# Usado por:
+#   • Sofia tool `check_medication_safety` (médico pergunta "se eu prescrever X
+#     pro paciente Y, é seguro?")
+#   • UI de prescrição (preview antes de salvar)
+#
+# NÃO escreve aia_health_alerts — só retorna o ValidationResult. Quem cria
+# o alerta é o endpoint que de fato persiste a schedule.
+@bp.post("/api/clinical-rules/validate-prescription")
+def validate_prescription():
+    """Roda o motor de cruzamentos para uma prescrição candidata.
+
+    Body:
+        medication_name: str (required)
+        dose: str (required, ex: "10 mg", "0,5 mg")
+        times_of_day: list[str] (opcional, ex: ["08:00", "20:00"])
+        route: str (default "oral")
+        schedule_type: str (opcional)
+        patient_id: str (opcional, se passado busca patient row)
+        patient: dict (opcional, alternativa a patient_id, com full_name,
+                       birth_date, allergies, conditions)
+    Retorna: {status, validation: ValidationResult.to_dict()}
+    """
+    from src.services import dose_validator
+    body = request.get_json(silent=True) or {}
+
+    if not body.get("medication_name") or not body.get("dose"):
+        return jsonify({
+            "status": "error",
+            "reason": "medication_name_and_dose_required",
+        }), 400
+
+    patient = body.get("patient")
+    patient_id = body.get("patient_id")
+    if patient_id and not patient:
+        row = get_postgres().fetch_one(
+            "SELECT id, full_name, birth_date, allergies, conditions "
+            "FROM aia_health_patients WHERE id = %s",
+            (patient_id,),
+        )
+        patient = dict(row) if row else None
+
+    try:
+        result = dose_validator.validate(
+            medication_name=body["medication_name"],
+            dose=body["dose"],
+            times_of_day=body.get("times_of_day"),
+            route=(body.get("route") or "oral").lower(),
+            patient=patient,
+            schedule_type=body.get("schedule_type"),
+        ).to_dict()
+    except Exception as exc:
+        logger.exception("validate_prescription_failed")
+        return jsonify({
+            "status": "error",
+            "reason": "validator_exception",
+            "detail": str(exc),
+        }), 500
+
+    return jsonify({"status": "ok", "validation": result})
