@@ -54,6 +54,42 @@ def create_schedule(patient_id: str):
     if not body.get("medication_name") or not body.get("dose"):
         return jsonify({"error": "medication_name_and_dose_required"}), 400
 
+    # ── Validação de dose máxima diária (cruzamento determinístico) ──
+    # Bloqueia hard se ratio > 2× e source confidence ≥ 0.9.
+    # Cliente pode forçar com `force=true` (médico assume responsabilidade,
+    # registramos no warnings da schedule pra audit).
+    from src.services import dose_validator
+    from src.services.postgres import get_postgres
+    patient_row = get_postgres().fetch_one(
+        "SELECT id, full_name, birth_date FROM aia_health_patients WHERE id = %s",
+        (patient_id,),
+    )
+    validation = dose_validator.validate(
+        medication_name=body["medication_name"],
+        dose=body["dose"],
+        times_of_day=body.get("times_of_day"),
+        route=(body.get("route") or "oral").lower(),
+        patient=dict(patient_row) if patient_row else None,
+        schedule_type=body.get("schedule_type"),
+    ).to_dict()
+
+    force = bool(body.get("force"))
+    if validation["severity"] == "block" and not force:
+        return jsonify({
+            "status": "error",
+            "reason": "dose_validation_blocked",
+            "validation": validation,
+        }), 422
+
+    # Anexa warnings da validação às warnings já passadas pelo cliente
+    extra_warnings = [
+        i["message"] for i in validation["issues"]
+        if i["severity"] in ("warning", "warning_strong", "block")
+    ]
+    body_warnings = body.get("warnings") or []
+    if extra_warnings:
+        body_warnings = list(body_warnings) + extra_warnings
+
     svc = get_medication_schedule_service()
     row = svc.create(
         tenant_id=tenant_id,
@@ -68,7 +104,7 @@ def create_schedule(patient_id: str):
         dose_form=body.get("dose_form", "comprimido"),
         with_food=body.get("with_food", "either"),
         special_instructions=body.get("special_instructions"),
-        warnings=body.get("warnings"),
+        warnings=body_warnings,
         source_type=body.get("source_type", "manual_admin"),
         added_by_type=body.get("added_by_type"),
         starts_at=_parse_date(body.get("starts_at")),
@@ -77,7 +113,40 @@ def create_schedule(patient_id: str):
         tolerance_minutes=body.get("tolerance_minutes", 60),
         preferred_channels=body.get("preferred_channels"),
     )
-    return jsonify({"status": "ok", "schedule": _serialize_schedule(row)})
+
+    # Cria alerta automático se houve warning_strong/block e schedule foi criada
+    if validation["severity"] in ("warning_strong", "block"):
+        try:
+            get_postgres().execute(
+                """
+                INSERT INTO aia_health_alerts
+                    (tenant_id, patient_id, level, title, description,
+                     recommended_actions, metadata)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    tenant_id, patient_id,
+                    "high" if validation["severity"] == "block" else "medium",
+                    f"Dose acima do limite: {body['medication_name']}",
+                    " ".join(i["message"] for i in validation["issues"]),
+                    psycopg2_json([{"action": "review_with_doctor"}]),
+                    psycopg2_json({"validation": validation, "schedule_id": str(row["id"])}),
+                ),
+            )
+        except Exception as exc:
+            logger.warning("alert_create_failed name=%s err=%s", body["medication_name"], str(exc))
+
+    return jsonify({
+        "status": "ok",
+        "schedule": _serialize_schedule(row),
+        "validation": validation,
+    })
+
+
+# Helper local pra json adapter sem importar psycopg2 ali em cima
+def psycopg2_json(data):
+    import psycopg2.extras
+    return psycopg2.extras.Json(data)
 
 
 @bp.put("/api/medication-schedules/<schedule_id>")

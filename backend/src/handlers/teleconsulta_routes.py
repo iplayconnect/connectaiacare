@@ -475,6 +475,35 @@ def add_prescription(tc_id: str):
             "_error": str(exc),
         }
 
+    # ── Cruzamento determinístico de dose máxima diária (ANVISA/Beers/SBGG) ──
+    # Complementa a validação LLM com lookup em aia_health_drug_dose_limits.
+    # Retorna no payload separado pra UI mostrar fonte rastreável.
+    try:
+        from src.services import dose_validator as _dose_validator
+        # Heurística: extrair frequência do schedule textual
+        sched_text = (body.get("schedule") or "").lower()
+        if "4x" in sched_text or "4 x" in sched_text or "6/6" in sched_text:
+            times = ["00", "06", "12", "18"]
+        elif "3x" in sched_text or "3 x" in sched_text or "8/8" in sched_text:
+            times = ["08", "16", "24"]
+        elif "2x" in sched_text or "2 x" in sched_text or "12/12" in sched_text:
+            times = ["08", "20"]
+        else:
+            times = ["08"]
+        dose_check = _dose_validator.validate(
+            medication_name=medication,
+            dose=body.get("dose") or "",
+            times_of_day=times,
+            patient=patient,
+        ).to_dict()
+        validation["dose_limit_check"] = dose_check
+        # Se determinístico bloquear, sobrepõe LLM
+        if dose_check.get("severity") == "block":
+            validation["validation_status"] = "rejected"
+            validation["severity"] = "critical"
+    except Exception as exc:
+        logger.warning("dose_limit_check_failed tc_id=%s err=%s", tc_id, str(exc))
+
     # Adiciona no array de prescription
     existing = list(tc.get("prescription") or [])
     new_item = {

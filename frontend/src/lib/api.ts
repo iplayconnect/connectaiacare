@@ -25,10 +25,12 @@ const API_BASE =
 export class ApiError extends Error {
   status: number;
   reason?: string;
-  constructor(status: number, message: string, reason?: string) {
+  body?: any;
+  constructor(status: number, message: string, reason?: string, body?: any) {
     super(message);
     this.status = status;
     this.reason = reason;
+    this.body = body;
   }
 }
 
@@ -66,12 +68,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (!res.ok) {
     const text = await res.text();
     let reason: string | undefined;
+    let body: any = undefined;
     try {
-      reason = JSON.parse(text)?.reason;
+      body = JSON.parse(text);
+      reason = body?.reason;
     } catch {
       /* body não é JSON */
     }
-    throw new ApiError(res.status, `API ${res.status}: ${text}`, reason);
+    throw new ApiError(res.status, `API ${res.status}: ${text}`, reason, body);
   }
   return (await res.json()) as T;
 }
@@ -292,6 +296,39 @@ export interface CloseEventResponse {
 // ============================================================
 
 import type { AuthUser } from "./auth";
+
+// ============================================================
+// Dose validation (cruzamento Bulário ANVISA / Beers / SBGG)
+// ============================================================
+
+export type DoseSeverity = "info" | "warning" | "warning_strong" | "block";
+
+export interface DoseIssue {
+  severity: DoseSeverity;
+  code:
+    | "dose_above_limit"
+    | "beers_avoid"
+    | "unknown_drug"
+    | "dose_unparseable"
+    | "no_limit_for_route"
+    | "unit_mismatch";
+  message: string;
+  detail?: Record<string, unknown>;
+}
+
+export interface DoseValidation {
+  ok: boolean;
+  severity: DoseSeverity | null;
+  principle_active: string | null;
+  limit_found: boolean;
+  computed_daily_dose: { value: number; unit: string } | null;
+  max_daily_dose: { value: number; unit: string } | null;
+  ratio: number | null;
+  source: string | null;
+  source_ref: string | null;
+  notes: string | null;
+  issues: DoseIssue[];
+}
 
 export interface SofiaMessage {
   role: "user" | "assistant" | "tool" | "system";
@@ -603,11 +640,22 @@ export const api = {
     request<{ results: MedicationSchedule[] }>(
       `/api/patients/${patientId}/medication-schedules`,
     ),
-  createMedicationSchedule: (patientId: string, body: Partial<MedicationSchedule> & { medication_name: string; dose: string }) =>
-    request<{ status: string; schedule: MedicationSchedule }>(
-      `/api/patients/${patientId}/medication-schedules`,
-      { method: "POST", body: JSON.stringify(body) },
-    ),
+  createMedicationSchedule: (
+    patientId: string,
+    body: Partial<MedicationSchedule> & {
+      medication_name: string;
+      dose: string;
+      force?: boolean;  // confirmação após warning ANVISA/Beers
+    },
+  ) =>
+    request<{
+      status: string;
+      schedule: MedicationSchedule;
+      validation: DoseValidation;
+    }>(`/api/patients/${patientId}/medication-schedules`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
   updateMedicationSchedule: (scheduleId: string, body: Partial<MedicationSchedule>) =>
     request<{ status: string; schedule: MedicationSchedule }>(
       `/api/medication-schedules/${scheduleId}`,

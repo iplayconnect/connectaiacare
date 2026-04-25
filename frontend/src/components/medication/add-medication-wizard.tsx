@@ -607,8 +607,10 @@ function ManualFlow({
   const [indication, setIndication] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [validation, setValidation] = useState<import("@/lib/api").DoseValidation | null>(null);
+  const [pendingForceConfirm, setPendingForceConfirm] = useState(false);
 
-  async function handleSave() {
+  async function handleSave(force = false) {
     if (!name.trim() || !dose.trim()) {
       setError("Informe nome e dose");
       return;
@@ -621,17 +623,28 @@ function ManualFlow({
         .map((t) => t.trim())
         .filter(Boolean)
         .map((t) => (t.length === 5 ? t : t.padStart(5, "0")));
-      await api.createMedicationSchedule(patientId, {
+      const res = await api.createMedicationSchedule(patientId, {
         medication_name: name.trim(),
         dose: dose.trim(),
         schedule_type: scheduleType as "fixed_daily",
         times_of_day: scheduleType === "prn" ? undefined : times,
         special_instructions: indication.trim() || undefined,
         source_type: "manual_admin",
+        force,
       });
+      // Mostra warnings antes de fechar (pra registro visual)
+      setValidation(res.validation || null);
       onDone();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Erro ao salvar");
+    } catch (e: any) {
+      // 422 dose_validation_blocked: backend devolveu validation no body.
+      // ApiError.body contém a payload JSON parseada.
+      if (e?.reason === "dose_validation_blocked" && e?.body?.validation) {
+        setValidation(e.body.validation);
+        setPendingForceConfirm(true);
+        setError(null);
+      } else {
+        setError(e instanceof Error ? e.message : "Erro ao salvar");
+      }
     } finally {
       setSaving(false);
     }
@@ -715,6 +728,10 @@ function ManualFlow({
           </div>
         )}
 
+        {validation && (validation.severity === "block" || validation.severity === "warning_strong" || validation.severity === "warning") && (
+          <DoseValidationPanel validation={validation} />
+        )}
+
         <div className="flex justify-end gap-2 pt-2">
           <button
             onClick={onBack}
@@ -722,16 +739,86 @@ function ManualFlow({
           >
             Cancelar
           </button>
-          <button
-            onClick={handleSave}
-            disabled={saving || !name.trim() || !dose.trim()}
-            className="px-4 py-2 rounded-lg bg-accent-cyan text-slate-900 text-xs font-semibold hover:bg-accent-teal disabled:opacity-50 inline-flex items-center gap-1.5"
-          >
-            {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" strokeWidth={3} />}
-            Salvar
-          </button>
+          {pendingForceConfirm ? (
+            <button
+              onClick={() => handleSave(true)}
+              disabled={saving}
+              className="px-4 py-2 rounded-lg bg-classification-critical/80 hover:bg-classification-critical text-white text-xs font-semibold disabled:opacity-50 inline-flex items-center gap-1.5"
+              title="Confirmação clínica do médico (registramos no audit)"
+            >
+              {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" strokeWidth={3} />}
+              Confirmar mesmo assim
+            </button>
+          ) : (
+            <button
+              onClick={() => handleSave(false)}
+              disabled={saving || !name.trim() || !dose.trim()}
+              className="px-4 py-2 rounded-lg bg-accent-cyan text-slate-900 text-xs font-semibold hover:bg-accent-teal disabled:opacity-50 inline-flex items-center gap-1.5"
+            >
+              {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" strokeWidth={3} />}
+              Salvar
+            </button>
+          )}
         </div>
       </div>
+    </div>
+  );
+}
+
+function DoseValidationPanel({
+  validation,
+}: {
+  validation: import("@/lib/api").DoseValidation;
+}) {
+  const sevColor =
+    validation.severity === "block"
+      ? "text-classification-critical bg-classification-critical/10 border-classification-critical/30"
+      : validation.severity === "warning_strong"
+      ? "text-classification-attention bg-classification-attention/10 border-classification-attention/30"
+      : "text-foreground/85 bg-white/[0.03] border-white/[0.08]";
+  const SOURCE_LABEL: Record<string, string> = {
+    anvisa: "Bulário ANVISA",
+    beers_2023: "Critérios de Beers 2023",
+    sbgg: "Guia SBGG (Geriatria)",
+    who_atc: "WHO ATC/DDD",
+    fda: "FDA (referência)",
+    manual: "Curadoria interna",
+  };
+  return (
+    <div className={`rounded-md border p-3 text-[12px] space-y-2 ${sevColor}`}>
+      <div className="font-semibold uppercase tracking-wider text-[10px] flex items-center gap-2">
+        {validation.severity === "block" ? "⛔ Dose acima do permitido" :
+         validation.severity === "warning_strong" ? "⚠️ Atenção: revisar dose" :
+         "Recomendação clínica"}
+        {validation.principle_active && (
+          <span className="ml-auto font-mono text-[10px] opacity-70">
+            {validation.principle_active}
+          </span>
+        )}
+      </div>
+      {validation.computed_daily_dose && validation.max_daily_dose && (
+        <div className="text-foreground/80">
+          Calculado: <strong>{validation.computed_daily_dose.value}{validation.computed_daily_dose.unit}/dia</strong>
+          {" · "}
+          Limite: <strong>{validation.max_daily_dose.value}{validation.max_daily_dose.unit}/dia</strong>
+          {validation.ratio != null && (
+            <span className="opacity-70"> ({(validation.ratio * 100).toFixed(0)}% do limite)</span>
+          )}
+        </div>
+      )}
+      <ul className="space-y-1 list-disc pl-4">
+        {validation.issues.map((i, idx) => (
+          <li key={idx} className="leading-snug">
+            {i.message}
+          </li>
+        ))}
+      </ul>
+      {validation.source && (
+        <div className="text-[10px] opacity-60 pt-1 border-t border-current/10">
+          Fonte: {SOURCE_LABEL[validation.source] || validation.source}
+          {validation.source_ref && <> · {validation.source_ref}</>}
+        </div>
+      )}
     </div>
   );
 }
