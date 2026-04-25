@@ -18,11 +18,11 @@ BEGIN;
 CREATE TABLE IF NOT EXISTS aia_health_drug_interactions (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     -- O par é simétrico — guardamos sempre lex-ordenado (a < b) pra
-    -- evitar duplicatas. Validator ordena antes de buscar.
-    principle_a TEXT NOT NULL,
-    principle_b TEXT NOT NULL,
-    -- Se a interação é por classe (ex: "AINEs + IECA"), populamos as
-    -- colunas class_a/class_b ao invés de principle_a/principle_b.
+    -- evitar duplicatas em pares principle×principle ou class×class.
+    -- Em pares mistos (principle×class) a coluna oposta fica NULL.
+    -- O CHECK abaixo garante que pelo menos um par seja válido.
+    principle_a TEXT,
+    principle_b TEXT,
     class_a TEXT,
     class_b TEXT,
 
