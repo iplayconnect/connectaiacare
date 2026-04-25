@@ -282,13 +282,13 @@ VALUES
 
     -- Síndrome do QT longo → azitromicina
     ('sindrome qt longo', 'azitromicina', NULL, 'contraindicated',
-     'Azitromicina prolonga QT — risco torsade.',
+     'Azitromicina prolonga QT — risco torsade. Box warning FDA 2013.',
      'Trocar por antibiótico não-prolongador (ex: amoxicilina, doxiciclina).',
-     'fda', 0.97),
+     'manual', 0.97),
 
     -- Insuficiência renal grave → dabigatrana
     ('doenca renal cronica', 'dabigatrana', NULL, 'warning',
-     'Dabigatrana excretada 80% pelos rins. ClCr <30 contraindica.',
+     'Dabigatrana excretada 80% pelos rins. ClCr <30 contraindica (FDA box).',
      'Confirmar ClCr atual. Se <30 trocar para apixabana.',
      'kdigo', 0.97),
 
