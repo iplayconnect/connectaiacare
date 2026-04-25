@@ -316,7 +316,10 @@ export interface DoseIssue {
     | "duplicate_therapy"
     | "polypharmacy"
     | "narrow_therapeutic_index"
-    | "drug_interaction";
+    | "drug_interaction"
+    | "condition_contraindicated"
+    | "anticholinergic_burden"
+    | "fall_risk";
   message: string;
   detail?: Record<string, unknown>;
 }

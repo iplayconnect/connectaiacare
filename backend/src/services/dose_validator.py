@@ -573,6 +573,230 @@ def check_drug_interactions(
     return issues
 
 
+# ─── F3: CONTRAINDICAÇÃO POR CONDIÇÃO ─────────────────────
+
+def _normalize_condition(term: str | None) -> str | None:
+    """Normaliza termo de condição via aliases (asma bronquica → asma)."""
+    if not term:
+        return None
+    norm = normalize(term)
+    if not norm:
+        return None
+    row = get_postgres().fetch_one(
+        "SELECT canonical_term FROM aia_health_condition_aliases "
+        "WHERE lower(alias) = %s LIMIT 1",
+        (norm,),
+    )
+    if row:
+        return row["canonical_term"]
+    return norm
+
+
+def _patient_condition_terms(patient: dict | None) -> list[str]:
+    """Extrai lista de condições normalizadas. Suporta:
+      • patient.conditions = [{"description": "Asma", "code": "J45"}, ...]
+      • patient.conditions = ["Asma", "DPOC", ...]
+    """
+    if not patient:
+        return []
+    raw = patient.get("conditions") or []
+    out: list[str] = []
+    for item in raw:
+        if isinstance(item, str):
+            term = _normalize_condition(item)
+        elif isinstance(item, dict):
+            term = _normalize_condition(
+                item.get("description") or item.get("name") or item.get("code")
+            )
+        else:
+            term = None
+        if term:
+            out.append(term)
+    return out
+
+
+_CONDITION_SEVERITY_MAP = {
+    "contraindicated": "block",
+    "warning": "warning_strong",
+    "caution": "warning",
+}
+
+
+def check_condition_contraindications(
+    principle: str | None,
+    therapeutic_class: str | None,
+    patient: dict | None,
+) -> list[DoseIssue]:
+    """Cruza condições do paciente com tabela de contraindicações."""
+    if not principle and not therapeutic_class:
+        return []
+    conditions = _patient_condition_terms(patient)
+    if not conditions:
+        return []
+    pg = get_postgres()
+    issues: list[DoseIssue] = []
+    seen: set[tuple] = set()
+    for cond in conditions:
+        rows = pg.fetch_all(
+            """
+            SELECT condition_term, severity, rationale, recommendation,
+                   source, source_ref, affected_principle_active,
+                   affected_therapeutic_class
+            FROM aia_health_condition_contraindications
+            WHERE active = TRUE AND condition_term = %s
+              AND ((affected_principle_active IS NOT NULL AND affected_principle_active = %s)
+                OR (affected_therapeutic_class IS NOT NULL AND affected_therapeutic_class = %s))
+            """,
+            (cond, principle, therapeutic_class),
+        )
+        for r in rows:
+            sig = (cond, r["severity"], r["rationale"][:40])
+            if sig in seen:
+                continue
+            seen.add(sig)
+            mapped = _CONDITION_SEVERITY_MAP.get(r["severity"], "warning")
+            issues.append(DoseIssue(
+                severity=mapped,
+                code="condition_contraindicated",
+                message=(
+                    f"🩺 Paciente tem '{cond}' — {r['rationale']} "
+                    f"Conduta: {r['recommendation']} Fonte: {r['source']}."
+                ),
+                detail={
+                    "condition": cond,
+                    "severity_raw": r["severity"],
+                    "matched_via": "principle" if r.get("affected_principle_active") else "class",
+                    "source": r["source"],
+                },
+            ))
+    return issues
+
+
+# ─── F3: ANTICHOLINERGIC BURDEN SCORE ─────────────────────
+
+def check_anticholinergic_burden(
+    new_principle: str | None,
+    patient_id: str | None,
+) -> list[DoseIssue]:
+    """Soma score do paciente (existente + novo). ≥3 = warning."""
+    if not patient_id:
+        return []
+    pg = get_postgres()
+    actives = _list_active_schedules(patient_id)
+    burdens = []
+    for sch in actives:
+        existing_principle = resolve_principle_active(sch["medication_name"])
+        if not existing_principle:
+            continue
+        row = pg.fetch_one(
+            "SELECT burden_score FROM aia_health_drug_anticholinergic_burden "
+            "WHERE principle_active = %s AND active = TRUE",
+            (existing_principle,),
+        )
+        if row and row["burden_score"] > 0:
+            burdens.append((existing_principle, sch["medication_name"], row["burden_score"]))
+
+    new_score = 0
+    if new_principle:
+        row = pg.fetch_one(
+            "SELECT burden_score FROM aia_health_drug_anticholinergic_burden "
+            "WHERE principle_active = %s AND active = TRUE",
+            (new_principle,),
+        )
+        if row:
+            new_score = int(row["burden_score"])
+
+    total = sum(b[2] for b in burdens) + new_score
+    if total < 3:
+        return []
+    sev = "warning_strong" if total >= 5 else "warning"
+    components = [f"{name}({score})" for _, name, score in burdens]
+    if new_score > 0:
+        components.append(f"NOVO ({new_score})")
+    return [DoseIssue(
+        severity=sev,
+        code="anticholinergic_burden",
+        message=(
+            f"🧠 Carga anticolinérgica acumulada: {total} pontos "
+            f"({', '.join(components)}). Score ≥3 aumenta risco de delirium "
+            "e queda em idoso (Boustani 2008)."
+        ),
+        detail={"total": total, "components": [
+            {"principle": p, "name": n, "score": s} for p, n, s in burdens
+        ], "new_score": new_score},
+    )]
+
+
+# ─── F3: FALL RISK SCORE ──────────────────────────────────
+
+def check_fall_risk(
+    new_principle: str | None,
+    new_class: str | None,
+    patient: dict | None,
+) -> list[DoseIssue]:
+    """Soma score de queda (existente + novo). ≥3 = warning, ≥5 = strong."""
+    patient_id = (patient or {}).get("id")
+    if not patient_id:
+        return []
+    pg = get_postgres()
+    actives = _list_active_schedules(patient_id)
+
+    def lookup_score(p: str | None, c: str | None) -> int:
+        if not p and not c:
+            return 0
+        row = pg.fetch_one(
+            """
+            SELECT fall_risk_score FROM aia_health_drug_fall_risk
+            WHERE active = TRUE
+              AND (principle_active = %s OR therapeutic_class = %s)
+            ORDER BY (principle_active = %s) DESC
+            LIMIT 1
+            """,
+            (p, c, p),
+        )
+        return int(row["fall_risk_score"]) if row else 0
+
+    components = []
+    total = 0
+    for sch in actives:
+        existing_principle = resolve_principle_active(sch["medication_name"])
+        existing_meta = get_principle_meta(existing_principle) if existing_principle else None
+        existing_class = (existing_meta or {}).get("therapeutic_class")
+        score = lookup_score(existing_principle, existing_class)
+        if score > 0:
+            components.append((sch["medication_name"], score))
+            total += score
+
+    new_score = lookup_score(new_principle, new_class)
+    total_with_new = total + new_score
+
+    # Bonus +2 se paciente tem histórico de queda registrado
+    has_fall_history = "historico_queda" in _patient_condition_terms(patient)
+    if has_fall_history:
+        total_with_new += 2
+
+    if total_with_new < 3:
+        return []
+    sev = "warning_strong" if total_with_new >= 5 else "warning"
+    parts = [f"{name}({score})" for name, score in components]
+    if new_score > 0:
+        parts.append(f"NOVO ({new_score})")
+    if has_fall_history:
+        parts.append("histórico de queda (+2)")
+    return [DoseIssue(
+        severity=sev,
+        code="fall_risk",
+        message=(
+            f"⚠️ Risco de queda acumulado: {total_with_new} pontos "
+            f"({', '.join(parts) or 'soma de classes'}). "
+            "Score ≥3 = atenção (STOPP 2023). Considerar desprescrição "
+            "ou redução de doses."
+        ),
+        detail={"total": total_with_new, "components": components,
+                "new_score": new_score, "fall_history": has_fall_history},
+    )]
+
+
 def check_narrow_therapeutic_index(limit: dict | None) -> list[DoseIssue]:
     """NTI = janela terapêutica estreita (digoxina, varfarina, levotiroxina)."""
     if not limit or not limit.get("narrow_therapeutic_index"):
@@ -657,6 +881,9 @@ def validate(
     issues.extend(check_drug_interactions(
         principle, therapeutic_class, medication_name, patient_id,
     ))
+    issues.extend(check_condition_contraindications(principle, therapeutic_class, patient))
+    issues.extend(check_anticholinergic_burden(principle, patient_id))
+    issues.extend(check_fall_risk(principle, therapeutic_class, patient))
 
     if not limit:
         issues.append(DoseIssue(
