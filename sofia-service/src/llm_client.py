@@ -22,8 +22,13 @@ import google.generativeai as genai
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MODEL = os.getenv("SOFIA_LLM_MODEL") or "gemini-3.1-flash"
-FALLBACK_MODEL = "gemini-1.5-flash"
+# Modelos GA suportados (snapshot 2026-04-25):
+#   gemini-2.5-flash, gemini-2.5-flash-lite, gemini-flash-latest (alias),
+#   gemini-2.0-flash, gemini-3-flash-preview, gemini-3.1-flash-lite-preview,
+#   gemini-3.1-flash-live-preview (real-time, p/ Sofia.4 ligações).
+# `gemini-3.1-flash` (não-preview) ainda não existe; usamos 2.5 Flash estável.
+DEFAULT_MODEL = os.getenv("SOFIA_LLM_MODEL") or "gemini-2.5-flash"
+FALLBACK_MODEL = "gemini-flash-latest"
 
 
 def _api_key() -> str | None:
