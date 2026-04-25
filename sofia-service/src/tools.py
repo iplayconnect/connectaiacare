@@ -310,18 +310,27 @@ def _tool_query_clinical_guidelines(
     topic: str,
     **_: Any,
 ) -> dict:
-    """Busca em aia_health_knowledge_chunks (RAG simples por ILIKE).
+    """Busca em aia_health_knowledge_chunks (RAG por ILIKE + keywords).
+    Cobre conhecimento clínico (Beers, Child-Pugh, NTI, ACB, polifarmácia,
+    DOACs renais, QT prolongadores, AINEs) E plataforma (motor de cruzamentos,
+    /admin/regras-clinicas, /alertas/clinicos, revalidação semanal).
     Sofia.3+ vai upgrade pra pgvector quando tivermos embeddings."""
-    if persona_ctx.get("persona") not in ("medico", "enfermeiro"):
+    if persona_ctx.get("persona") not in (
+        "medico", "enfermeiro", "admin_tenant", "super_admin"
+    ):
         return {"ok": False, "error": "persona_cannot_query_clinical"}
     rows = persistence.fetch_all(
         """
-        SELECT id, source, title, content
+        SELECT id, source, title, content, summary, domain, subdomain, keywords
         FROM aia_health_knowledge_chunks
-        WHERE content ILIKE %s OR title ILIKE %s
+        WHERE active = TRUE
+          AND (content ILIKE %s OR title ILIKE %s
+               OR summary ILIKE %s
+               OR EXISTS (SELECT 1 FROM unnest(keywords) k WHERE k ILIKE %s))
+        ORDER BY priority DESC
         LIMIT 5
         """,
-        (f"%{topic}%", f"%{topic}%"),
+        (f"%{topic}%", f"%{topic}%", f"%{topic}%", f"%{topic}%"),
     )
     return {"ok": True, "count": len(rows), "chunks": rows}
 
@@ -426,6 +435,245 @@ def _tool_check_medication_safety(
         "dose": dose,
         "summary": summary,
         "validation": validation,
+    }
+
+
+def _resolve_principle(name: str) -> str | None:
+    """Normaliza um nome (comercial ou genérico) pro principle_active canônico
+    via aia_health_drug_aliases + dose_limits."""
+    if not name:
+        return None
+    n = name.strip().lower()
+    # 1) tenta como principle_active direto
+    row = persistence.fetch_one(
+        "SELECT principle_active FROM aia_health_drug_dose_limits "
+        "WHERE lower(principle_active) = %s LIMIT 1",
+        (n,),
+    )
+    if row:
+        return row["principle_active"]
+    # 2) alias (brand/synonym/misspelling)
+    row = persistence.fetch_one(
+        "SELECT principle_active FROM aia_health_drug_aliases "
+        "WHERE lower(alias) = %s LIMIT 1",
+        (n,),
+    )
+    if row:
+        return row["principle_active"]
+    # 3) fuzzy ILIKE
+    row = persistence.fetch_one(
+        "SELECT principle_active FROM aia_health_drug_dose_limits "
+        "WHERE principle_active ILIKE %s LIMIT 1",
+        (f"%{n}%",),
+    )
+    return row["principle_active"] if row else None
+
+
+def _tool_query_drug_rules(*, persona_ctx: dict, medication_name: str, **_: Any) -> dict:
+    """Devolve TODAS as regras carregadas pra um princípio ativo: dose máxima,
+    interações, contraindicações por condição, ajustes renais/hepáticos,
+    ACB, fall risk, alergias. Use pra perguntas tipo 'me conta tudo sobre
+    rivaroxabana' ou 'quais regras vocês têm pra olanzapina'."""
+    if not medication_name:
+        return {"ok": False, "error": "medication_name_required"}
+    pa = _resolve_principle(medication_name)
+    if not pa:
+        return {"ok": False, "error": "principle_not_found", "input": medication_name}
+
+    dose = persistence.fetch_one(
+        """SELECT principle_active, route, max_daily_dose_value,
+                  max_daily_dose_unit, therapeutic_class,
+                  beers_avoid, beers_rationale,
+                  narrow_therapeutic_index, source, source_ref, notes
+           FROM aia_health_drug_dose_limits
+           WHERE principle_active = %s LIMIT 1""",
+        (pa,),
+    )
+    aliases = persistence.fetch_all(
+        "SELECT alias, alias_type FROM aia_health_drug_aliases "
+        "WHERE principle_active = %s ORDER BY alias_type, alias",
+        (pa,),
+    )
+    interactions = persistence.fetch_all(
+        """SELECT principle_a, principle_b, class_a, class_b, severity,
+                  mechanism, clinical_effect, recommendation,
+                  time_separation_minutes, source
+           FROM aia_health_drug_interactions
+           WHERE active = TRUE
+             AND (principle_a = %s OR principle_b = %s
+                  OR (class_a IS NOT NULL AND class_a = (
+                      SELECT therapeutic_class FROM aia_health_drug_dose_limits
+                      WHERE principle_active = %s LIMIT 1))
+                  OR (class_b IS NOT NULL AND class_b = (
+                      SELECT therapeutic_class FROM aia_health_drug_dose_limits
+                      WHERE principle_active = %s LIMIT 1))
+                 )
+           ORDER BY severity""",
+        (pa, pa, pa, pa),
+    )
+    contraindications = persistence.fetch_all(
+        """SELECT condition_term, severity, rationale, recommendation, source
+           FROM aia_health_condition_contraindications
+           WHERE active = TRUE
+             AND (affected_principle_active = %s
+                  OR affected_therapeutic_class = (
+                      SELECT therapeutic_class FROM aia_health_drug_dose_limits
+                      WHERE principle_active = %s LIMIT 1))
+           ORDER BY severity""",
+        (pa, pa),
+    )
+    renal = persistence.fetch_all(
+        """SELECT clcr_min, clcr_max, action, rationale, source
+           FROM aia_health_drug_renal_adjustments
+           WHERE active = TRUE AND principle_active = %s
+           ORDER BY clcr_min""",
+        (pa,),
+    )
+    hepatic = persistence.fetch_all(
+        """SELECT severity_class, action, rationale, source
+           FROM aia_health_drug_hepatic_adjustments
+           WHERE active = TRUE AND principle_active = %s
+           ORDER BY severity_class""",
+        (pa,),
+    )
+    acb = persistence.fetch_one(
+        "SELECT burden_score, notes FROM aia_health_drug_anticholinergic_burden "
+        "WHERE principle_active = %s",
+        (pa,),
+    )
+    fall_risk = persistence.fetch_one(
+        """SELECT therapeutic_class, fall_risk_score, rationale
+           FROM aia_health_drug_fall_risk
+           WHERE therapeutic_class = (
+               SELECT therapeutic_class FROM aia_health_drug_dose_limits
+               WHERE principle_active = %s LIMIT 1)""",
+        (pa,),
+    )
+    allergies = persistence.fetch_all(
+        """SELECT allergy_term, severity, rationale, source
+           FROM aia_health_allergy_mappings
+           WHERE active = TRUE
+             AND (affected_principle_active = %s
+                  OR affected_therapeutic_class = (
+                      SELECT therapeutic_class FROM aia_health_drug_dose_limits
+                      WHERE principle_active = %s LIMIT 1))""",
+        (pa, pa),
+    )
+
+    return {
+        "ok": True,
+        "principle_active": pa,
+        "input_resolved_from": medication_name if medication_name.lower() != pa else None,
+        "dose_limit": dose,
+        "aliases": aliases,
+        "interactions": interactions,
+        "interaction_count": len(interactions),
+        "condition_contraindications": contraindications,
+        "renal_adjustments": renal,
+        "hepatic_adjustments": hepatic,
+        "anticholinergic_burden": acb,
+        "fall_risk": fall_risk,
+        "allergy_cross_reactions": allergies,
+    }
+
+
+def _tool_check_drug_interaction(
+    *, persona_ctx: dict, med_a: str, med_b: str, **_: Any
+) -> dict:
+    """Lookup específico de um par de medicamentos. Aceita nome comercial
+    ou princípio ativo. Use pra 'posso usar X com Y?'."""
+    if not med_a or not med_b:
+        return {"ok": False, "error": "both_meds_required"}
+    pa_a = _resolve_principle(med_a)
+    pa_b = _resolve_principle(med_b)
+    if not pa_a or not pa_b:
+        return {
+            "ok": False,
+            "error": "principle_not_found",
+            "med_a_resolved": pa_a,
+            "med_b_resolved": pa_b,
+        }
+    # Pares são lex-ordenados na tabela
+    a, b = sorted([pa_a, pa_b])
+    rows = persistence.fetch_all(
+        """SELECT principle_a, principle_b, severity, mechanism,
+                  clinical_effect, recommendation,
+                  time_separation_minutes, source, confidence
+           FROM aia_health_drug_interactions
+           WHERE active = TRUE
+             AND principle_a = %s AND principle_b = %s""",
+        (a, b),
+    )
+    if not rows:
+        # tenta combinação class-based
+        rows = persistence.fetch_all(
+            """SELECT principle_a, principle_b, class_a, class_b, severity,
+                      mechanism, clinical_effect, recommendation,
+                      time_separation_minutes, source, confidence
+               FROM aia_health_drug_interactions i
+               WHERE active = TRUE
+                 AND ((class_a = (SELECT therapeutic_class FROM aia_health_drug_dose_limits WHERE principle_active = %s LIMIT 1)
+                       AND principle_b = %s)
+                  OR (principle_a = %s
+                      AND class_b = (SELECT therapeutic_class FROM aia_health_drug_dose_limits WHERE principle_active = %s LIMIT 1))
+                  OR (class_a = (SELECT therapeutic_class FROM aia_health_drug_dose_limits WHERE principle_active = %s LIMIT 1)
+                      AND class_b = (SELECT therapeutic_class FROM aia_health_drug_dose_limits WHERE principle_active = %s LIMIT 1)))""",
+            (pa_a, pa_b, pa_a, pa_b, pa_a, pa_b),
+        )
+    return {
+        "ok": True,
+        "med_a": pa_a,
+        "med_b": pa_b,
+        "found": bool(rows),
+        "interactions": rows,
+    }
+
+
+def _tool_list_beers_avoid_in_condition(
+    *, persona_ctx: dict, condition: str, **_: Any
+) -> dict:
+    """Lista medicamentos contraindicados pra uma condição específica
+    (ex: 'demência', 'parkinson', 'doenca renal cronica'). Combina
+    condition_contraindications + alias resolution."""
+    if not condition:
+        return {"ok": False, "error": "condition_required"}
+    cond = condition.strip().lower()
+    # Resolve via condition_aliases
+    canon = persistence.fetch_one(
+        "SELECT canonical_term FROM aia_health_condition_aliases "
+        "WHERE lower(alias) = %s LIMIT 1",
+        (cond,),
+    )
+    canon_term = canon["canonical_term"] if canon else cond
+
+    rows = persistence.fetch_all(
+        """SELECT condition_term, affected_principle_active,
+                  affected_therapeutic_class, severity, rationale,
+                  recommendation, source
+           FROM aia_health_condition_contraindications
+           WHERE active = TRUE
+             AND (lower(condition_term) = %s OR lower(condition_term) = %s)
+           ORDER BY severity, affected_principle_active""",
+        (cond, canon_term),
+    )
+
+    # Beers AVOID gerais (independente de condição) — útil pra demência
+    beers_rows = []
+    if cond in ("demencia", "demência", "alzheimer"):
+        beers_rows = persistence.fetch_all(
+            """SELECT principle_active, therapeutic_class, beers_rationale, source
+               FROM aia_health_drug_dose_limits
+               WHERE beers_avoid = TRUE
+               ORDER BY therapeutic_class, principle_active"""
+        )
+
+    return {
+        "ok": True,
+        "condition": cond,
+        "canonical_term": canon_term,
+        "contraindications": rows,
+        "contraindication_count": len(rows),
+        "beers_avoid_general": beers_rows,
     }
 
 
@@ -546,7 +794,7 @@ TOOLS: dict[str, dict[str, Any]] = {
             "required": ["topic"],
         },
         "handler": _tool_query_clinical_guidelines,
-        "allowed_personas": ["medico", "enfermeiro"],
+        "allowed_personas": ["medico", "enfermeiro", "admin_tenant", "super_admin"],
     },
     "send_check_in": {
         "description": "Cria um care_event de check-in proativo da Sofia (não dispara WhatsApp aqui — apenas registra).",
@@ -560,6 +808,43 @@ TOOLS: dict[str, dict[str, Any]] = {
         },
         "handler": _tool_send_check_in,
         "allowed_personas": ["medico", "enfermeiro", "admin_tenant"],
+    },
+    "query_drug_rules": {
+        "description": "Devolve TODAS as regras carregadas no motor de cruzamentos para um princípio ativo: dose máxima diária, classe terapêutica, flag Beers AVOID, NTI, aliases comerciais, interações medicamentosas (com time_separation), contraindicações por condição, ajuste renal por faixa de ClCr, ajuste hepático por Child-Pugh A/B/C, ACB score, fall risk, alergias cruzadas. Use quando alguém perguntar 'me conta tudo que vocês têm sobre X' ou 'quais regras existem pra Y'. Aceita nome comercial (resolve alias) ou princípio ativo.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "medication_name": {"type": "string", "description": "Nome (comercial ou genérico), ex: 'pradaxa', 'dabigatrana', 'risperdal'."},
+            },
+            "required": ["medication_name"],
+        },
+        "handler": _tool_query_drug_rules,
+        "allowed_personas": ["medico", "enfermeiro", "admin_tenant", "super_admin"],
+    },
+    "check_drug_interaction": {
+        "description": "Lookup determinístico de interação medicamentosa para um PAR específico. Resolve aliases comerciais. Inclui interações por classe terapêutica (ex: AINE↔varfarina). Retorna severity (minor/moderate/major/contraindicated), mecanismo, efeito clínico, recomendação e time_separation_minutes (>0 = mitigável espaçando horários). Use pra 'posso usar X com Y?'.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "med_a": {"type": "string"},
+                "med_b": {"type": "string"},
+            },
+            "required": ["med_a", "med_b"],
+        },
+        "handler": _tool_check_drug_interaction,
+        "allowed_personas": ["medico", "enfermeiro", "admin_tenant", "super_admin"],
+    },
+    "list_beers_avoid_in_condition": {
+        "description": "Lista medicamentos contraindicados ou marcados Beers AVOID para uma condição específica (ex: 'demência', 'parkinson', 'asma', 'doenca renal cronica', 'sindrome qt longo'). Resolve aliases de condição (ex: 'cirrose child b' → child_b). Combina aia_health_condition_contraindications + Beers AVOID gerais quando aplicável. Use pra 'o que devo evitar em paciente com X'.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "condition": {"type": "string", "description": "Condição médica em texto livre."},
+            },
+            "required": ["condition"],
+        },
+        "handler": _tool_list_beers_avoid_in_condition,
+        "allowed_personas": ["medico", "enfermeiro", "admin_tenant", "super_admin"],
     },
     "check_medication_safety": {
         "description": "Valida uma prescrição candidata contra o motor de cruzamentos clínicos: dose máxima diária, alergias, interações medicamentosas (incluindo separação por horário), contraindicações por condição, ajuste renal/hepático, ACB score, risco de queda, NTI e constraints de sinais vitais. NÃO persiste a prescrição — apenas retorna a análise de risco. Use ANTES de criar/atualizar uma medication_schedule, ou quando o médico pergunta 'é seguro prescrever X mg de Y para o paciente Z?'.",
