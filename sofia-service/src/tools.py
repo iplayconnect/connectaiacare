@@ -319,20 +319,29 @@ def _tool_query_clinical_guidelines(
         "medico", "enfermeiro", "admin_tenant", "super_admin"
     ):
         return {"ok": False, "error": "persona_cannot_query_clinical"}
-    rows = persistence.fetch_all(
-        """
-        SELECT id, source, title, content, summary, domain, subdomain, keywords
-        FROM aia_health_knowledge_chunks
-        WHERE active = TRUE
-          AND (content ILIKE %s OR title ILIKE %s
-               OR summary ILIKE %s
-               OR EXISTS (SELECT 1 FROM unnest(keywords) k WHERE k ILIKE %s))
-        ORDER BY priority DESC
-        LIMIT 5
-        """,
-        (f"%{topic}%", f"%{topic}%", f"%{topic}%", f"%{topic}%"),
+    # Tokeniza pra cobrir multi-palavra ("motor cruzamento" deve achar
+    # tanto "motor de cruzamentos" quanto "cruzamento" sozinho).
+    raw_tokens = [t.strip() for t in topic.replace(",", " ").split() if t.strip()]
+    tokens = [t for t in raw_tokens if len(t) >= 3]
+    if not tokens:
+        tokens = [topic]
+    where_or = []
+    params: list = []
+    for tok in tokens:
+        like = f"%{tok}%"
+        where_or.append(
+            "(content ILIKE %s OR title ILIKE %s OR summary ILIKE %s "
+            "OR EXISTS (SELECT 1 FROM unnest(keywords) k WHERE k ILIKE %s))"
+        )
+        params.extend([like, like, like, like])
+    sql = (
+        "SELECT id, source, title, content, summary, domain, subdomain, keywords "
+        "FROM aia_health_knowledge_chunks "
+        f"WHERE active = TRUE AND ({' OR '.join(where_or)}) "
+        "ORDER BY priority DESC LIMIT 5"
     )
-    return {"ok": True, "count": len(rows), "chunks": rows}
+    rows = persistence.fetch_all(sql, tuple(params))
+    return {"ok": True, "count": len(rows), "tokens_used": tokens, "chunks": rows}
 
 
 def _tool_send_check_in(
@@ -460,11 +469,33 @@ def _resolve_principle(name: str) -> str | None:
     )
     if row:
         return row["principle_active"]
-    # 3) fuzzy ILIKE
+    # 3) fuzzy ILIKE em dose_limits
     row = persistence.fetch_one(
         "SELECT principle_active FROM aia_health_drug_dose_limits "
         "WHERE principle_active ILIKE %s LIMIT 1",
         (f"%{n}%",),
+    )
+    if row:
+        return row["principle_active"]
+    # 4) fallback — princípios que aparecem só em interactions
+    # (ex: amiodarona, alopurinol — não tem dose_limit mas têm interações).
+    row = persistence.fetch_one(
+        """SELECT principle_active FROM (
+            SELECT DISTINCT principle_a AS principle_active
+            FROM aia_health_drug_interactions WHERE principle_a IS NOT NULL
+            UNION
+            SELECT DISTINCT principle_b AS principle_active
+            FROM aia_health_drug_interactions WHERE principle_b IS NOT NULL
+            UNION
+            SELECT DISTINCT principle_active
+            FROM aia_health_drug_renal_adjustments
+            UNION
+            SELECT DISTINCT principle_active
+            FROM aia_health_drug_hepatic_adjustments
+        ) p
+        WHERE lower(principle_active) = %s OR principle_active ILIKE %s
+        LIMIT 1""",
+        (n, f"%{n}%"),
     )
     return row["principle_active"] if row else None
 
