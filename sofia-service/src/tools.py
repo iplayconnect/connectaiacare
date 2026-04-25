@@ -917,6 +917,45 @@ def tools_for_persona(persona: str) -> list[dict]:
     return out
 
 
+def _to_jsonable(value):
+    """Converte recursivamente tipos não-JSON em equivalentes serializáveis.
+
+    PG retorna NUMERIC como Decimal, TIMESTAMPTZ como datetime, UUID como
+    UUID. json.dumps default não sabe disso → todos os consumers (psycopg2
+    Json adapter na persistência, json.dumps quando devolvemos pro Grok)
+    estouram TypeError. Aplicamos UMA vez aqui no execute_tool e tudo a
+    jusante recebe dado limpo.
+    """
+    from datetime import date, datetime, time
+    from decimal import Decimal
+    from uuid import UUID
+
+    if value is None or isinstance(value, (bool, int, str)):
+        return value
+    if isinstance(value, float):
+        return value
+    if isinstance(value, Decimal):
+        # Numeric do PG → float (perdemos precisão extrema mas dose
+        # máxima/confidence/burden_score etc. cabem em float)
+        return float(value)
+    if isinstance(value, (datetime, date, time)):
+        return value.isoformat()
+    if isinstance(value, UUID):
+        return str(value)
+    if isinstance(value, (bytes, bytearray)):
+        import base64
+        return base64.b64encode(bytes(value)).decode("ascii")
+    if isinstance(value, dict):
+        return {str(k): _to_jsonable(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_to_jsonable(v) for v in value]
+    # Fallback — tenta string repr (ex: Range, Interval do PG)
+    try:
+        return str(value)
+    except Exception:
+        return None
+
+
 def execute_tool(name: str, args: dict, persona_ctx: dict) -> dict:
     spec = TOOLS.get(name)
     if not spec:
@@ -924,7 +963,12 @@ def execute_tool(name: str, args: dict, persona_ctx: dict) -> dict:
     if persona_ctx.get("persona") not in spec["allowed_personas"]:
         return {"ok": False, "error": "persona_not_allowed"}
     try:
-        return spec["handler"](persona_ctx=persona_ctx, **(args or {}))
+        result = spec["handler"](persona_ctx=persona_ctx, **(args or {}))
     except Exception as exc:
         logger.exception("tool_exec_failed name=%s", name)
         return {"ok": False, "error": str(exc)}
+    # Garante que resultado seja JSON-clean pra todos os consumers
+    # (psycopg2 Json adapter na persistência, json.dumps pro Grok/Gemini).
+    return _to_jsonable(result) if isinstance(result, dict) else {
+        "ok": True, "data": _to_jsonable(result)
+    }
