@@ -128,7 +128,8 @@ class VoiceSession:
                         voice_name=DEFAULT_VOICE_NAME,
                     )
                 ),
-                language_code="pt-BR",
+                # language_code não é aceito em SpeechConfig do google-genai.
+                # Idioma é detectado automaticamente; reforçamos via prompt.
             ),
             system_instruction=types.Content(
                 parts=[types.Part(text=_build_system_instruction(self.persona_ctx))]
