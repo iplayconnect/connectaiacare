@@ -359,82 +359,71 @@ ON CONFLICT DO NOTHING;
 -- 7. hepatic_adjustments
 -- =====================================================
 INSERT INTO aia_health_drug_hepatic_adjustments
-    (principle_active, severity_class, action, rationale, recommendation, source, confidence)
+    (principle_active, severity_class, action, rationale, source, confidence)
 VALUES
     -- Quetiapina (CYP3A4 — alvo hepático)
     ('quetiapina', 'child_a', 'reduce_50pct',
-     'Quetiapina é metabolizada por CYP3A4 — clearance reduz 30%.',
-     'Iniciar 25mg/dia e titular devagar.',
+     'CYP3A4 — clearance reduz ~30%. Iniciar 25mg/dia e titular devagar.',
      'fda', 0.9),
     ('quetiapina', 'child_b', 'reduce_75pct',
-     'Clearance reduz ainda mais.',
-     '12,5mg/dia e monitorar sedação.',
+     'Clearance reduz ainda mais. 12,5mg/dia e monitorar sedação.',
      'fda', 0.9),
     ('quetiapina', 'child_c', 'avoid',
-     'Hepatopatia grave: evitar.',
-     'Trocar para haloperidol em dose mínima ou avaliar suspender.',
+     'Hepatopatia grave: evitar. Trocar para haloperidol dose mínima ou avaliar suspender.',
      'manual', 0.85),
 
     -- Olanzapina
-    ('olanzapina', 'child_a', 'monitor',
-     'Olanzapina elevações leves de transaminases possíveis.',
-     'Monitorar enzimas hepáticas.', 'fda', 0.85),
+    ('olanzapina', 'child_a', 'caution_monitor',
+     'Possíveis elevações leves de transaminases. Monitorar enzimas hepáticas.',
+     'fda', 0.85),
     ('olanzapina', 'child_b', 'reduce_50pct',
-     'Reduzir dose pela metade.',
-     '2,5-5mg/dia.', 'fda', 0.85),
+     'Reduzir dose pela metade (2,5-5mg/dia).', 'fda', 0.85),
     ('olanzapina', 'child_c', 'avoid',
-     'Hepatopatia grave.', 'Evitar.', 'manual', 0.85),
+     'Hepatopatia grave: evitar.', 'manual', 0.85),
 
     -- Risperidona
-    ('risperidona', 'child_a', 'monitor', 'Sem ajuste rotineiro.', 'Monitorar.', 'fda', 0.85),
+    ('risperidona', 'child_a', 'caution_monitor', 'Sem ajuste rotineiro. Monitorar.', 'fda', 0.85),
     ('risperidona', 'child_b', 'reduce_50pct',
-     'Reduzir dose. Iniciar 0,5mg 12/12h.', 'Reduzir dose.', 'fda', 0.85),
+     'Reduzir dose. Iniciar 0,5mg 12/12h.', 'fda', 0.85),
     ('risperidona', 'child_c', 'reduce_75pct',
-     'Hepatopatia grave: reduzir significativamente.',
-     'Iniciar 0,25mg 12/12h.', 'manual', 0.8),
+     'Hepatopatia grave: reduzir significativamente. Iniciar 0,25mg 12/12h.',
+     'manual', 0.8),
 
     -- Amoxicilina+clavulanato (hepatotoxicidade colestática rara mas séria)
-    ('amoxicilina+clavulanato', 'child_a', 'monitor',
-     'Risco hepatotoxicidade colestática (especialmente curso >14d ou em homens >55a).',
-     'Monitorar enzimas. Cursos curtos (<7d).',
+    ('amoxicilina+clavulanato', 'child_a', 'caution_monitor',
+     'Risco hepatotoxicidade colestática (especialmente curso >14d ou homens >55a). Monitorar enzimas. Cursos curtos (<7d).',
      'fda', 0.9),
-    ('amoxicilina+clavulanato', 'child_b', 'monitor',
-     'Mesmo cuidado, mais rigoroso.',
-     'Cursos curtos. Reavaliar diariamente.',
+    ('amoxicilina+clavulanato', 'child_b', 'caution_monitor',
+     'Mesmo cuidado, mais rigoroso. Cursos curtos. Reavaliar diariamente.',
      'fda', 0.85),
     ('amoxicilina+clavulanato', 'child_c', 'avoid',
-     'Hepatopatia grave: evitar.',
-     'Preferir antibiótico não-hepatotóxico (ex: ceftriaxona).',
+     'Hepatopatia grave: evitar. Preferir antibiótico não-hepatotóxico (ceftriaxona).',
      'manual', 0.85),
 
     -- Azitromicina
-    ('azitromicina', 'child_a', 'no_adjustment', 'Sem ajuste.', 'Manter.', 'fda', 0.85),
-    ('azitromicina', 'child_b', 'monitor',
-     'Hepatotoxicidade rara mas reportada.',
-     'Monitorar enzimas se uso prolongado.', 'fda', 0.8),
+    ('azitromicina', 'child_a', 'no_adjustment', 'Sem ajuste.', 'fda', 0.85),
+    ('azitromicina', 'child_b', 'caution_monitor',
+     'Hepatotoxicidade rara mas reportada. Monitorar enzimas se uso prolongado.', 'fda', 0.8),
     ('azitromicina', 'child_c', 'avoid',
-     'Hepatopatia grave: evitar.',
-     'Trocar antibiótico.', 'manual', 0.8),
+     'Hepatopatia grave: evitar. Trocar antibiótico.', 'manual', 0.8),
 
     -- Dabigatrana (excreção renal — hepático tem menos peso)
-    ('dabigatrana', 'child_a', 'no_adjustment', 'Sem ajuste rotineiro.', 'Manter.', 'fda', 0.85),
-    ('dabigatrana', 'child_b', 'monitor',
-     'Dados limitados em hepatopatia moderada.',
-     'Monitorar e considerar alternativa (apixabana).',
+    ('dabigatrana', 'child_a', 'no_adjustment', 'Sem ajuste rotineiro.', 'fda', 0.85),
+    ('dabigatrana', 'child_b', 'caution_monitor',
+     'Dados limitados em hepatopatia moderada. Monitorar e considerar alternativa (apixabana).',
      'fda', 0.8),
     ('dabigatrana', 'child_c', 'avoid',
-     'Hepatopatia grave: evitar.',
-     'Apixabana é alternativa.', 'fda', 0.85),
+     'Hepatopatia grave: evitar. Apixabana é alternativa.', 'fda', 0.85),
 
     -- Pramipexol (eliminação renal — hepático sem ajuste)
-    ('pramipexol', 'child_a', 'no_adjustment', 'Eliminação renal.', 'Sem ajuste.', 'fda', 0.85),
-    ('pramipexol', 'child_b', 'no_adjustment', 'Sem ajuste.', 'Sem ajuste.', 'fda', 0.85),
-    ('pramipexol', 'child_c', 'monitor', 'Hepatopatia grave: dados limitados.', 'Monitorar.', 'manual', 0.7),
+    ('pramipexol', 'child_a', 'no_adjustment', 'Eliminação renal.', 'fda', 0.85),
+    ('pramipexol', 'child_b', 'no_adjustment', 'Sem ajuste.', 'fda', 0.85),
+    ('pramipexol', 'child_c', 'caution_monitor', 'Hepatopatia grave: dados limitados, monitorar.', 'manual', 0.7),
 
     -- Ropinirol (CYP1A2 — hepatic-dependent)
-    ('ropinirol', 'child_a', 'monitor', 'Metabolismo CYP1A2.', 'Iniciar dose mínima.', 'fda', 0.85),
-    ('ropinirol', 'child_b', 'reduce_50pct', 'Clearance reduzido.', 'Iniciar 0,25mg.', 'fda', 0.8),
-    ('ropinirol', 'child_c', 'avoid', 'Hepatopatia grave.', 'Evitar.', 'manual', 0.8)
+    ('ropinirol', 'child_a', 'caution_monitor', 'Metabolismo CYP1A2. Iniciar dose mínima.', 'fda', 0.85),
+    ('ropinirol', 'child_b', 'reduce_50pct', 'Clearance reduzido. Iniciar 0,25mg.', 'fda', 0.8),
+    ('ropinirol', 'child_c', 'avoid', 'Hepatopatia grave: evitar.', 'manual', 0.8)
 ON CONFLICT DO NOTHING;
 
 
