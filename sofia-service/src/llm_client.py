@@ -1,15 +1,20 @@
-"""Gemini wrapper para Sofia Care.
+"""Wrapper Gemini para Sofia Care.
 
-Usa google-generativeai 0.8.x (genai) com modelo gemini-3.1-flash.
-Suporta:
-  - chat com histórico (multi-turn)
-  - tool-use (function-calling) com schema OpenAPI-like
-  - TTS quando provider de TTS estiver disponível (separado em tts_client)
-  - contagem de tokens via response.usage_metadata
+SDK consolidado: google-genai (substitui google-generativeai legacy).
+Mesmo SDK usado pelo tts_client e voice_session — uma fonte só.
 
-Envs:
-  GOOGLE_API_KEY (ou GEMINI_API_KEY)
-  SOFIA_LLM_MODEL (default gemini-3.1-flash; fallback gemini-1.5-flash)
+Modelos suportados (snapshot 2026-04-25):
+  - gemini-3-flash-preview        — preview família 3, generateContent
+  - gemini-3.1-flash-lite-preview — preview lite (mais barato $0.25/$1.50)
+  - gemini-3.1-pro-preview        — preview pro (raciocínio profundo)
+  - gemini-2.5-flash              — GA estável (recomendado prod por enquanto)
+  - gemini-flash-latest           — alias seguro como fallback
+
+Família 3 muda paradigma:
+  - thinking_config (substitui thinking_budget): minimal|low|medium|high
+  - temperatura: doc orienta NÃO ajustar (default 1.0 é otimizado);
+    valores baixos podem causar looping. Removemos config explícito.
+  - thought_signatures processadas automaticamente pelo SDK.
 """
 from __future__ import annotations
 
@@ -17,55 +22,54 @@ import json
 import logging
 import os
 from dataclasses import dataclass
+from typing import Any, Callable
 
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 
 logger = logging.getLogger(__name__)
 
-# Modelos GA suportados (snapshot 2026-04-25):
-#   gemini-2.5-flash, gemini-2.5-flash-lite, gemini-flash-latest (alias),
-#   gemini-2.0-flash, gemini-3-flash-preview, gemini-3.1-flash-lite-preview,
-#   gemini-3.1-flash-live-preview (real-time, p/ Sofia.4 ligações).
-# `gemini-3.1-flash` (não-preview) ainda não existe; usamos 2.5 Flash estável.
-DEFAULT_MODEL = os.getenv("SOFIA_LLM_MODEL") or "gemini-2.5-flash"
-FALLBACK_MODEL = "gemini-flash-latest"
+# Família 3 como default — saúde exige qualidade. gemini-3-flash-preview
+# tem "inteligência de nível Pro na velocidade e preço do Flash" + thinking
+# nativo. Fallback estável é o 2.5-flash GA.
+# Trocar via SOFIA_LLM_MODEL pra testar 3.1-pro-preview (clínico premium)
+# ou 3.1-flash-lite-preview (alto volume, mais barato).
+DEFAULT_MODEL = os.getenv("SOFIA_LLM_MODEL") or "gemini-3-flash-preview"
+FALLBACK_MODEL = os.getenv("SOFIA_LLM_FALLBACK") or "gemini-2.5-flash"
 
-
-def _api_key() -> str | None:
-    return os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
-
-
-_configured = False
-
-
-def _ensure_configured() -> None:
-    global _configured
-    if _configured:
-        return
-    key = _api_key()
-    if not key:
-        raise RuntimeError("GOOGLE_API_KEY or GEMINI_API_KEY required")
-    genai.configure(api_key=key)
-    _configured = True
+# thinking_level só vale pra família 3.
+_THINKING_FAMILY_3_PREFIX = ("gemini-3", "gemini-3.")
 
 
 @dataclass
 class ToolDefinition:
-    """Estrutura simples de uma tool registrada no orchestrator/agents."""
     name: str
     description: str
-    parameters: dict             # JSON schema
-    handler: callable            # função Python que recebe **params e retorna dict
+    parameters: dict
+    handler: Callable
 
 
 @dataclass
 class GenerationResult:
     text: str
-    tool_calls: list[dict]       # [{name, args}]
+    tool_calls: list[dict]
     tokens_in: int
     tokens_out: int
     model: str
     finish_reason: str | None = None
+
+
+_client: genai.Client | None = None
+
+
+def _get_client() -> genai.Client:
+    global _client
+    if _client is None:
+        api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+        if not api_key:
+            raise RuntimeError("GOOGLE_API_KEY required")
+        _client = genai.Client(api_key=api_key)
+    return _client
 
 
 _GEMINI_SCHEMA_ALLOWED_KEYS = {
@@ -75,13 +79,8 @@ _GEMINI_SCHEMA_ALLOWED_KEYS = {
 
 
 def _clean_schema(node):
-    """Remove campos do JSON Schema não suportados pelo Gemini.
-
-    Gemini Function Declarations aceita um subset enxuto: type, properties,
-    required, description, enum, items, format (limitado), nullable. Coisas
-    como minimum, maximum, pattern, minLength, default são rejeitadas com
-    'Unknown field for Schema: <campo>'.
-    """
+    """Poda do JSON Schema os campos não suportados por Gemini Function
+    Declarations (minimum/maximum/pattern/etc rejeitados pela API)."""
     if isinstance(node, list):
         return [_clean_schema(x) for x in node]
     if not isinstance(node, dict):
@@ -99,60 +98,78 @@ def _clean_schema(node):
     return cleaned
 
 
-def _convert_tools(tools: list[ToolDefinition]) -> list[dict]:
-    """Converte ToolDefinition para o formato do google-generativeai."""
-    return [
-        {
-            "function_declarations": [
-                {
-                    "name": t.name,
-                    "description": t.description,
-                    "parameters": _clean_schema(t.parameters),
-                }
-                for t in tools
-            ]
-        }
+def _build_tools(tools: list[ToolDefinition] | None):
+    if not tools:
+        return None
+    decls = [
+        types.FunctionDeclaration(
+            name=t.name,
+            description=t.description,
+            parameters=_clean_schema(t.parameters) if t.parameters else None,
+        )
+        for t in tools
     ]
+    return [types.Tool(function_declarations=decls)]
 
 
-def _convert_history(messages: list[dict]) -> list[dict]:
-    """Converte histórico [{role, content}] pra contents do Gemini.
-
-    Roles: 'user', 'assistant' (vira 'model'), 'tool' (vira function response).
-    """
-    contents: list[dict] = []
+def _convert_history(messages: list[dict]) -> list[types.Content]:
+    """[{role, content, ...}] → list[Content] do google-genai."""
+    contents: list[types.Content] = []
     for m in messages:
         role = m.get("role")
         content = m.get("content") or ""
         if role == "system":
-            # Gemini usa system_instruction no GenerativeModel; ignora aqui.
             continue
         if role in ("user",):
-            contents.append({"role": "user", "parts": [{"text": content}]})
+            contents.append(types.Content(role="user", parts=[types.Part(text=content)]))
         elif role in ("assistant", "model"):
-            contents.append({"role": "model", "parts": [{"text": content}]})
+            contents.append(types.Content(role="model", parts=[types.Part(text=content)]))
         elif role == "tool":
-            # function response = result da tool
             tool_name = m.get("tool_name") or "tool"
-            try:
-                payload = m.get("tool_output") if m.get("tool_output") is not None else content
-                if isinstance(payload, str):
-                    try:
-                        payload = json.loads(payload)
-                    except Exception:
-                        payload = {"text": payload}
-                contents.append({
-                    "role": "user",
-                    "parts": [{
-                        "function_response": {
-                            "name": tool_name,
-                            "response": payload,
-                        }
-                    }],
-                })
-            except Exception as exc:
-                logger.warning("history_tool_convert_failed", extra={"error": str(exc)})
+            payload = m.get("tool_output") if m.get("tool_output") is not None else content
+            if isinstance(payload, str):
+                try:
+                    payload = json.loads(payload)
+                except Exception:
+                    payload = {"text": payload}
+            contents.append(types.Content(
+                role="user",
+                parts=[types.Part.from_function_response(name=tool_name, response=payload)],
+            ))
     return contents
+
+
+def _is_family_3(model: str) -> bool:
+    return any(model.startswith(p) for p in _THINKING_FAMILY_3_PREFIX)
+
+
+def _build_config(
+    *,
+    model: str,
+    system_prompt: str | None,
+    tools: list[ToolDefinition] | None,
+    max_output_tokens: int,
+    thinking_level: str | None,
+) -> types.GenerateContentConfig:
+    cfg_kwargs: dict[str, Any] = {
+        "max_output_tokens": max_output_tokens,
+    }
+    if system_prompt:
+        cfg_kwargs["system_instruction"] = system_prompt
+    tool_objs = _build_tools(tools)
+    if tool_objs:
+        cfg_kwargs["tools"] = tool_objs
+
+    # thinking_config só faz sentido na família 3.
+    # minimal/low/medium/high. Valores explícitos só na 3.
+    if _is_family_3(model) and thinking_level:
+        cfg_kwargs["thinking_config"] = types.ThinkingConfig(
+            thinking_level=thinking_level,
+        )
+
+    # NÃO setamos temperature — doc Gemini 3 orienta usar default (1.0).
+    # Valores baixos podem causar looping/degradação.
+    return types.GenerateContentConfig(**cfg_kwargs)
 
 
 def generate(
@@ -161,43 +178,39 @@ def generate(
     messages: list[dict],
     tools: list[ToolDefinition] | None = None,
     model: str | None = None,
-    temperature: float = 0.4,
     max_output_tokens: int = 1024,
+    thinking_level: str | None = None,
 ) -> GenerationResult:
-    """Chamada one-shot ao modelo. Não chama tools — devolve as solicitadas
-    pra o orchestrator decidir o que executar e re-chamar."""
-    _ensure_configured()
+    client = _get_client()
     model_name = model or DEFAULT_MODEL
 
     def _call(model_id: str) -> GenerationResult:
-        gm = genai.GenerativeModel(
-            model_name=model_id,
-            system_instruction=system_prompt or None,
-            tools=_convert_tools(tools) if tools else None,
-            generation_config={
-                "temperature": temperature,
-                "max_output_tokens": max_output_tokens,
-            },
+        config = _build_config(
+            model=model_id,
+            system_prompt=system_prompt,
+            tools=tools,
+            max_output_tokens=max_output_tokens,
+            thinking_level=thinking_level,
         )
         contents = _convert_history(messages)
-        resp = gm.generate_content(contents)
+        resp = client.models.generate_content(
+            model=model_id,
+            contents=contents,
+            config=config,
+        )
 
         text_parts: list[str] = []
         tool_calls: list[dict] = []
-        candidates = getattr(resp, "candidates", None) or []
         finish_reason = None
-        if candidates:
-            cand = candidates[0]
+        for cand in (getattr(resp, "candidates", None) or []):
             finish_reason = getattr(cand, "finish_reason", None)
             content = getattr(cand, "content", None)
             for part in (getattr(content, "parts", None) or []):
-                # text
                 t = getattr(part, "text", None)
                 if t:
                     text_parts.append(t)
-                # function_call
                 fc = getattr(part, "function_call", None)
-                if fc:
+                if fc and getattr(fc, "name", None):
                     args = dict(getattr(fc, "args", {}) or {})
                     tool_calls.append({"name": fc.name, "args": args})
 
@@ -217,8 +230,6 @@ def generate(
     try:
         return _call(model_name)
     except Exception as exc:
-        # Modelo 3.1-flash pode não estar disponível em todos os tenants/região.
-        # Cai pro fallback estável.
         if model_name != FALLBACK_MODEL:
             logger.warning(
                 "gemini_model_failed_falling_back",

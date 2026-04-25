@@ -1,7 +1,6 @@
 """Sub-agent: Médico/Enfermeiro. Foco em apoio à decisão clínica.
 
-Característica crítica: precisão > brevidade. Pode usar modelo Pro
-quando disponível. Tools de query clínica disponíveis exclusivamente.
+Precisão > brevidade. Pode usar modelo Pro quando configurado.
 """
 import os
 
@@ -22,9 +21,12 @@ class ClinicalAgent(BaseAgent):
         "send_check_in",
         "create_care_event",
     ]
-    TEMPERATURE = 0.2       # Precisão clínica > criatividade
-    MAX_TOKENS = 1500       # Respostas mais detalhadas com referências
-    # Permite override pra Pro quando o tenant assinar plano clínico
-    # (env: SOFIA_CLINICAL_MODEL=gemini-2.5-pro). Default = mesma base.
-    MODEL = os.getenv("SOFIA_CLINICAL_MODEL") or None
+    # Respostas detalhadas com referências (Beers, drug interactions)
+    MAX_TOKENS = 1500
+    # high: raciocínio clínico profundo (na família 3 ativa thinking interno)
+    THINKING_LEVEL = "high"
+    # Default Pro pra apoio à decisão clínica — janela 1M, raciocínio
+    # profundo, suporta thinking high. Pode trocar via SOFIA_CLINICAL_MODEL
+    # (ex: gemini-3-flash-preview pra economia em tenant menor).
+    MODEL = os.getenv("SOFIA_CLINICAL_MODEL") or "gemini-3.1-pro-preview"
     GREETING = "Olá {first_name}. Sofia aqui. Posso buscar dados de paciente, diretrizes clínicas ou status de alertas."

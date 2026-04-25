@@ -1,188 +1,156 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { Loader2, Mic, MicOff, Sparkles, Square, X } from "lucide-react";
+import { useState } from "react";
+import {
+  AlertCircle,
+  Loader2,
+  Mic,
+  MicOff,
+  PhoneOff,
+  Sparkles,
+  Volume2,
+  Wrench,
+  X,
+} from "lucide-react";
 
 import { useAuth } from "@/context/auth-context";
-import { api, ApiError } from "@/lib/api";
+import { useSofiaVoice } from "@/hooks/use-sofia-voice";
 
 // ═══════════════════════════════════════════════════════════════
-// FAB Sofia Voz — flutuante no canto inferior direito de todas as
-// páginas com chrome (sidebar). Ao clicar, abre painel pequeno que:
-//  1. Toca saudação TTS (Gemini Flash) personalizada com nome do user.
-//  2. Permite gravar áudio (MediaRecorder) → enviar pra Sofia → tocar
-//     resposta TTS.
+// FAB Sofia Voz — sessão Live API bidirecional (Sofia.4)
 //
-// STT do áudio do usuário ainda usa Deepgram via /api/sofia/transcribe
-// (não trocar pra Gemini sem shadow mode — ADR-028).
-// Sofia.4 implementa o ciclo de gravação completo. Por enquanto FAB
-// entrega saudação + abertura de chat texto rápido.
+// Fluxo:
+//   Click FAB → painel abre
+//   Click "Falar" → permissão mic → WS sofia-voice → Live API
+//   Conversa contínua: usuário fala, Sofia responde por voz, tools chamam
+//   Click "Encerrar" → cleanup full
+//
+// FAB não aparece pra paciente_b2c (eles usam WhatsApp).
 // ═══════════════════════════════════════════════════════════════
 
-type Mode = "idle" | "greeting" | "listening" | "thinking" | "speaking" | "error";
+const STATUS_LABEL: Record<string, { label: string; color: string }> = {
+  idle: { label: "", color: "" },
+  requesting_permission: { label: "pedindo mic...", color: "text-classification-attention" },
+  connecting: { label: "conectando...", color: "text-classification-attention" },
+  ready: { label: "pronta", color: "text-accent-cyan" },
+  listening: { label: "ouvindo", color: "text-classification-routine" },
+  thinking: { label: "pensando", color: "text-classification-attention" },
+  speaking: { label: "falando", color: "text-accent-cyan" },
+  interrupted: { label: "pausada", color: "text-muted-foreground" },
+  error: { label: "erro", color: "text-classification-attention" },
+};
 
 export function SofiaVoiceFab() {
   const { user } = useAuth();
   const [open, setOpen] = useState(false);
-  const [mode, setMode] = useState<Mode>("idle");
-  const [transcript, setTranscript] = useState("");
-  const [response, setResponse] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-
-  // Greeting tocada ao abrir o painel pela primeira vez
-  useEffect(() => {
-    if (open && mode === "idle") {
-      void playGreeting();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  const voice = useSofiaVoice();
 
   if (!user) return null;
   // FAB não aparece pra paciente_b2c na tela web — eles usam WhatsApp.
   if (user.role === "paciente_b2c") return null;
 
-  async function playGreeting() {
-    setError(null);
-    setMode("greeting");
-    try {
-      const greet = await api.sofiaGreeting();
-      setResponse(greet.text);
-      const tts = await api.sofiaTTS(greet.text);
-      await playAudioBase64(tts.audioBase64, tts.mimeType);
-    } catch (err) {
-      const msg = err instanceof ApiError ? err.reason || err.message : "Falha";
-      setError(`Não consegui cumprimentar (${msg}).`);
-      setMode("error");
-      return;
-    }
-    setMode("idle");
-  }
-
-  async function playAudioBase64(b64: string, mime: string) {
-    return new Promise<void>((resolve, reject) => {
-      const audio = new Audio(`data:${mime};base64,${b64}`);
-      audioRef.current = audio;
-      audio.onended = () => {
-        setMode("idle");
-        resolve();
-      };
-      audio.onerror = () => reject(new Error("audio_play_failed"));
-      setMode("speaking");
-      audio.play().catch(reject);
-    });
-  }
-
-  async function handleQuickAsk(text: string) {
-    setError(null);
-    setMode("thinking");
-    setTranscript(text);
-    try {
-      const res = await api.sofiaChat(text);
-      setResponse(res.text);
-      if (res.text) {
-        const tts = await api.sofiaTTS(res.text);
-        await playAudioBase64(tts.audioBase64, tts.mimeType);
-      } else {
-        setMode("idle");
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Falha");
-      setMode("error");
-    }
-  }
-
-  function stopAudio() {
-    if (audioRef.current) {
-      audioRef.current.pause();
-      audioRef.current.currentTime = 0;
-    }
-    setMode("idle");
-  }
+  const handleClose = () => {
+    voice.stop();
+    setOpen(false);
+  };
 
   return (
     <>
-      {/* Painel */}
       {open && (
         <div className="fixed bottom-24 right-6 z-50 w-80 rounded-2xl border border-accent-cyan/30 bg-[hsl(225,80%,8%)]/95 backdrop-blur-xl shadow-[0_8px_48px_rgba(49,225,255,0.20)] overflow-hidden animate-fade-up">
           <header className="flex items-center justify-between px-4 py-3 border-b border-white/[0.06] bg-gradient-to-r from-accent-cyan/10 to-transparent">
             <div className="flex items-center gap-2">
               <Sparkles className="h-4 w-4 text-accent-cyan" />
               <span className="text-sm font-semibold">Sofia Voz</span>
-              <ModePill mode={mode} />
+              <StatusPill status={voice.status} />
             </div>
             <button
-              onClick={() => {
-                stopAudio();
-                setOpen(false);
-              }}
+              onClick={handleClose}
               className="p-1 rounded hover:bg-white/[0.05]"
+              title="Fechar"
             >
               <X className="h-3.5 w-3.5" />
             </button>
           </header>
 
-          <div className="px-4 py-3 space-y-3 max-h-72 overflow-y-auto text-xs">
-            {transcript && (
-              <div>
-                <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">
-                  Você
-                </div>
-                <div className="bg-accent-cyan/10 border border-accent-cyan/20 rounded-lg px-3 py-2 text-foreground leading-relaxed">
-                  {transcript}
-                </div>
+          {/* Transcripts */}
+          <div className="px-4 py-3 max-h-64 overflow-y-auto text-xs space-y-2">
+            {voice.transcripts.length === 0 && voice.status === "idle" && (
+              <div className="text-muted-foreground text-center py-3 leading-relaxed">
+                Toque no botão abaixo pra começar a falar com a Sofia. Ela vai
+                te cumprimentar e responder em tempo real.
               </div>
             )}
-            {response && (
-              <div>
-                <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">
-                  Sofia
-                </div>
-                <div className="bg-white/[0.04] border border-white/[0.06] rounded-lg px-3 py-2 leading-relaxed">
-                  {response}
-                </div>
+            {voice.transcripts.length === 0 && voice.status !== "idle" && (
+              <div className="text-muted-foreground text-center py-3 italic">
+                {voice.status === "listening"
+                  ? "Pode falar..."
+                  : "Aguarda um instante..."}
               </div>
             )}
-            {error && (
-              <div className="text-classification-attention">{error}</div>
-            )}
-            {mode === "idle" && !transcript && !response && (
-              <div className="text-muted-foreground text-center py-2">
-                Sofia tá te ouvindo. Diga algo ou use um atalho:
-              </div>
-            )}
-          </div>
-
-          {/* Quick prompts */}
-          <div className="px-4 pb-3 flex flex-wrap gap-1.5">
-            {QUICK_PROMPTS_FOR_ROLE[user.role]?.map((p, i) => (
-              <button
-                key={i}
-                onClick={() => handleQuickAsk(p)}
-                disabled={mode !== "idle"}
-                className="text-[10px] px-2 py-1 rounded-full bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] disabled:opacity-50"
-              >
-                {p}
-              </button>
+            {voice.transcripts.map((t, i) => (
+              <TranscriptBubble key={i} t={t} />
             ))}
+            {voice.toolEvents.length > 0 && (
+              <div className="pt-2 border-t border-white/[0.04] space-y-1">
+                {voice.toolEvents.map((e, i) => (
+                  <div
+                    key={i}
+                    className="flex items-center gap-1.5 text-[10px] text-muted-foreground"
+                  >
+                    <Wrench className="h-2.5 w-2.5" />
+                    {e.name}
+                    <span
+                      className={
+                        e.ok
+                          ? "text-classification-routine"
+                          : "text-classification-attention"
+                      }
+                    >
+                      {e.ok ? "ok" : "falhou"}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
-          {/* Mic placeholder (Sofia.4 ativa MediaRecorder real) */}
-          <div className="border-t border-white/[0.04] px-4 py-3 flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
-            {mode === "speaking" ? (
+          {voice.error && (
+            <div className="px-4 py-2 text-[11px] text-classification-attention border-t border-classification-attention/20 bg-classification-attention/5 flex items-start gap-1.5">
+              <AlertCircle className="h-3.5 w-3.5 flex-shrink-0 mt-0.5" />
+              <span>{voice.error}</span>
+            </div>
+          )}
+
+          {/* Controles */}
+          <div className="border-t border-white/[0.04] px-4 py-3 flex items-center gap-2">
+            {!voice.isActive ? (
               <button
-                onClick={stopAudio}
-                className="flex items-center gap-1.5 text-classification-attention"
+                onClick={voice.start}
+                className="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg accent-gradient text-slate-900 text-sm font-medium shadow-glow-cyan hover:brightness-110"
               >
-                <Square className="h-3 w-3 fill-current" /> parar fala
+                <Mic className="h-4 w-4" />
+                Falar com a Sofia
               </button>
             ) : (
-              <span className="flex items-center gap-1.5">
-                <MicOff className="h-3 w-3" />
-                gravação por voz chega na próxima atualização
-              </span>
+              <>
+                <button
+                  onClick={voice.interrupt}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-white/[0.05] hover:bg-white/[0.08] text-xs border border-white/[0.06]"
+                  title="Interromper Sofia"
+                >
+                  <MicOff className="h-3.5 w-3.5" />
+                  Pausar
+                </button>
+                <button
+                  onClick={voice.stop}
+                  className="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-classification-attention/15 hover:bg-classification-attention/25 text-classification-attention text-sm font-medium border border-classification-attention/30"
+                >
+                  <PhoneOff className="h-4 w-4" />
+                  Encerrar
+                </button>
+              </>
             )}
-            <span>{mode}</span>
           </div>
         </div>
       )}
@@ -199,10 +167,12 @@ export function SofiaVoiceFab() {
         `}
         title="Sofia Voz"
       >
-        {mode === "thinking" ? (
+        {voice.status === "speaking" ? (
+          <Volume2 className="h-6 w-6 animate-pulse" />
+        ) : voice.status === "listening" ? (
+          <Mic className="h-6 w-6" />
+        ) : voice.status === "thinking" || voice.status === "connecting" ? (
           <Loader2 className="h-6 w-6 animate-spin" />
-        ) : mode === "speaking" ? (
-          <Mic className="h-6 w-6 animate-pulse" />
         ) : (
           <Sparkles className="h-6 w-6" />
         )}
@@ -211,18 +181,9 @@ export function SofiaVoiceFab() {
   );
 }
 
-function ModePill({ mode }: { mode: Mode }) {
-  if (mode === "idle") return null;
-  const map: Record<Mode, { label: string; color: string }> = {
-    idle: { label: "", color: "" },
-    greeting: { label: "cumprimentando", color: "text-accent-cyan" },
-    listening: { label: "ouvindo", color: "text-classification-routine" },
-    thinking: { label: "pensando", color: "text-classification-attention" },
-    speaking: { label: "falando", color: "text-accent-cyan" },
-    error: { label: "erro", color: "text-classification-attention" },
-  };
-  const cur = map[mode];
-  if (!cur.label) return null;
+function StatusPill({ status }: { status: string }) {
+  const cur = STATUS_LABEL[status];
+  if (!cur || !cur.label) return null;
   return (
     <span className={`text-[10px] uppercase tracking-wider ${cur.color}`}>
       · {cur.label}
@@ -230,13 +191,24 @@ function ModePill({ mode }: { mode: Mode }) {
   );
 }
 
-const QUICK_PROMPTS_FOR_ROLE: Record<string, string[]> = {
-  super_admin: ["Quantos pacientes ativos?", "Quais alertas estão abertos?"],
-  admin_tenant: ["Quais alertas estão abertos?", "Como cadastro um paciente?"],
-  medico: ["Quais pacientes têm alerta crítico?", "Resumo do paciente mais recente"],
-  enfermeiro: ["Quais alertas requerem atenção?", "Quem precisa de medicação agora?"],
-  cuidador_pro: ["Que medicação posso dar agora?", "Status do paciente"],
-  familia: ["Como tá meu familiar?", "Posso agendar uma teleconsulta?"],
-  parceiro: ["Status dos meus pacientes liberados"],
-  paciente_b2c: [], // FAB não aparece pra B2C
-};
+function TranscriptBubble({
+  t,
+}: {
+  t: { role: "user" | "assistant"; text: string };
+}) {
+  const isUser = t.role === "user";
+  return (
+    <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
+      <div
+        className={`
+          max-w-[85%] rounded-xl px-2.5 py-1.5 leading-snug
+          ${isUser
+            ? "bg-accent-cyan/15 border border-accent-cyan/20"
+            : "bg-white/[0.04] border border-white/[0.06]"}
+        `}
+      >
+        {t.text}
+      </div>
+    </div>
+  );
+}

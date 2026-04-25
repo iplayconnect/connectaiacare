@@ -14,6 +14,9 @@ class CaregiverAgent(BaseAgent):
         "search_patients",
         "schedule_teleconsulta",
     ]
-    TEMPERATURE = 0.3       # Mais determinístico — registro clínico
-    MAX_TOKENS = 700        # Cuidador quer respostas curtas
+    # Cuidador quer respostas curtas e diretas
+    MAX_TOKENS = 700
+    # medium: registro clínico precisa precisão (medicação, sintomas).
+    # Errar dose ou interpretar relato errado tem custo clínico real.
+    THINKING_LEVEL = "medium"
     GREETING = "Oi {first_name}! Pode mandar relato, dúvida sobre medicação ou pedir o status de um paciente."

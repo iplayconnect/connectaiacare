@@ -98,16 +98,32 @@ services:
       # LGPD: dados de saúde nunca saem da rede privada connectaiacare_internal.
       DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/connectaiacare
       LOG_LEVEL: INFO
-      # SOFIA_LLM_MODEL=gemini-3.1-flash já é default no llm_client.
-      # SOFIA_TTS_MODEL=gemini-2.5-flash-preview-tts já é default no tts_client.
-      # SOFIA_INTERNAL_KEY: shared secret api ↔ sofia-service (segunda camada
-      # após auth do api). Setar no .env (HEALTH_*).
+      # SOFIA_LLM_MODEL=gemini-3-flash-preview default no llm_client.
+      # SOFIA_VOICE_MODEL=gemini-3.1-flash-live-preview default no voice_session.
+      # SOFIA_INTERNAL_KEY: shared secret api ↔ sofia-service (.env)
     depends_on:
       postgres:
         condition: service_healthy
     networks:
-      - connectaiacare_internal  # Acessa PG. Não plugado ao infra_proxy
-                                 # (sofia-service é interno: api fala com ele).
+      - connectaiacare_internal  # Postgres + comunicação interna do api.
+      - infra_proxy              # Voice WS exposto via Traefik em
+                                 # voice.connectaia.com.br (subdomínio próprio).
+    labels:
+      # Voz exposta em sofia-voice.connectaia.com.br pra browser conectar
+      # WebSocket direto. Backend api emite token efêmero/JWT short-TTL pra
+      # autenticar a conexão (X-Internal-Key inicial).
+      traefik.enable: "true"
+      traefik.docker.network: "infra_proxy"
+      traefik.http.routers.connectaiacare-sofia-voice.rule: "Host(`sofia-voice.connectaia.com.br`)"
+      traefik.http.routers.connectaiacare-sofia-voice.entrypoints: "websecure"
+      traefik.http.routers.connectaiacare-sofia-voice.tls.certresolver: "letsencrypt"
+      traefik.http.services.connectaiacare-sofia-voice.loadbalancer.server.port: "5032"
+      # Redirect HTTP → HTTPS
+      traefik.http.routers.connectaiacare-sofia-voice-http.rule: "Host(`sofia-voice.connectaia.com.br`)"
+      traefik.http.routers.connectaiacare-sofia-voice-http.entrypoints: "web"
+      traefik.http.routers.connectaiacare-sofia-voice-http.middlewares: "connectaiacare-voice-https-redirect"
+      traefik.http.middlewares.connectaiacare-voice-https-redirect.redirectscheme.scheme: "https"
+      traefik.http.middlewares.connectaiacare-voice-https-redirect.redirectscheme.permanent: "true"
 
   frontend:
     build:

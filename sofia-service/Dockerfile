@@ -14,9 +14,11 @@ COPY . .
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
-EXPOSE 5031
+# 5031 = Flask REST (chat texto, TTS one-shot, history, usage, greeting)
+# 5032 = uvicorn ASGI WebSocket (voz Live bidirecional)
+EXPOSE 5031 5032
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD curl -fsS http://localhost:5031/health || exit 1
+    CMD curl -fsS http://localhost:5031/health && curl -fsS http://localhost:5032/health || exit 1
 
-CMD ["gunicorn", "--bind", "0.0.0.0:5031", "--workers", "2", "--threads", "4", "--timeout", "60", "sofia_app:app"]
+CMD ["supervisord", "-c", "/app/supervisord.conf"]

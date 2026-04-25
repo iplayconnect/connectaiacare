@@ -13,6 +13,8 @@ class FamilyAgent(BaseAgent):
         "schedule_teleconsulta",
         "get_my_subscription",
     ]
-    TEMPERATURE = 0.5       # Tom mais caloroso
     MAX_TOKENS = 800
+    # medium: familiar pergunta sobre saúde do ente (mãe/pai). Acertar
+    # interpretação clínica + tom emocional importa.
+    THINKING_LEVEL = "medium"
     GREETING = "Oi {first_name}, sou a Sofia. Quer ver como tá seu familiar, agendar uma teleconsulta ou ver o histórico?"

@@ -31,8 +31,14 @@ class BaseAgent:
     PERSONA: ClassVar[str] = "anonymous"
     PROMPT_FILE: ClassVar[str] = "sofia_platform.txt"
     ALLOWED_TOOL_NAMES: ClassVar[list[str] | None] = None  # None = todas da persona
-    TEMPERATURE: ClassVar[float] = 0.4
+    # NÃO há TEMPERATURE: Gemini 3 doc orienta usar default 1.0 (valores
+    # baixos podem causar looping). Sub-agents controlam estilo via prompt.
     MAX_TOKENS: ClassVar[int] = 1024
+    # thinking_level só vale na família 3 (preview). minimal|low|medium|high.
+    # Saúde exige raciocínio: default medium garante respostas precisas
+    # sem latência exagerada. ClinicalAgent sobe pra high; PatientAgent
+    # cai pra low só pra latência soar natural ao idoso.
+    THINKING_LEVEL: ClassVar[str] = "medium"
     MODEL: ClassVar[str | None] = None  # None = DEFAULT_MODEL
     GREETING: ClassVar[str] = "Oi! Sou a Sofia. Como posso te ajudar?"
 
@@ -110,8 +116,8 @@ class BaseAgent:
                 messages=history_serialized,
                 tools=tools,
                 model=model,
-                temperature=cls.TEMPERATURE,
                 max_output_tokens=cls.MAX_TOKENS,
+                thinking_level=cls.THINKING_LEVEL,
             )
             total_in += result.tokens_in
             total_out += result.tokens_out

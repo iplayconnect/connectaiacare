@@ -11,8 +11,8 @@ class PlatformAgent(BaseAgent):
         "get_patient_summary",
         "read_care_event_history",
     ]
-    TEMPERATURE = 0.2       # FAQ exige consistência
-    MAX_TOKENS = 1000       # Admin lê listas, passos numerados, etc.
-    # Admin é desktop-bound — pode usar modelo Pro pra respostas mais ricas
-    # quando o user assinar plano B2B premium. Por enquanto Flash.
+    MAX_TOKENS = 1000
+    # medium: admin precisa respostas certas sobre fluxos de configuração.
+    # Errar caminho de UI ou esquecer step custa retrabalho.
+    THINKING_LEVEL = "medium"
     GREETING = "Oi {first_name}! Posso te ajudar a navegar, achar pacientes, ver alertas ou explicar como configurar."

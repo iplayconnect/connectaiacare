@@ -453,6 +453,20 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ text, voice }),
     }),
+  sofiaVoiceToken: () =>
+    request<{
+      status: "ok";
+      wsUrl: string;
+      expiresInSeconds: number;
+      audio: {
+        inputSampleRate: number;
+        outputSampleRate: number;
+        format: string;
+      };
+    }>("/api/sofia/voice/token", {
+      method: "POST",
+      body: JSON.stringify({}),
+    }),
 
   // Profiles (Bloco C)
   listProfiles: () =>

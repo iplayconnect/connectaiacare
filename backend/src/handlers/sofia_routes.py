@@ -26,6 +26,7 @@ from dataclasses import asdict
 import httpx
 from flask import Blueprint, g, jsonify, request
 
+from src.services.jwt_utils import jwt_encode
 from src.services.sofia import availability_service, persona_detector
 from src.utils.logger import get_logger
 
@@ -143,6 +144,58 @@ def usage():
 # ════════════════════════════════════════════════════
 # POST /api/sofia/tts
 # ════════════════════════════════════════════════════
+
+@bp.post("/api/sofia/voice/token")
+def voice_token():
+    """Emite JWT short-TTL pra browser conectar no sofia-voice WebSocket.
+
+    Token contém persona já resolvida (server-trusted) + scope=sofia_voice
+    + exp 5min. Browser usa em ?token=<JWT> na URL ws://sofia-voice.../voice/ws.
+
+    Time window guard: mesmo do chat — operadores fora do horário não
+    recebem token (Sofia voz fica indisponível pra eles).
+    """
+    persona_ctx = _persona_payload()
+    if not persona_ctx.get("persona") or persona_ctx.get("persona") == "anonymous":
+        return jsonify({"status": "error", "reason": "missing_persona"}), 401
+
+    decision = availability_service.check(_to_namespace(persona_ctx))
+    if not decision.allowed:
+        return jsonify({
+            "status": "error",
+            "reason": decision.reason,
+            "message": decision.message,
+        }), 423
+
+    secret = os.getenv("JWT_SECRET") or os.getenv("SECRET_KEY") or ""
+    if not secret:
+        return jsonify({"status": "error", "reason": "jwt_secret_not_configured"}), 500
+
+    ttl = 300  # 5 minutos
+    voice_token_jwt = jwt_encode(
+        {
+            "scope": "sofia_voice",
+            "sub": persona_ctx.get("user_id") or "",
+            "persona": persona_ctx,
+        },
+        secret,
+        exp_seconds=ttl,
+    )
+
+    ws_host = os.getenv("SOFIA_VOICE_WS_HOST") or "sofia-voice.connectaia.com.br"
+    ws_url = f"wss://{ws_host}/voice/ws?token={voice_token_jwt}"
+
+    return jsonify({
+        "status": "ok",
+        "wsUrl": ws_url,
+        "expiresInSeconds": ttl,
+        "audio": {
+            "inputSampleRate": 16000,
+            "outputSampleRate": 24000,
+            "format": "pcm_s16le",
+        },
+    })
+
 
 @bp.post("/api/sofia/tts")
 def tts():
