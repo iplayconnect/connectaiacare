@@ -191,19 +191,23 @@ class VoiceSession:
     async def feed_audio(self, pcm_bytes: bytes) -> None:
         """Browser enviou um chunk PCM 16kHz.
 
-        Em google-genai 1.73+ a API Live unificou tudo em session.send(input=...).
-        Áudio realtime vai como LiveClientRealtimeInput.media_chunks.
+        google-genai 1.73 SDK ainda usa media_chunks no validator, mas a
+        Live API server-side já marcou deprecated e exige campo `audio`
+        direto. Bypassamos via session._ws.send manual com formato wire
+        atual até o SDK alinhar.
         """
         if self._closed or not self._live_session:
             return
         try:
-            await self._live_session.send(
-                input=types.LiveClientRealtimeInput(
-                    media_chunks=[
-                        types.Blob(data=pcm_bytes, mime_type="audio/pcm;rate=16000")
-                    ]
-                ),
-            )
+            payload = {
+                "realtime_input": {
+                    "audio": {
+                        "data": _b64(pcm_bytes),
+                        "mime_type": "audio/pcm;rate=16000",
+                    }
+                }
+            }
+            await self._live_session._ws.send(json.dumps(payload))
         except Exception as exc:
             logger.warning(
                 "voice_feed_failed type=%s msg=%s",
