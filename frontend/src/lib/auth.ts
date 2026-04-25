@@ -31,7 +31,8 @@ export type Role =
   | "enfermeiro"
   | "cuidador_pro"
   | "familia"
-  | "parceiro";
+  | "parceiro"
+  | "paciente_b2c";
 
 export type AuthUser = {
   id: string;

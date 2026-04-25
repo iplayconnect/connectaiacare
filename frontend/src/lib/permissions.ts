@@ -20,6 +20,7 @@ export const ROLE_LABEL: Record<Role, string> = {
   cuidador_pro: "Cuidador(a)",
   familia: "Familiar",
   parceiro: "Parceiro",
+  paciente_b2c: "Paciente",
 };
 
 export function hasPermission(user: AuthUser | null, required: string): boolean {

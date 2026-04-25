@@ -293,6 +293,18 @@ export interface CloseEventResponse {
 
 import type { AuthUser } from "./auth";
 
+export interface SofiaMessage {
+  role: "user" | "assistant" | "tool" | "system";
+  content: string | null;
+  toolName?: string | null;
+  toolOutput?: Record<string, unknown> | null;
+  model?: string | null;
+  tokensIn?: number | null;
+  tokensOut?: number | null;
+  audioUrl?: string | null;
+  createdAt: string | null;
+}
+
 export interface ProfileRecord {
   id: string;
   tenantId: string;
@@ -385,6 +397,61 @@ export const api = {
     request<{ status: "ok" }>(`/api/users/${id}/password`, {
       method: "POST",
       body: JSON.stringify({ newPassword }),
+    }),
+
+  // ─── Sofia Care ──────────────────────────────────
+  sofiaChat: (message: string, channel: "web" | "whatsapp" = "web") =>
+    request<{
+      status: "ok";
+      sessionId: string;
+      agent: string;
+      model: string;
+      text: string;
+      tokensIn: number;
+      tokensOut: number;
+      toolCalls: number;
+      blocked?: boolean;
+      reason?: string;
+    }>("/api/sofia/chat", {
+      method: "POST",
+      body: JSON.stringify({ message, channel }),
+    }),
+  sofiaGreeting: () =>
+    request<{ status: "ok"; text: string }>("/api/sofia/greeting", {
+      method: "POST",
+      body: JSON.stringify({}),
+    }),
+  sofiaHistory: (sessionId: string) =>
+    request<{
+      status: "ok";
+      sessionId: string;
+      messages: SofiaMessage[];
+    }>(`/api/sofia/sessions/${sessionId}`),
+  sofiaUsage: () =>
+    request<{
+      status: "ok";
+      usage: {
+        year: number;
+        month: number;
+        messages: number;
+        tokensIn: number;
+        tokensOut: number;
+        audioMinutes: number;
+        toolCalls: number;
+        planSku: string | null;
+      };
+    }>("/api/sofia/usage"),
+  sofiaTTS: (text: string, voice?: string) =>
+    request<{
+      status: "ok";
+      audioBase64: string;
+      mimeType: string;
+      durationSeconds: number;
+      model: string;
+      voice: string;
+    }>("/api/sofia/tts", {
+      method: "POST",
+      body: JSON.stringify({ text, voice }),
     }),
 
   // Profiles (Bloco C)

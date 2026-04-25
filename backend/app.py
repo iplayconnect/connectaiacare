@@ -17,6 +17,7 @@ from src.handlers.onboarding_web_routes import bp as onboarding_web_bp
 from src.handlers.patient_portal_routes import bp as patient_portal_bp
 from src.handlers.profiles_routes import bp as profiles_bp
 from src.handlers.routes import bp as api_bp
+from src.handlers.sofia_routes import bp as sofia_bp
 from src.handlers.teleconsulta_routes import bp as teleconsulta_bp
 from src.handlers.users_routes import bp as users_bp
 from src.handlers.voip_routes import bp as voip_bp
@@ -60,6 +61,7 @@ def create_app() -> Flask:
     app.register_blueprint(auth_bp)
     app.register_blueprint(users_bp)
     app.register_blueprint(profiles_bp)
+    app.register_blueprint(sofia_bp)
     app.register_blueprint(api_bp)
     app.register_blueprint(teleconsulta_bp)
     app.register_blueprint(patient_portal_bp)

@@ -45,7 +45,7 @@ const NAV_ITEMS: NavItem[] = [
   { href: "/reports", label: "Relatos", icon: FileText, permissions: ["reports:read"] },
   { href: "/patients", label: "Pacientes", icon: UsersRound, permissions: ["patients:read"] },
   { href: "/teleconsulta", label: "Teleconsulta", icon: Video, permissions: ["teleconsulta:read"] },
-  { href: "/demo/onboarding", label: "Sofia ao vivo", icon: Sparkles },
+  { href: "/sofia", label: "Sofia Chat", icon: Sparkles },
   { href: "/equipe", label: "Equipe", icon: UserCog, permissions: ["caregivers:read"] },
   // Admin section
   {

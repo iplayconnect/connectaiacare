@@ -4,6 +4,7 @@ import { usePathname } from "next/navigation";
 import { useEffect } from "react";
 
 import { Sidebar } from "@/components/sidebar";
+import { SofiaVoiceFab } from "@/components/sofia-voice-fab";
 import { TopBar } from "@/components/top-bar";
 import { useAuth } from "@/context/auth-context";
 
@@ -60,6 +61,7 @@ export function AuthShell({ children }: { children: React.ReactNode }) {
           {children}
         </div>
       </main>
+      <SofiaVoiceFab />
     </>
   );
 }
