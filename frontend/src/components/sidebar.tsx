@@ -57,7 +57,7 @@ const NAV_ITEMS: NavItem[] = [
   },
   {
     href: "/admin/perfis",
-    label: "Perfis",
+    label: "Papéis & Permissões",
     icon: KeyRound,
     permissions: ["profiles:read"],
     group: "admin",
