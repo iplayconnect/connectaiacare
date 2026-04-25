@@ -106,7 +106,9 @@ CREATE TABLE IF NOT EXISTS aia_health_allergy_mappings (
     -- Alergia normalizada (lowercase, sem acentos)
     allergy_term TEXT NOT NULL,
     -- Princípio ativo afetado (normalizado, igual dose_limits)
-    affected_principle_active TEXT NOT NULL,
+    -- Nullable: alternativa é affected_therapeutic_class. CHECK abaixo
+    -- garante que pelo menos um esteja presente.
+    affected_principle_active TEXT,
     -- ou classe (alternativa quando o cruzamento é classe inteira)
     affected_therapeutic_class TEXT,
     severity TEXT NOT NULL CHECK (severity IN ('block', 'warning', 'info')),
