@@ -42,7 +42,7 @@ logger = logging.getLogger(__name__)
 # forem GA + suportarem tool-use bidirecional.
 DEFAULT_VOICE_MODEL = (
     os.getenv("SOFIA_VOICE_MODEL")
-    or "gemini-2.5-flash-preview-native-audio-dialog"
+    or "gemini-2.5-flash-native-audio-latest"
 )
 DEFAULT_VOICE_NAME = os.getenv("SOFIA_TTS_VOICE") or "Kore"
 
