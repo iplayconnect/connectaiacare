@@ -426,6 +426,153 @@ def check_polypharmacy(
     )]
 
 
+# ─── Cruzamento DRUG-DRUG INTERACTIONS ────────────────────
+
+# Mapeia severity da tabela → severity do issue
+_INTERACTION_SEVERITY_MAP = {
+    "contraindicated": "block",
+    "major": "warning_strong",
+    "moderate": "warning",
+    "minor": "info",
+}
+
+
+def _query_interactions_pair(
+    a_principle: str | None,
+    a_class: str | None,
+    b_principle: str | None,
+    b_class: str | None,
+) -> list[dict]:
+    """Busca interações pra um par. Suporta 4 combinações principle/class."""
+    pg = get_postgres()
+    rows: list[dict] = []
+    # principle × principle (lex-ordenado a < b)
+    if a_principle and b_principle:
+        ord_a, ord_b = sorted([a_principle, b_principle])
+        rows.extend(pg.fetch_all(
+            """
+            SELECT severity, mechanism, clinical_effect, recommendation,
+                   source, source_ref, confidence,
+                   principle_a, principle_b, class_a, class_b
+            FROM aia_health_drug_interactions
+            WHERE active = TRUE
+              AND ((principle_a = %s AND principle_b = %s)
+                OR (principle_a = %s AND principle_b = %s))
+            """,
+            (ord_a, ord_b, ord_b, ord_a),
+        ))
+    # principle × class (testa as duas direções)
+    if a_principle and b_class:
+        rows.extend(pg.fetch_all(
+            """
+            SELECT severity, mechanism, clinical_effect, recommendation,
+                   source, source_ref, confidence,
+                   principle_a, principle_b, class_a, class_b
+            FROM aia_health_drug_interactions
+            WHERE active = TRUE
+              AND ((principle_a = %s AND class_b = %s)
+                OR (class_a = %s AND principle_b = %s))
+            """,
+            (a_principle, b_class, b_class, a_principle),
+        ))
+    if a_class and b_principle:
+        rows.extend(pg.fetch_all(
+            """
+            SELECT severity, mechanism, clinical_effect, recommendation,
+                   source, source_ref, confidence,
+                   principle_a, principle_b, class_a, class_b
+            FROM aia_health_drug_interactions
+            WHERE active = TRUE
+              AND ((principle_a = %s AND class_b = %s)
+                OR (class_a = %s AND principle_b = %s))
+            """,
+            (b_principle, a_class, a_class, b_principle),
+        ))
+    # class × class
+    if a_class and b_class:
+        ord_a, ord_b = sorted([a_class, b_class])
+        rows.extend(pg.fetch_all(
+            """
+            SELECT severity, mechanism, clinical_effect, recommendation,
+                   source, source_ref, confidence,
+                   principle_a, principle_b, class_a, class_b
+            FROM aia_health_drug_interactions
+            WHERE active = TRUE
+              AND ((class_a = %s AND class_b = %s)
+                OR (class_a = %s AND class_b = %s))
+            """,
+            (ord_a, ord_b, ord_b, ord_a),
+        ))
+    # Dedupe por (mechanism, source)
+    seen: set[tuple] = set()
+    out: list[dict] = []
+    for r in rows:
+        key = (r["mechanism"], r["source"])
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(r)
+    return out
+
+
+def check_drug_interactions(
+    new_principle: str | None,
+    new_class: str | None,
+    new_med_name: str,
+    patient_id: str | None,
+) -> list[DoseIssue]:
+    """Cruza nova prescrição com schedules ativos do paciente."""
+    if not new_principle and not new_class:
+        return []
+    if not patient_id:
+        return []
+    actives = _list_active_schedules(patient_id)
+    if not actives:
+        return []
+    issues: list[DoseIssue] = []
+    seen_pairs: set[tuple] = set()
+    for sch in actives:
+        existing_principle = resolve_principle_active(sch["medication_name"])
+        if not existing_principle:
+            continue
+        # Não cruza com ele mesmo (já tratado por duplicate_therapy)
+        if existing_principle == new_principle:
+            continue
+        existing_meta = get_principle_meta(existing_principle)
+        existing_class = (existing_meta or {}).get("therapeutic_class")
+        rows = _query_interactions_pair(
+            new_principle, new_class, existing_principle, existing_class,
+        )
+        for r in rows:
+            sig = (existing_principle, r["mechanism"])
+            if sig in seen_pairs:
+                continue
+            seen_pairs.add(sig)
+            mapped = _INTERACTION_SEVERITY_MAP.get(r["severity"], "warning")
+            label_existing = sch["medication_name"]
+            issues.append(DoseIssue(
+                severity=mapped,
+                code="drug_interaction",
+                message=(
+                    f"💊 Interação ({r['severity']}): "
+                    f"{new_med_name} × {label_existing} — {r['clinical_effect']} "
+                    f"Conduta: {r['recommendation']} "
+                    f"Fonte: {r['source']}."
+                ),
+                detail={
+                    "existing": label_existing,
+                    "existing_principle": existing_principle,
+                    "new_principle": new_principle,
+                    "mechanism": r["mechanism"],
+                    "severity_raw": r["severity"],
+                    "source": r["source"],
+                    "source_ref": r.get("source_ref"),
+                    "confidence": float(r.get("confidence") or 0.85),
+                },
+            ))
+    return issues
+
+
 def check_narrow_therapeutic_index(limit: dict | None) -> list[DoseIssue]:
     """NTI = janela terapêutica estreita (digoxina, varfarina, levotiroxina)."""
     if not limit or not limit.get("narrow_therapeutic_index"):
@@ -507,6 +654,9 @@ def validate(
     issues.extend(check_duplicate_therapy(principle, therapeutic_class, patient_id))
     issues.extend(check_polypharmacy(patient_id))
     issues.extend(check_narrow_therapeutic_index(limit))
+    issues.extend(check_drug_interactions(
+        principle, therapeutic_class, medication_name, patient_id,
+    ))
 
     if not limit:
         issues.append(DoseIssue(

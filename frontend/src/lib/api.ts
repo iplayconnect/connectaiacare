@@ -315,7 +315,8 @@ export interface DoseIssue {
     | "allergy_match"
     | "duplicate_therapy"
     | "polypharmacy"
-    | "narrow_therapeutic_index";
+    | "narrow_therapeutic_index"
+    | "drug_interaction";
   message: string;
   detail?: Record<string, unknown>;
 }
