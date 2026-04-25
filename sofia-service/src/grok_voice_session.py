@@ -122,6 +122,7 @@ class GrokVoiceSession:
         self._fc_args_buf: dict[str, str] = {}
         self._fc_name_by_call: dict[str, str] = {}
         self._fc_response_id_by_call: dict[str, str] = {}
+        self._audio_chunk_logged = False
 
     # ─────────────── tools (Gemini → OpenAI/Grok schema) ───────────────
 
@@ -342,10 +343,18 @@ class GrokVoiceSession:
         if etype in ("response.output_audio.delta", "response.audio.delta"):
             delta = msg.get("delta")
             if delta:
+                # Log apenas o primeiro chunk de cada response pra não floodar
+                if not self._audio_chunk_logged:
+                    logger.info(
+                        "grok_audio_chunk_forwarded session_id=%s bytes_b64=%d",
+                        self.session_id, len(delta),
+                    )
+                    self._audio_chunk_logged = True
                 await self.send_to_browser({"type": "audio", "data": delta})
             return
 
         if etype in ("response.output_audio.done", "response.audio.done"):
+            self._audio_chunk_logged = False  # reset pra próxima resposta
             return
 
         # ── Transcript Sofia (output) ──
