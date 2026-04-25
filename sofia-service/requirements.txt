@@ -19,6 +19,7 @@ fastapi==0.115.0
 
 structlog==24.4.0
 # supervisor 4.2.5 importa pkg_resources que foi removido em Python 3.12.
-# setuptools restaura pkg_resources como módulo independente.
+# setuptools <80 restaura pkg_resources. >=80 removeu o módulo do pacote.
+# Mesmo pin do backend api (ver backend/requirements.txt).
 supervisor==4.2.5
-setuptools>=75.0.0
+setuptools>=75.0.0,<80
