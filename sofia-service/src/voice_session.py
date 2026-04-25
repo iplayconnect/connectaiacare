@@ -197,7 +197,13 @@ class VoiceSession:
                 audio=types.Blob(data=pcm_bytes, mime_type="audio/pcm;rate=16000"),
             )
         except Exception as exc:
-            logger.warning("voice_feed_failed", extra={"error": str(exc)})
+            # Logar tipo + msg do erro pra diagnóstico (a key 'error' em
+            # extra do logger é silenciosamente ignorada — usar mensagem
+            # principal do log).
+            logger.warning(
+                "voice_feed_failed type=%s msg=%s",
+                type(exc).__name__, str(exc),
+            )
 
     async def feed_text(self, text: str) -> None:
         """Permite digitar texto durante a chamada (modo híbrido)."""
