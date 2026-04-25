@@ -8,22 +8,70 @@
  *
  *   typeof window === "undefined"  → server (container) → INTERNAL_API_URL
  *   typeof window !== "undefined"  → browser → NEXT_PUBLIC_API_URL
+ *
+ * Auth: no browser, injeta `Authorization: Bearer <token>` lendo de
+ * localStorage. 401 → limpa auth e redireciona pra /login.
+ * SSR não injeta token — páginas com fetch SSR que precisem de auth devem
+ * ser convertidas pra client components ou ler o cookie via `next/headers`.
  */
+
+import { clearAuth, getToken } from "./auth";
 
 const API_BASE =
   typeof window === "undefined"
     ? process.env.INTERNAL_API_URL || "http://api:5055"
     : process.env.NEXT_PUBLIC_API_URL || "http://localhost:5055";
 
+export class ApiError extends Error {
+  status: number;
+  reason?: string;
+  constructor(status: number, message: string, reason?: string) {
+    super(message);
+    this.status = status;
+    this.reason = reason;
+  }
+}
+
+function buildHeaders(init?: RequestInit): HeadersInit {
+  const base: Record<string, string> = { "Content-Type": "application/json" };
+  if (typeof window !== "undefined") {
+    const token = getToken();
+    if (token) base["Authorization"] = `Bearer ${token}`;
+  }
+  // Permite override individual via init.headers
+  return { ...base, ...((init?.headers as Record<string, string>) || {}) };
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const url = `${API_BASE}${path}`;
   const res = await fetch(url, {
     ...init,
-    headers: { "Content-Type": "application/json", ...(init?.headers || {}) },
+    headers: buildHeaders(init),
     cache: "no-store",
   });
+
+  if (res.status === 401 && typeof window !== "undefined") {
+    // Sessão expirou ou inválida → limpa e manda pro login.
+    // Evita loop se já estiver na própria /login (login chama /api/auth/login que é público).
+    clearAuth();
+    if (!window.location.pathname.startsWith("/login")) {
+      const next = encodeURIComponent(
+        window.location.pathname + window.location.search,
+      );
+      window.location.href = `/login?next=${next}`;
+    }
+    throw new ApiError(401, "unauthorized", "unauthorized");
+  }
+
   if (!res.ok) {
-    throw new Error(`API ${res.status}: ${await res.text()}`);
+    const text = await res.text();
+    let reason: string | undefined;
+    try {
+      reason = JSON.parse(text)?.reason;
+    } catch {
+      /* body não é JSON */
+    }
+    throw new ApiError(res.status, `API ${res.status}: ${text}`, reason);
   }
   return (await res.json()) as T;
 }
@@ -239,7 +287,133 @@ export interface CloseEventResponse {
   };
 }
 
+// ============================================================
+// Auth + Users + Profiles (Bloco A/B/C)
+// ============================================================
+
+import type { AuthUser } from "./auth";
+
+export interface ProfileRecord {
+  id: string;
+  tenantId: string;
+  slug: string;
+  displayName: string;
+  description: string | null;
+  permissions: string[];
+  config: Record<string, unknown>;
+  active: boolean;
+  createdAt: string | null;
+  updatedAt: string | null;
+}
+
 export const api = {
+  // Auth
+  me: () => request<{ status: "ok"; user: AuthUser }>("/api/auth/me"),
+  changePassword: (currentPassword: string, newPassword: string) =>
+    request<{ status: "ok" }>("/api/auth/change-password", {
+      method: "POST",
+      body: JSON.stringify({ currentPassword, newPassword }),
+    }),
+
+  // Users (admin)
+  listUsers: (includeInactive = false) =>
+    request<{ status: "ok"; users: AuthUser[] }>(
+      `/api/users?include_inactive=${includeInactive}`,
+    ),
+  getUser: (id: string) =>
+    request<{ status: "ok"; user: AuthUser }>(`/api/users/${id}`),
+  createUser: (payload: {
+    email: string;
+    fullName: string;
+    password: string;
+    role: AuthUser["role"];
+    phone?: string;
+    profileId?: string;
+    permissions?: string[];
+    crmRegister?: string;
+    corenRegister?: string;
+    caregiverId?: string;
+    patientId?: string;
+    allowedPatientIds?: string[];
+    partnerOrg?: string;
+    passwordChangeRequired?: boolean;
+  }) =>
+    request<{ status: "ok"; user: AuthUser }>("/api/users", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  updateUser: (
+    id: string,
+    payload: Partial<{
+      fullName: string;
+      phone: string;
+      avatarUrl: string;
+      role: AuthUser["role"];
+      permissions: string[];
+      profileId: string | null;
+      crmRegister: string;
+      corenRegister: string;
+      caregiverId: string | null;
+      patientId: string | null;
+      allowedPatientIds: string[];
+      partnerOrg: string;
+      active: boolean;
+    }>,
+  ) =>
+    request<{ status: "ok"; user: AuthUser }>(`/api/users/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+  deleteUser: (id: string) =>
+    request<{ status: "ok" }>(`/api/users/${id}`, { method: "DELETE" }),
+  uploadAvatar: (id: string, dataUrl: string) =>
+    request<{ status: "ok" }>(`/api/users/${id}/avatar`, {
+      method: "POST",
+      body: JSON.stringify({ image: dataUrl }),
+    }),
+  adminSetPassword: (id: string, newPassword: string) =>
+    request<{ status: "ok" }>(`/api/users/${id}/password`, {
+      method: "POST",
+      body: JSON.stringify({ newPassword }),
+    }),
+
+  // Profiles (Bloco C)
+  listProfiles: () =>
+    request<{ status: "ok"; profiles: ProfileRecord[] }>("/api/profiles"),
+  listAvailablePermissions: () =>
+    request<{ status: "ok"; groups: Record<string, string[]>; all: string[] }>(
+      "/api/profiles/permissions",
+    ),
+  getProfile: (id: string) =>
+    request<{ status: "ok"; profile: ProfileRecord }>(`/api/profiles/${id}`),
+  createProfile: (payload: {
+    slug: string;
+    displayName: string;
+    description?: string;
+    permissions: string[];
+    config?: Record<string, unknown>;
+  }) =>
+    request<{ status: "ok"; profile: ProfileRecord }>("/api/profiles", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  updateProfile: (
+    id: string,
+    payload: Partial<{
+      displayName: string;
+      description: string;
+      permissions: string[];
+      config: Record<string, unknown>;
+      active: boolean;
+    }>,
+  ) =>
+    request<{ status: "ok"; profile: ProfileRecord }>(`/api/profiles/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+  deleteProfile: (id: string) =>
+    request<{ status: "ok" }>(`/api/profiles/${id}`, { method: "DELETE" }),
+
   // Legados
   listPatients: () => request<{ patients: Patient[] }>("/api/patients"),
   getPatient: (id: string) =>

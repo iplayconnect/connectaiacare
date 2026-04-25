@@ -1,9 +1,12 @@
 "use client";
 
-import { Bell, Search } from "lucide-react";
+import { Bell, ChevronDown, LogOut, Search, User as UserIcon } from "lucide-react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+
+import { useAuth } from "@/context/auth-context";
+import { ROLE_LABEL } from "@/lib/permissions";
 
 // ═══════════════════════════════════════════════════════════════
 // Top bar — breadcrumbs + search global + status + notifications
@@ -88,13 +91,100 @@ export function TopBar() {
         {/* Search global (⌘K) */}
         <GlobalSearch />
 
-        {/* Sistema ativo + notificações */}
+        {/* Sistema ativo + notificações + perfil */}
         <div className="flex items-center gap-3">
           <SystemStatus />
           <NotificationBell />
+          <UserMenu />
         </div>
       </div>
     </header>
+  );
+}
+
+function UserMenu() {
+  const { user, logout } = useAuth();
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function onClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    if (open) document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, [open]);
+
+  if (!user) return null;
+
+  const initials = (user.fullName || user.email)
+    .split(" ")
+    .map((p) => p[0])
+    .filter(Boolean)
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-2 pl-1.5 pr-2 py-1 rounded-full hover:bg-white/[0.04] transition-colors"
+        title={user.email}
+      >
+        {user.avatarUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={user.avatarUrl}
+            alt={user.fullName}
+            className="w-7 h-7 rounded-full object-cover border border-white/10"
+          />
+        ) : (
+          <div className="w-7 h-7 rounded-full bg-gradient-to-br from-accent-cyan/30 to-accent-teal/30 border border-white/10 flex items-center justify-center text-[10px] font-bold">
+            {initials || "?"}
+          </div>
+        )}
+        <ChevronDown className="h-3 w-3 text-muted-foreground" />
+      </button>
+
+      {open && (
+        <div className="absolute right-0 top-full mt-1 w-60 rounded-lg border border-white/[0.08] bg-[hsl(225,80%,8%)]/95 backdrop-blur-xl shadow-[0_8px_32px_rgba(0,0,0,0.5)] z-50 overflow-hidden">
+          <div className="px-3 py-3 border-b border-white/[0.06]">
+            <div className="text-xs font-medium text-foreground truncate">
+              {user.fullName}
+            </div>
+            <div className="text-[10px] text-muted-foreground truncate mt-0.5">
+              {user.email}
+            </div>
+            <div className="text-[9px] uppercase tracking-[0.14em] text-accent-cyan mt-1.5">
+              {ROLE_LABEL[user.role] || user.role}
+            </div>
+          </div>
+          <div className="py-1">
+            <Link
+              href="/perfil"
+              onClick={() => setOpen(false)}
+              className="flex items-center gap-2 px-3 py-2 text-xs text-foreground hover:bg-white/[0.04]"
+            >
+              <UserIcon className="h-3.5 w-3.5" />
+              Meu perfil
+            </Link>
+            <button
+              onClick={() => {
+                setOpen(false);
+                logout();
+              }}
+              className="w-full flex items-center gap-2 px-3 py-2 text-xs text-classification-attention hover:bg-classification-attention/10 text-left"
+            >
+              <LogOut className="h-3.5 w-3.5" />
+              Sair
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 

@@ -1,17 +1,24 @@
 """ConnectaIACare — Flask app entrypoint."""
-from flask import Flask, jsonify
+from flask import Flask, g, jsonify, request
 from flask_cors import CORS
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from config.settings import settings
 from src.handlers.alerts_routes import bp as alerts_bp
+from src.handlers.auth_routes import (
+    authenticate_request,
+    bp as auth_bp,
+    is_public_path,
+)
 from src.handlers.caregivers_routes import bp as caregivers_bp
 from src.handlers.disease_routes import bp as disease_bp
 from src.handlers.medication_routes import bp as medication_bp
 from src.handlers.onboarding_web_routes import bp as onboarding_web_bp
 from src.handlers.patient_portal_routes import bp as patient_portal_bp
+from src.handlers.profiles_routes import bp as profiles_bp
 from src.handlers.routes import bp as api_bp
 from src.handlers.teleconsulta_routes import bp as teleconsulta_bp
+from src.handlers.users_routes import bp as users_bp
 from src.handlers.voip_routes import bp as voip_bp
 from src.handlers.weekly_report_routes import bp as weekly_report_bp
 from src.utils.logger import configure_logging, get_logger
@@ -50,6 +57,9 @@ def create_app() -> Flask:
         supports_credentials=False,
     )
 
+    app.register_blueprint(auth_bp)
+    app.register_blueprint(users_bp)
+    app.register_blueprint(profiles_bp)
     app.register_blueprint(api_bp)
     app.register_blueprint(teleconsulta_bp)
     app.register_blueprint(patient_portal_bp)
@@ -60,6 +70,32 @@ def create_app() -> Flask:
     app.register_blueprint(voip_bp, url_prefix="/api")
     app.register_blueprint(caregivers_bp, url_prefix="/api")
     app.register_blueprint(alerts_bp, url_prefix="/api")
+
+    # JWT middleware: protege /api/* exceto rotas públicas (auth, webhook,
+    # portal do paciente com PIN, onboarding B2C).
+    # Default DESLIGADO durante a migração de páginas SSR (que fazem fetch
+    # server-side sem injetar Bearer) para client fetch. O middleware Next.js
+    # do frontend já bloqueia o acesso de não-autenticados.
+    # Ligar com AUTH_ENFORCE=true quando todas as páginas tiverem migrado.
+    import os
+    auth_enforce = (os.getenv("AUTH_ENFORCE", "false").lower() == "true")
+
+    @app.before_request
+    def _enforce_auth():
+        if request.method == "OPTIONS":
+            return None
+        path = request.path
+        if not path.startswith("/api/"):
+            return None
+        if is_public_path(path):
+            return None
+        if not auth_enforce:
+            return None
+        payload, err = authenticate_request()
+        if err:
+            return err
+        g.user = payload
+        return None
 
     # Headers de segurança em todas as respostas.
     # Ver FINDING-006 do security audit.
@@ -92,10 +128,18 @@ def create_app() -> Flask:
             }
         )
 
+    # Auto-seed: cria super_admin (Alexandre) + parceiro (Murilo) se vars setadas.
+    # Idempotente — skip se já existir. Roda em todo startup.
+    if os.getenv("AUTH_SEED_ON_STARTUP", "true").lower() == "true":
+        try:
+            from src.services import user_service
+            user_service.ensure_seed_users()
+        except Exception as exc:
+            logger.error("auth_seed_failed", error=str(exc))
+
     # Checkin Scheduler — worker background que dispara timeline de care events.
     # Concorrência: usa pg_try_advisory_lock para garantir single-writer entre workers.
     # Desabilitar em testes ou dev curto setando ENABLE_SCHEDULER=false.
-    import os
     if os.getenv("ENABLE_SCHEDULER", "true").lower() == "true":
         try:
             from src.services.checkin_scheduler import get_scheduler

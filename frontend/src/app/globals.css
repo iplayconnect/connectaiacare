@@ -210,6 +210,14 @@
     text-shadow: 0 0 14px rgba(49, 225, 255, 0.40);
   }
 
+  /* ── Form input padronizado (auth, perfil, admin) ── */
+  .input {
+    @apply w-full px-3 py-2 rounded-lg bg-white/[0.04] border border-white/[0.08]
+           text-sm placeholder:text-muted-foreground/60
+           focus:outline-none focus:border-accent-cyan/40 focus:bg-white/[0.06]
+           transition-all;
+  }
+
   /* ── Classification badges ── */
   .badge-classification {
     @apply inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs font-semibold tracking-wide uppercase;

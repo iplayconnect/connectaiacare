@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import { Sidebar } from "@/components/sidebar";
-import { TopBar } from "@/components/top-bar";
+import { AuthProvider } from "@/context/auth-context";
+import { AuthShell } from "@/components/auth-shell";
 
 export const metadata: Metadata = {
   title: "ConnectaIACare — Cuidado Integrado com IA",
@@ -24,14 +24,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           }}
         />
 
-        <Sidebar />
-        <TopBar />
-
-        <main className="pl-60 pt-14 relative z-10">
-          <div className="px-8 py-6 min-h-[calc(100vh-3.5rem)] animate-fade-up">
-            {children}
-          </div>
-        </main>
+        <AuthProvider>
+          <AuthShell>{children}</AuthShell>
+        </AuthProvider>
       </body>
     </html>
   );
