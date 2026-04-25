@@ -889,6 +889,119 @@ def check_renal_adjustment(
     )]
 
 
+# ─── F5: AJUSTE HEPÁTICO (Child-Pugh) ────────────────────
+
+# Severidade hepática inferida via conditions+aliases (sem campo
+# estruturado nessa fase). Aliases mapeiam termos livres pra:
+#   child_a (leve), child_b (moderada), child_c (grave),
+#   hepatopatia_unspecified (sem qualificador → assume leve + warning).
+_HEPATIC_SEVERITY_TERMS = {
+    "child_a", "child_b", "child_c", "hepatopatia_unspecified",
+}
+
+# Termos genéricos de hepatopatia (sem qualificador) que tratamos como
+# 'hepatopatia_unspecified' (regra mais conservadora + warning).
+_HEPATIC_GENERIC_FALLBACK = {"hepatopatia"}
+
+
+def _patient_hepatic_severity(patient: dict | None) -> str | None:
+    """Examina conditions e retorna 'child_a'|'child_b'|'child_c'|
+    'hepatopatia_unspecified'|None. Mais grave vence."""
+    terms = set(_patient_condition_terms(patient))
+    if not terms:
+        return None
+    # Ordem de prioridade: c > b > a > unspecified
+    if "child_c" in terms:
+        return "child_c"
+    if "child_b" in terms:
+        return "child_b"
+    if "child_a" in terms:
+        return "child_a"
+    if "hepatopatia_unspecified" in terms:
+        return "hepatopatia_unspecified"
+    if terms & _HEPATIC_GENERIC_FALLBACK:
+        return "hepatopatia_unspecified"
+    return None
+
+
+_HEPATIC_ACTION_MAP = {
+    "avoid":             ("block",          "❌ NÃO usar"),
+    "reduce_50pct":      ("warning_strong", "Reduzir dose 50%"),
+    "reduce_75pct":      ("warning_strong", "Reduzir dose 75%"),
+    "increase_interval": ("warning_strong", "Aumentar intervalo"),
+    "caution_monitor":   ("warning",        "Usar com cautela + monitorização"),
+    "no_adjustment":     (None, None),
+}
+
+_HEPATIC_LABEL = {
+    "child_a": "Hepatopatia leve (Child-Pugh A)",
+    "child_b": "Hepatopatia moderada (Child-Pugh B)",
+    "child_c": "Hepatopatia grave (Child-Pugh C)",
+    "hepatopatia_unspecified": "Hepatopatia (gravidade não especificada — assumindo leve)",
+}
+
+
+def check_hepatic_adjustment(
+    principle: str | None,
+    patient: dict | None,
+) -> list[DoseIssue]:
+    """Aplica regra de ajuste hepático conforme Child-Pugh do paciente."""
+    if not principle:
+        return []
+    severity_class = _patient_hepatic_severity(patient)
+    if not severity_class:
+        return []
+
+    rule = get_postgres().fetch_one(
+        """
+        SELECT severity_class, action, rationale, source, source_ref
+        FROM aia_health_drug_hepatic_adjustments
+        WHERE principle_active = %s AND severity_class = %s AND active = TRUE
+        ORDER BY confidence DESC LIMIT 1
+        """,
+        (principle, severity_class),
+    )
+    issues: list[DoseIssue] = []
+
+    # Quando paciente tem hepatopatia sem severidade especificada,
+    # alertamos pra confirmar Child-Pugh independente da regra.
+    if severity_class == "hepatopatia_unspecified":
+        issues.append(DoseIssue(
+            severity="info",
+            code="hepatic_severity_unknown",
+            message=(
+                "🩺 Paciente tem hepatopatia mas a gravidade Child-Pugh "
+                "não está especificada nas conditions. Assumindo "
+                "compensada (leve). Cadastre 'cirrose Child A/B/C' ou "
+                "'hepatopatia leve/moderada/grave' pra precisão."
+            ),
+            detail={"hepatic_severity": severity_class},
+        ))
+
+    if not rule:
+        return issues
+
+    sev, label = _HEPATIC_ACTION_MAP.get(rule["action"], (None, None))
+    if not sev:
+        return issues
+
+    issues.append(DoseIssue(
+        severity=sev,
+        code="hepatic_adjustment",
+        message=(
+            f"🩺 {_HEPATIC_LABEL[severity_class]}. {label} para {principle}: "
+            f"{rule['rationale']} Fonte: {rule['source']}."
+        ),
+        detail={
+            "principle": principle,
+            "severity_class": severity_class,
+            "action": rule["action"],
+            "source": rule["source"],
+        },
+    ))
+    return issues
+
+
 # ─── F4: SINAIS VITAIS ↔ MEDICAÇÃO ──────────────────────
 
 _VITAL_OP = {
@@ -1102,6 +1215,7 @@ def validate(
     issues.extend(check_anticholinergic_burden(principle, patient_id))
     issues.extend(check_fall_risk(principle, therapeutic_class, patient))
     issues.extend(check_renal_adjustment(principle, patient))
+    issues.extend(check_hepatic_adjustment(principle, patient))
     issues.extend(check_vital_constraints(principle, therapeutic_class, patient))
 
     if not limit:

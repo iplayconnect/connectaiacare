@@ -322,6 +322,8 @@ export interface DoseIssue {
     | "fall_risk"
     | "renal_adjustment"
     | "renal_adjust_no_data"
+    | "hepatic_adjustment"
+    | "hepatic_severity_unknown"
     | "vital_constraint";
   message: string;
   detail?: Record<string, unknown>;
