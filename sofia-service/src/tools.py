@@ -222,17 +222,40 @@ def _tool_create_care_event(
 
 
 def _tool_get_alert_status(*, persona_ctx: dict, **_: Any) -> dict:
+    """Lista alertas não resolvidos do tenant.
+
+    Schema (migration 001): level low|medium|high|critical, title, description,
+    acknowledged_at, resolved_at. Sem 'status' explícito; derivamos:
+      open       = resolved_at IS NULL AND acknowledged_at IS NULL
+      acknowledged = resolved_at IS NULL AND acknowledged_at IS NOT NULL
+      resolved   = resolved_at IS NOT NULL
+    """
+    tenant_id = persona_ctx.get("tenant_id") or "connectaiacare_demo"
     rows = persistence.fetch_all(
         """
-        SELECT a.id, a.classification, a.status, a.title, a.description,
-               a.created_at, p.full_name AS patient_name
+        SELECT a.id, a.level, a.title, a.description,
+               a.acknowledged_by, a.acknowledged_at, a.resolved_at,
+               a.created_at, p.full_name AS patient_name, p.nickname AS patient_nickname
         FROM aia_health_alerts a
         LEFT JOIN aia_health_patients p ON p.id = a.patient_id
-        WHERE a.status NOT IN ('resolved', 'expired')
-        ORDER BY a.created_at DESC
+        WHERE a.tenant_id = %s AND a.resolved_at IS NULL
+        ORDER BY
+            CASE a.level
+                WHEN 'critical' THEN 0 WHEN 'high' THEN 1
+                WHEN 'medium' THEN 2 ELSE 3 END,
+            a.created_at DESC
         LIMIT 25
-        """
+        """,
+        (tenant_id,),
     )
+    # Derive status pra UI/LLM ler facilmente
+    for r in rows:
+        if r.get("resolved_at"):
+            r["status"] = "resolved"
+        elif r.get("acknowledged_at"):
+            r["status"] = "acknowledged"
+        else:
+            r["status"] = "open"
     return {"ok": True, "count": len(rows), "alerts": rows}
 
 
