@@ -45,6 +45,18 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.voice_session import VoiceSession
+from src.grok_voice_session import GrokVoiceSession
+
+
+# Provider switch — default é grok (estável após instabilidades do Gemini Live).
+# Trocar via SOFIA_VOICE_PROVIDER=gemini se precisar do fallback antigo.
+_VOICE_PROVIDER = (os.getenv("SOFIA_VOICE_PROVIDER") or "grok").lower()
+
+
+def _make_voice_session(persona_ctx, send_fn):
+    if _VOICE_PROVIDER == "grok":
+        return GrokVoiceSession(persona_ctx, send_fn)
+    return VoiceSession(persona_ctx, send_fn)
 
 
 # JWT inline (HS256) compatível com api/src/services/jwt_utils.py — voice
@@ -150,7 +162,7 @@ async def voice_ws(ws: WebSocket):
                     await send_to_browser({"type": "error", "detail": "already_started"})
                     continue
                 # Persona vem do JWT (server-trusted), não do client message.
-                voice = VoiceSession(persona_ctx_from_token, send_to_browser)
+                voice = _make_voice_session(persona_ctx_from_token, send_to_browser)
                 try:
                     await voice.start()
                 except Exception as exc:

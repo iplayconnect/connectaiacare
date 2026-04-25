@@ -99,8 +99,14 @@ services:
       DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/connectaiacare
       LOG_LEVEL: INFO
       # SOFIA_LLM_MODEL=gemini-3-flash-preview default no llm_client.
-      # SOFIA_VOICE_MODEL=gemini-3.1-flash-live-preview default no voice_session.
+      # SOFIA_VOICE_PROVIDER=grok|gemini (default grok).
+      # SOFIA_GROK_VOICE_MODEL=grok-voice-think-fast-1.0 default.
+      # SOFIA_GROK_VOICE=ara default.
+      # XAI_API_KEY: chave xAI emitida em console.x.ai (.env).
+      # SOFIA_VOICE_MODEL=gemini-2.5-flash-native-audio-latest (fallback Gemini).
       # SOFIA_INTERNAL_KEY: shared secret api ↔ sofia-service (.env)
+      SOFIA_VOICE_PROVIDER: ${SOFIA_VOICE_PROVIDER:-grok}
+      XAI_API_KEY: ${XAI_API_KEY:-}
     depends_on:
       postgres:
         condition: service_healthy
