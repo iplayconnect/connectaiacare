@@ -337,18 +337,22 @@ class GrokVoiceSession:
         etype = msg.get("type") or ""
 
         # ── Áudio output (chunks PCM 24kHz base64) ──
-        if etype == "response.audio.delta":
+        # xAI usa "response.output_audio.delta"; OpenAI Realtime usa
+        # "response.audio.delta". Aceitamos ambos pra robustez.
+        if etype in ("response.output_audio.delta", "response.audio.delta"):
             delta = msg.get("delta")
             if delta:
                 await self.send_to_browser({"type": "audio", "data": delta})
             return
 
-        if etype == "response.audio.done":
-            # Sofia terminou de falar (ainda pode ter mais transcript chegando)
+        if etype in ("response.output_audio.done", "response.audio.done"):
             return
 
         # ── Transcript Sofia (output) ──
-        if etype == "response.audio_transcript.delta":
+        if etype in (
+            "response.output_audio_transcript.delta",
+            "response.audio_transcript.delta",
+        ):
             chunk = msg.get("delta") or ""
             if chunk:
                 self._assistant_transcript_buffer += chunk
@@ -359,7 +363,10 @@ class GrokVoiceSession:
                 })
             return
 
-        if etype == "response.audio_transcript.done":
+        if etype in (
+            "response.output_audio_transcript.done",
+            "response.audio_transcript.done",
+        ):
             full = msg.get("transcript") or self._assistant_transcript_buffer
             self._assistant_transcript_buffer = ""
             if full:
