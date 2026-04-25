@@ -39,18 +39,21 @@ git log --oneline "$CURRENT_COMMIT..$NEW_COMMIT"
 FILES_CHANGED=$(git diff --name-only "$CURRENT_COMMIT..$NEW_COMMIT")
 REBUILD_API=false
 REBUILD_FRONTEND=false
+REBUILD_SOFIA=false
 RUN_MIGRATIONS=false
 
 if echo "$FILES_CHANGED" | grep -qE '^backend/(requirements\.txt|Dockerfile|\.env)'; then REBUILD_API=true; fi
 if echo "$FILES_CHANGED" | grep -qE '^backend/'; then REBUILD_API=true; fi
 if echo "$FILES_CHANGED" | grep -qE '^frontend/(package|Dockerfile)'; then REBUILD_FRONTEND=true; fi
 if echo "$FILES_CHANGED" | grep -qE '^frontend/'; then REBUILD_FRONTEND=true; fi
+if echo "$FILES_CHANGED" | grep -qE '^sofia-service/'; then REBUILD_SOFIA=true; fi
 if echo "$FILES_CHANGED" | grep -qE '^backend/migrations/'; then RUN_MIGRATIONS=true; fi
 
 # Override manual do serviço
 case "$SERVICE" in
-    api) REBUILD_API=true; REBUILD_FRONTEND=false ;;
-    frontend) REBUILD_API=false; REBUILD_FRONTEND=true ;;
+    api) REBUILD_API=true; REBUILD_FRONTEND=false; REBUILD_SOFIA=false ;;
+    frontend) REBUILD_API=false; REBUILD_FRONTEND=true; REBUILD_SOFIA=false ;;
+    sofia|sofia-service) REBUILD_API=false; REBUILD_FRONTEND=false; REBUILD_SOFIA=true ;;
     all) ;;
 esac
 
@@ -64,6 +67,13 @@ if [ "$RUN_MIGRATIONS" = "true" ]; then
 fi
 
 # 4. Rebuild
+# Ordem: sofia-service primeiro (api depende dele via depends_on),
+# depois api, depois frontend.
+if [ "$REBUILD_SOFIA" = "true" ]; then
+    echo "==> Rebuild sofia-service..."
+    docker compose up -d --build sofia-service
+fi
+
 if [ "$REBUILD_API" = "true" ]; then
     echo "==> Rebuild api..."
     docker compose up -d --build api
