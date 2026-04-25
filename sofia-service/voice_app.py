@@ -160,7 +160,11 @@ async def voice_ws(ws: WebSocket):
                 continue
 
             if voice is None:
-                await send_to_browser({"type": "error", "detail": "not_started"})
+                # Frame chegou antes de start completar (race normal).
+                # Audio frames são droppados silenciosamente; outros tipos
+                # sinalizam erro pra o cliente reagir.
+                if mtype != "audio":
+                    await send_to_browser({"type": "error", "detail": "not_started"})
                 continue
 
             if mtype == "audio":

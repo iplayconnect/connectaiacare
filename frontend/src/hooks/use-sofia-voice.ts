@@ -159,11 +159,26 @@ export function useSofiaVoice() {
     setStatus((s) => (s === "thinking" || s === "listening" ? "speaking" : s));
   }, []);
 
+  // Habilita pipe mic → WS apenas após ready do server (Live session pronta)
+  const startMicPipe = useCallback(() => {
+    const ws = wsRef.current;
+    const wn = workletNodeRef.current;
+    if (!ws || !wn) return;
+    wn.port.onmessage = (e) => {
+      if (ws.readyState !== WebSocket.OPEN) return;
+      ws.send(JSON.stringify({
+        type: "audio",
+        data: int16BufferToBase64(e.data as ArrayBuffer),
+      }));
+    };
+  }, []);
+
   const handleServerMessage = useCallback(
     (msg: ServerMessage) => {
       switch (msg.type) {
         case "ready":
           setStatus("listening");
+          startMicPipe();
           break;
         case "audio":
           playPcmChunk(base64ToInt16Array(msg.data));
@@ -255,16 +270,11 @@ export function useSofiaVoice() {
       wsRef.current = ws;
 
       ws.addEventListener("open", () => {
+        // Apenas sinaliza início. O pipe mic→WS só é habilitado quando
+        // o server responde "ready" (Live session pronta). Sem isso,
+        // os primeiros audio chunks chegariam antes do server processar
+        // start → "not_started".
         ws.send(JSON.stringify({ type: "start" }));
-
-        // Pipe mic → ws (só após open)
-        workletNode.port.onmessage = (e) => {
-          if (ws.readyState !== WebSocket.OPEN) return;
-          ws.send(JSON.stringify({
-            type: "audio",
-            data: int16BufferToBase64(e.data as ArrayBuffer),
-          }));
-        };
       });
 
       ws.addEventListener("message", (e) => {
