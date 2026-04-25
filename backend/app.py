@@ -89,12 +89,16 @@ def create_app() -> Flask:
             return None
         if is_public_path(path):
             return None
-        if not auth_enforce:
-            return None
+        # Sempre tenta autenticar pra popular g.user — decoradores
+        # @require_role / @require_permission em endpoints específicos
+        # dependem de g.user existir. Só BLOQUEIA o request quando
+        # AUTH_ENFORCE=true; com false, segue sem g.user (rotas legadas
+        # continuam abertas, mas /api/users etc. exigem token via decorator).
         payload, err = authenticate_request()
-        if err:
+        if err and auth_enforce:
             return err
-        g.user = payload
+        if payload:
+            g.user = payload
         return None
 
     # Headers de segurança em todas as respostas.
