@@ -52,22 +52,43 @@ const INPUT_SAMPLE_RATE = 16000;
 const OUTPUT_SAMPLE_RATE = 24000;
 
 /**
- * AudioWorklet processor — converte Float32 → Int16 PCM e posta pra main
- * thread em chunks de ~100ms. Inline via Blob URL pra evitar arquivo
- * separado em /public.
+ * AudioWorklet processor — converte Float32 → Int16 PCM downsampled pra
+ * 16kHz e posta pra main thread em chunks de ~100ms.
+ *
+ * Browser não garante o sampleRate solicitado em AudioContext (Chrome em
+ * mac frequentemente fica em 48000 mesmo pedindo 16000). Detectamos a
+ * taxa real e fazemos downsample com média de blocos pra evitar aliasing
+ * grosseiro. Suficiente pra voz humana (8kHz Nyquist é OK pra fala).
+ *
+ * Inline via Blob URL pra evitar arquivo separado em /public.
  */
 const PCM_WORKLET_CODE = `
 class PcmCaptureProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
+    this.targetRate = 16000;
+    this.sourceRate = sampleRate; // var global do AudioWorkletGlobalScope
+    this.ratio = Math.max(1, this.sourceRate / this.targetRate);
     this.buffer = [];
     this.targetSamples = 1600; // 100ms a 16kHz
+    this.acc = 0;
+    this.accCount = 0;
+    this.port.postMessage({ kind: "init", sourceRate: this.sourceRate, targetRate: this.targetRate });
   }
   process(inputs) {
     const input = inputs[0];
     if (!input || !input[0]) return true;
-    const channel = input[0];
-    for (let i = 0; i < channel.length; i++) this.buffer.push(channel[i]);
+    const ch = input[0];
+    // Downsample por média de blocos (evita aliasing decente p/ voz).
+    for (let i = 0; i < ch.length; i++) {
+      this.acc += ch[i];
+      this.accCount++;
+      if (this.accCount >= this.ratio) {
+        this.buffer.push(this.acc / this.accCount);
+        this.acc = 0;
+        this.accCount = 0;
+      }
+    }
     while (this.buffer.length >= this.targetSamples) {
       const chunk = this.buffer.splice(0, this.targetSamples);
       const int16 = new Int16Array(chunk.length);
@@ -75,7 +96,7 @@ class PcmCaptureProcessor extends AudioWorkletProcessor {
         const s = Math.max(-1, Math.min(1, chunk[i]));
         int16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
       }
-      this.port.postMessage(int16.buffer, [int16.buffer]);
+      this.port.postMessage({ kind: "audio", buffer: int16.buffer }, [int16.buffer]);
     }
     return true;
   }
@@ -165,11 +186,19 @@ export function useSofiaVoice() {
     const wn = workletNodeRef.current;
     if (!ws || !wn) return;
     wn.port.onmessage = (e) => {
-      if (ws.readyState !== WebSocket.OPEN) return;
-      ws.send(JSON.stringify({
-        type: "audio",
-        data: int16BufferToBase64(e.data as ArrayBuffer),
-      }));
+      const msg = e.data;
+      if (!msg || typeof msg !== "object") return;
+      if (msg.kind === "audio") {
+        if (ws.readyState !== WebSocket.OPEN) return;
+        ws.send(JSON.stringify({
+          type: "audio",
+          data: int16BufferToBase64(msg.buffer as ArrayBuffer),
+        }));
+      } else if (msg.kind === "init") {
+        // Apenas log informativo no console — útil pra debug de sample rate.
+        // eslint-disable-next-line no-console
+        console.log("[sofia-voice] worklet init", msg);
+      }
     };
   }, []);
 

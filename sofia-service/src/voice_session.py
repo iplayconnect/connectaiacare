@@ -170,6 +170,24 @@ class VoiceSession:
             "model": DEFAULT_VOICE_MODEL,
         })
 
+        # Kickoff: Sofia inicia falando, cumprimentando o user pelo primeiro
+        # nome. Mandamos uma instrução curta (não vai ser falada — entra
+        # como turn do user e Sofia responde com áudio). O system_instruction
+        # já tem o nome do user no contexto.
+        first_name = (self.persona_ctx.get("full_name") or "amigo(a)").split(" ")[0]
+        kickoff = (
+            f"[INÍCIO DA CHAMADA] Cumprimente {first_name} pelo primeiro nome de "
+            "forma calorosa e curta (1 frase), e pergunte como pode ajudar agora. "
+            "Não diga 'olá' duas vezes nem se apresente como Sofia."
+        )
+        try:
+            await self._live_session.send_client_content(
+                turns=types.Content(role="user", parts=[types.Part(text=kickoff)]),
+                turn_complete=True,
+            )
+        except Exception as exc:
+            logger.warning("voice_kickoff_failed", extra={"error": str(exc)})
+
     async def feed_audio(self, pcm_bytes: bytes) -> None:
         """Browser enviou um chunk PCM 16kHz."""
         if self._closed or not self._live_session:
