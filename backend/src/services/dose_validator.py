@@ -797,6 +797,186 @@ def check_fall_risk(
     )]
 
 
+# ─── F4: AJUSTE RENAL (Cockcroft-Gault) ────────────────────
+
+def calc_clcr_cockcroft_gault(
+    age: int | None,
+    weight_kg: float | None,
+    serum_creatinine_mg_dl: float | None,
+    is_female: bool = False,
+) -> float | None:
+    """Cockcroft-Gault em mL/min. None se faltar dado."""
+    if not age or not weight_kg or not serum_creatinine_mg_dl:
+        return None
+    if serum_creatinine_mg_dl <= 0:
+        return None
+    clcr = ((140 - age) * float(weight_kg)) / (72.0 * float(serum_creatinine_mg_dl))
+    if is_female:
+        clcr *= 0.85
+    return round(clcr, 1)
+
+
+_RENAL_ACTION_MAP = {
+    "avoid":              ("block",          "❌ NÃO usar"),
+    "reduce_50pct":       ("warning_strong", "Reduzir dose 50%"),
+    "reduce_75pct":       ("warning",        "Reduzir dose 25%"),
+    "increase_interval":  ("warning_strong", "Aumentar intervalo entre doses"),
+    "monitor":            ("warning",        "Monitorizar resposta + creatinina"),
+    "no_adjustment":      (None, None),
+}
+
+
+def check_renal_adjustment(
+    principle: str | None,
+    patient: dict | None,
+) -> list[DoseIssue]:
+    """Calcula ClCr Cockcroft-Gault e busca regra de ajuste renal."""
+    if not principle:
+        return []
+    age = _patient_age(patient)
+    weight = (patient or {}).get("weight_kg")
+    cr = (patient or {}).get("serum_creatinine_mg_dl")
+    is_female = ((patient or {}).get("gender") or "").upper() == "F"
+
+    clcr = calc_clcr_cockcroft_gault(age, weight, cr, is_female)
+    if clcr is None:
+        return [DoseIssue(
+            severity="info",
+            code="renal_adjust_no_data",
+            message=(
+                "Sem dados suficientes pra calcular ClCr (idade + peso + "
+                "creatinina). Ajuste renal não verificado."
+            ),
+            detail={
+                "missing": [
+                    k for k, v in {
+                        "age": age, "weight_kg": weight,
+                        "serum_creatinine": cr,
+                    }.items() if not v
+                ]
+            },
+        )]
+
+    rule = get_postgres().fetch_one(
+        """
+        SELECT clcr_min, clcr_max, action, rationale, source
+        FROM aia_health_drug_renal_adjustments
+        WHERE principle_active = %s AND active = TRUE
+          AND %s >= clcr_min
+          AND (clcr_max IS NULL OR %s < clcr_max)
+        ORDER BY clcr_min DESC LIMIT 1
+        """,
+        (principle, clcr, clcr),
+    )
+    if not rule:
+        return []
+    sev, label = _RENAL_ACTION_MAP.get(rule["action"], (None, None))
+    if not sev:
+        return []
+    return [DoseIssue(
+        severity=sev,
+        code="renal_adjustment",
+        message=(
+            f"🩺 ClCr calculado: {clcr} mL/min. {label} para {principle}: "
+            f"{rule['rationale']} Fonte: {rule['source']}."
+        ),
+        detail={
+            "clcr": clcr,
+            "action": rule["action"],
+            "principle": principle,
+            "source": rule["source"],
+        },
+    )]
+
+
+# ─── F4: SINAIS VITAIS ↔ MEDICAÇÃO ──────────────────────
+
+_VITAL_OP = {
+    "lt": lambda x, t: x < t,
+    "le": lambda x, t: x <= t,
+    "gt": lambda x, t: x > t,
+    "ge": lambda x, t: x >= t,
+}
+
+
+def _latest_vitals(patient_id: str | None, window_minutes: int) -> dict | None:
+    if not patient_id:
+        return None
+    return get_postgres().fetch_one(
+        """
+        SELECT bp_systolic, bp_diastolic, heart_rate, temperature_celsius,
+               oxygen_saturation, glucose_mg_dl, recorded_at
+        FROM aia_health_vital_signs
+        WHERE patient_id = %s
+          AND recorded_at >= NOW() - (%s || ' minutes')::interval
+        ORDER BY recorded_at DESC LIMIT 1
+        """,
+        (patient_id, str(window_minutes)),
+    )
+
+
+def check_vital_constraints(
+    principle: str | None,
+    therapeutic_class: str | None,
+    patient: dict | None,
+) -> list[DoseIssue]:
+    """Cruza vitais recentes com regras drug_vital_constraints."""
+    patient_id = (patient or {}).get("id")
+    if not patient_id or (not principle and not therapeutic_class):
+        return []
+    pg = get_postgres()
+    rules = pg.fetch_all(
+        """
+        SELECT principle_active, therapeutic_class, vital_field, operator,
+               threshold, window_minutes, severity, rationale, recommendation,
+               source, confidence
+        FROM aia_health_drug_vital_constraints
+        WHERE active = TRUE
+          AND ((principle_active IS NOT NULL AND principle_active = %s)
+            OR (therapeutic_class IS NOT NULL AND therapeutic_class = %s))
+        """,
+        (principle, therapeutic_class),
+    )
+    if not rules:
+        return []
+    issues: list[DoseIssue] = []
+    # Cache de vitais por janela diferente
+    vitals_cache: dict[int, dict | None] = {}
+    for r in rules:
+        window = int(r["window_minutes"])
+        if window not in vitals_cache:
+            vitals_cache[window] = _latest_vitals(patient_id, window)
+        vitals = vitals_cache[window]
+        if not vitals:
+            continue
+        field = r["vital_field"]
+        value = vitals.get(field)
+        if value is None:
+            continue
+        op = _VITAL_OP.get(r["operator"])
+        if not op or not op(float(value), float(r["threshold"])):
+            continue
+        sev_map = {"block": "block", "warning_strong": "warning_strong", "warning": "warning"}
+        issues.append(DoseIssue(
+            severity=sev_map[r["severity"]],
+            code="vital_constraint",
+            message=(
+                f"📈 Vital recente {field}={value} {r['operator']} {r['threshold']} — "
+                f"{r['rationale']} Conduta: {r['recommendation']} "
+                f"Fonte: {r['source']}."
+            ),
+            detail={
+                "vital": field,
+                "value": float(value),
+                "threshold": float(r["threshold"]),
+                "operator": r["operator"],
+                "recorded_at": vitals.get("recorded_at").isoformat() if vitals.get("recorded_at") else None,
+                "source": r["source"],
+            },
+        ))
+    return issues
+
+
 def check_narrow_therapeutic_index(limit: dict | None) -> list[DoseIssue]:
     """NTI = janela terapêutica estreita (digoxina, varfarina, levotiroxina)."""
     if not limit or not limit.get("narrow_therapeutic_index"):
@@ -884,6 +1064,8 @@ def validate(
     issues.extend(check_condition_contraindications(principle, therapeutic_class, patient))
     issues.extend(check_anticholinergic_burden(principle, patient_id))
     issues.extend(check_fall_risk(principle, therapeutic_class, patient))
+    issues.extend(check_renal_adjustment(principle, patient))
+    issues.extend(check_vital_constraints(principle, therapeutic_class, patient))
 
     if not limit:
         issues.append(DoseIssue(

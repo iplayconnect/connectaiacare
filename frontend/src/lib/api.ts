@@ -319,7 +319,10 @@ export interface DoseIssue {
     | "drug_interaction"
     | "condition_contraindicated"
     | "anticholinergic_burden"
-    | "fall_risk";
+    | "fall_risk"
+    | "renal_adjustment"
+    | "renal_adjust_no_data"
+    | "vital_constraint";
   message: string;
   detail?: Record<string, unknown>;
 }
