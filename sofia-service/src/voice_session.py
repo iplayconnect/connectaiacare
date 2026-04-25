@@ -135,8 +135,10 @@ class VoiceSession:
                 parts=[types.Part(text=_build_system_instruction(self.persona_ctx))]
             ),
             tools=_build_tools(self.persona),
-            input_audio_transcription=types.AudioTranscriptionConfig(),
-            output_audio_transcription=types.AudioTranscriptionConfig(),
+            # input_audio_transcription / output_audio_transcription só
+            # disponíveis em google-genai >= 1.x. Versão atual entrega só
+            # audio raw — UI mostra "ouvindo" sem texto até atualizarmos
+            # o SDK na próxima onda.
         )
 
         # Sessão de DB (continua a mesma do chat texto se existir)
