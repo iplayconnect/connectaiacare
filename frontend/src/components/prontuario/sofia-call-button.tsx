@@ -143,8 +143,8 @@ function SofiaCallModal({
 
   return (
     <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="bg-[hsl(222,47%,7%)] border border-white/10 rounded-xl w-full max-w-md">
-        <header className="flex items-center justify-between px-5 py-3 border-b border-white/[0.06]">
+      <div className="bg-[hsl(222,47%,7%)] border border-white/10 rounded-xl w-full max-w-md max-h-[90vh] flex flex-col">
+        <header className="flex items-center justify-between px-5 py-3 border-b border-white/[0.06] flex-shrink-0">
           <div className="flex items-center gap-2">
             <Phone className="h-4 w-4 text-accent-cyan" />
             <h2 className="font-semibold text-sm">
@@ -156,7 +156,7 @@ function SofiaCallModal({
           </button>
         </header>
 
-        <div className="p-5 space-y-4">
+        <div className="p-5 space-y-4 overflow-y-auto flex-1">
           {loading ? (
             <div className="flex items-center gap-2 text-muted-foreground py-4 justify-center">
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -227,7 +227,7 @@ function SofiaCallModal({
           )}
         </div>
 
-        <footer className="flex justify-end gap-2 px-5 py-3 border-t border-white/[0.06]">
+        <footer className="flex justify-end gap-2 px-5 py-3 border-t border-white/[0.06] flex-shrink-0">
           <button
             onClick={onClose}
             className="px-3 py-1.5 text-sm rounded border border-white/10 hover:bg-white/[0.04]"
