@@ -89,9 +89,12 @@ class SipLayer:
                 except Exception as exc:
                     logger.warning("set_null_dev_failed: %s", exc)
 
-                # Conta
+                # Conta — display name "ConnectaIA Care" aparece no caller ID
+                # do destinatário (quando a operadora preserva o From header).
                 acc_cfg = pj.AccountConfig()
-                acc_cfg.idUri = f"sip:{Config.SIP_USER}@{Config.SIP_DOMAIN}"
+                acc_cfg.idUri = (
+                    f'"ConnectaIA Care" <sip:{Config.SIP_USER}@{Config.SIP_DOMAIN}>'
+                )
                 acc_cfg.regConfig.registrarUri = f"sip:{Config.SIP_DOMAIN}"
                 cred = pj.AuthCredInfo(
                     "digest", "*", Config.SIP_USER, 0, Config.SIP_PASSWORD,
