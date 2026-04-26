@@ -308,7 +308,7 @@ def history():
 
     rows = db.fetch_all(
         f"""SELECT s.id, s.persona, s.user_id, s.patient_id, s.phone,
-                   s.created_at, s.last_active_at,
+                   s.started_at AS created_at, s.last_active_at,
                    p.full_name AS patient_name, p.nickname AS patient_nickname,
                    u.full_name AS caller_name,
                    (SELECT COUNT(*) FROM aia_health_sofia_messages m
