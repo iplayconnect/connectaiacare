@@ -154,7 +154,8 @@ Regras:
 - Não inclua nada que pareça PII (já passou por anonimização — desconfie \
   se ver nome próprio, sempre placeholder)
 - Pode retornar 0 insights se não há padrão real
-- Máximo 10 insights por extração
+- Máximo 5 insights por extração
+- detail: máximo 200 caracteres (seja conciso!)
 
 Devolva APENAS JSON válido (sem markdown wrapping, sem texto fora):
 {
@@ -171,13 +172,13 @@ def extract_insights_from_anon_messages(anon_messages: list[str]) -> list[dict]:
     de insights estruturados."""
     if not anon_messages:
         return []
-    body = "\n---\n".join(f"[{i}] {m[:600]}" for i, m in enumerate(anon_messages))
+    body = "\n---\n".join(f"[{i}] {m[:400]}" for i, m in enumerate(anon_messages))
     try:
         result = generate(
             system_prompt=_EXTRACT_PROMPT,
             messages=[{"role": "user", "content": body}],
             model=EXTRACTOR_MODEL,
-            max_output_tokens=2500,
+            max_output_tokens=6000,
             thinking_level="medium",
         )
     except Exception as exc:
@@ -192,11 +193,37 @@ def extract_insights_from_anon_messages(anon_messages: list[str]) -> list[dict]:
     try:
         parsed = json.loads(raw)
     except Exception as exc:
+        # Tenta salvar — comum o LLM truncar a string final.
+        # Procura pelo último item completo cortando antes do erro.
+        salvaged = _salvage_truncated_json(raw)
+        if salvaged:
+            logger.info("collective_extract_salvaged: recovered %d insights", len(salvaged))
+            return salvaged[:10]
         logger.warning(
             "collective_extract_parse_failed: %s raw=%r", exc, raw[:200]
         )
         return []
     return (parsed.get("insights") or [])[:10]
+
+
+def _salvage_truncated_json(raw: str) -> list[dict]:
+    """LLM frequentemente trunca o último item da lista. Tenta cortar até
+    o último } completo e fechar a estrutura."""
+    if not raw or '"insights"' not in raw:
+        return []
+    # Posições de } em ordem reversa — tenta fechar JSON após cada uma
+    positions = [i for i, c in enumerate(raw) if c == "}"]
+    for pos in reversed(positions):
+        chunk = raw[:pos + 1].rstrip().rstrip(",")
+        candidate = chunk + "]}"
+        try:
+            parsed = json.loads(candidate)
+            insights = parsed.get("insights") or []
+            if insights:
+                return insights
+        except Exception:
+            continue
+    return []
 
 
 # ────────────────────────── Upsert (agrega frequência) ──────────────────────────
@@ -406,17 +433,34 @@ def run_one_cycle() -> dict:
     promoted = promote_above_threshold()
     duration_ms = int((time.monotonic() - started) * 1000)
 
-    persistence.execute(
-        """UPDATE aia_health_sofia_collective_cursor
-           SET last_run_at = NOW(),
-               last_message_window_end = %s,
-               last_run_messages_processed = %s,
-               last_run_insights_extracted = %s,
-               last_run_insights_promoted = %s,
-               last_run_duration_ms = %s
-           WHERE id = 1""",
-        (window_end, messages_count, insights_extracted, promoted, duration_ms),
-    )
+    # Só avança o cursor se o ciclo realmente extraiu algo OU não tinha
+    # mensagens (ciclo vazio é ok). Se tinha mensagens mas extração falhou,
+    # mantém cursor pra retry — evita perder janela por falha do LLM.
+    advance_cursor = (messages_count == 0) or (insights_extracted > 0)
+    if advance_cursor:
+        persistence.execute(
+            """UPDATE aia_health_sofia_collective_cursor
+               SET last_run_at = NOW(),
+                   last_message_window_end = %s,
+                   last_run_messages_processed = %s,
+                   last_run_insights_extracted = %s,
+                   last_run_insights_promoted = %s,
+                   last_run_duration_ms = %s
+               WHERE id = 1""",
+            (window_end, messages_count, insights_extracted, promoted, duration_ms),
+        )
+    else:
+        # Atualiza só métricas, mantém window_end pra retry no próximo tick
+        persistence.execute(
+            """UPDATE aia_health_sofia_collective_cursor
+               SET last_run_at = NOW(),
+                   last_run_messages_processed = %s,
+                   last_run_insights_extracted = 0,
+                   last_run_insights_promoted = 0,
+                   last_run_duration_ms = %s
+               WHERE id = 1""",
+            (messages_count, duration_ms),
+        )
     logger.info(
         "collective_memory_cycle messages=%d insights=%d promoted=%d ms=%d",
         messages_count, insights_extracted, promoted, duration_ms,
