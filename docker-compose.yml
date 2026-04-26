@@ -133,49 +133,41 @@ services:
 
   # ════════════════════════════════════════════════════════════════════
   # voice-call-service — ligações telefônicas via SIP + Grok Realtime
-  # DESABILITADO até primeira validação de SIP+áudio com o trunk.
-  # Pra ativar: descomentar bloco abaixo + setar SIP_USER/SIP_PASSWORD
-  # no .env (mirrar de /root/assistenteia/.env). Build do PJSIP demora
-  # ~10min na primeira vez.
   # ════════════════════════════════════════════════════════════════════
-  # voice-call-service:
-  #   build:
-  #     context: ./voice-call-service
-  #     dockerfile: Dockerfile
-  #   container_name: connectaiacare-voice-call
-  #   restart: unless-stopped
-  #   env_file:
-  #     - ./backend/.env
-  #   environment:
-  #     DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/connectaiacare
-  #     LOG_LEVEL: INFO
-  #     # SIP creds — mirrar de /root/assistenteia/.env (ConnectaIA SaaS)
-  #     # OU pedir sub-ramal próprio ao operador
-  #     VOIP_SIP_DOMAIN: ${VOIP_SIP_DOMAIN:-revendapbx.flux.net.br}
-  #     VOIP_SIP_USER: ${VOIP_SIP_USER:-}
-  #     VOIP_SIP_PASSWORD: ${VOIP_SIP_PASSWORD:-}
-  #     # Grok Realtime (já setado pra sofia-service)
-  #     XAI_API_KEY: ${XAI_API_KEY:-}
-  #     SOFIA_GROK_VOICE_MODEL: grok-voice-think-fast-1.0
-  #     SOFIA_GROK_VOICE: ara
-  #   depends_on:
-  #     postgres:
-  #       condition: service_healthy
-  #   networks:
-  #     - connectaiacare_internal
-  #     - infra_proxy
-  #   ports:
-  #     # SIP signaling + RTP precisam de UDP exposto no host pra trunk alcançar
-  #     - "5061:5060/udp"
-  #     - "10500-10600:10500-10600/udp"
-  #   labels:
-  #     # API REST (POST /api/voice-call/dial) atrás de Traefik
-  #     traefik.enable: "true"
-  #     traefik.docker.network: "infra_proxy"
-  #     traefik.http.routers.connectaiacare-voice-call-api.rule: "Host(`voice-call.connectaia.com.br`)"
-  #     traefik.http.routers.connectaiacare-voice-call-api.entrypoints: "websecure"
-  #     traefik.http.routers.connectaiacare-voice-call-api.tls.certresolver: "letsencrypt"
-  #     traefik.http.services.connectaiacare-voice-call-api.loadbalancer.server.port: "5040"
+  voice-call-service:
+    build:
+      context: ./voice-call-service
+      dockerfile: Dockerfile
+    container_name: connectaiacare-voice-call
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/connectaiacare
+      LOG_LEVEL: INFO
+      VOIP_SIP_DOMAIN: ${VOIP_SIP_DOMAIN:-revendapbx.flux.net.br}
+      VOIP_SIP_USER: ${VOIP_SIP_USER:-}
+      VOIP_SIP_PASSWORD: ${VOIP_SIP_PASSWORD:-}
+      XAI_API_KEY: ${XAI_API_KEY:-}
+      SOFIA_GROK_VOICE_MODEL: grok-voice-think-fast-1.0
+      SOFIA_GROK_VOICE: ara
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - connectaiacare_internal
+      - infra_proxy
+    ports:
+      # SIP signaling (5061 host pra evitar conflito com voip-service na 5060)
+      - "5061:5060/udp"
+      - "10500-10600:10500-10600/udp"
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: "infra_proxy"
+      traefik.http.routers.connectaiacare-voice-call-api.rule: "Host(`voice-call.connectaia.com.br`)"
+      traefik.http.routers.connectaiacare-voice-call-api.entrypoints: "websecure"
+      traefik.http.routers.connectaiacare-voice-call-api.tls.certresolver: "letsencrypt"
+      traefik.http.services.connectaiacare-voice-call-api.loadbalancer.server.port: "5040"
 
   frontend:
     build:
