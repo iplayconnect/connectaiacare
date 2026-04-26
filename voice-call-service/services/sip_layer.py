@@ -133,6 +133,12 @@ class SipLayer:
 
         import pjsua2 as pj
         import time as _time
+        # PJSIP exige que cada thread externa (Flask worker) seja
+        # registrada antes de chamar pjlib. Idempotente.
+        try:
+            self._endpoint.libRegisterThread(f"flask-{threading.get_ident()}")
+        except Exception:
+            pass  # já registrada
         # destination: "5551996161700" → "sip:5551996161700@dominio"
         dest_uri = self._normalize_dest(destination)
         call_id = f"call-{len(self._calls) + 1}-{int(_time.time())}"
