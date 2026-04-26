@@ -52,7 +52,17 @@ class BaseAgent:
             ctx += f"\n- Paciente vinculado: {persona_ctx['patient_id']}"
         if persona_ctx.get("partner_org"):
             ctx += f"\n- Organização parceira: {persona_ctx['partner_org']}"
-        return f"{base}\n\n{persona_prompt}{ctx}"
+
+        # Memória cross-session — carrega resumo + key_facts persistidos.
+        # Late import pra evitar cycle import com llm_client.
+        try:
+            from src import memory_service
+            memory = memory_service.load_user_memory(persona_ctx.get("user_id"))
+            mem_block = memory_service.format_for_prompt(memory)
+        except Exception:
+            mem_block = ""
+
+        return f"{base}\n\n{persona_prompt}{ctx}{mem_block}"
 
     @classmethod
     def tool_definitions(cls, persona: str) -> list[ToolDefinition]:
@@ -183,6 +193,14 @@ class BaseAgent:
             "UPDATE aia_health_sofia_sessions SET last_active_at = NOW() WHERE id = %s",
             (session_id,),
         )
+
+        # Atualiza memória cross-session se threshold atingido (best-effort)
+        try:
+            from src import memory_service
+            memory_service.maybe_update_async(persona_ctx.get("user_id"))
+        except Exception:
+            pass
+
         persistence.record_usage(
             tenant_id=tenant_id,
             user_id=persona_ctx.get("user_id"),

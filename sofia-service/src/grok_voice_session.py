@@ -312,6 +312,16 @@ class GrokVoiceSession:
             },
         )
 
+        # Memória cross-session — força atualização ao fim da chamada
+        # (calls de voz tipicamente acumulam várias mensagens).
+        try:
+            from src import memory_service
+            memory_service.update_user_memory(
+                self.persona_ctx.get("user_id"), force=True,
+            )
+        except Exception:
+            pass
+
     # ─────────────── receive loop ───────────────
 
     async def _receive_loop(self) -> None:

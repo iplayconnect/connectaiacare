@@ -270,6 +270,15 @@ class VoiceSession:
             },
         )
 
+        # Memória cross-session — força atualização ao fim da chamada
+        try:
+            from src import memory_service
+            memory_service.update_user_memory(
+                self.persona_ctx.get("user_id"), force=True,
+            )
+        except Exception:
+            pass
+
     async def _receive_loop(self) -> None:
         """Lê mensagens do Gemini Live e encaminha pro browser."""
         try:
