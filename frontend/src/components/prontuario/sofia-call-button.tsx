@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { Phone, PhoneCall, Loader2, X, CheckCircle2 } from "lucide-react";
 
 import { api, type CallScenario } from "@/lib/api";
@@ -141,8 +142,18 @@ function SofiaCallModal({
 
   const selected = scenarios.find((s) => s.id === scenarioId);
 
-  return (
-    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+  // Renderiza VIA PORTAL no document.body — escapa o `transform` do
+  // animate-fade-up da página do paciente que quebra position:fixed.
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4"
+      onClick={(e) => {
+        // Click no backdrop fecha o modal
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
       <div className="bg-[hsl(222,47%,7%)] border border-white/10 rounded-xl w-full max-w-md max-h-[90vh] flex flex-col">
         <header className="flex items-center justify-between px-5 py-3 border-b border-white/[0.06] flex-shrink-0">
           <div className="flex items-center gap-2">
@@ -248,6 +259,7 @@ function SofiaCallModal({
           </button>
         </footer>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
