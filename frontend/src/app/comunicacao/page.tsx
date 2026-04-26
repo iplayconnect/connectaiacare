@@ -12,9 +12,11 @@ import {
   Activity,
   User,
   Stethoscope,
+  Search,
+  X,
 } from "lucide-react";
 
-import { api, type CallScenario, type CallHistoryItem } from "@/lib/api";
+import { api, type CallScenario, type CallHistoryItem, type Patient } from "@/lib/api";
 
 // ═══════════════════════════════════════════════════════════════════
 // /comunicacao — hub de ligações Sofia VoIP (outbound only nesta fase)
@@ -79,29 +81,44 @@ export default function ComunicacaoPage() {
 
 function NewCallPanel() {
   const [scenarios, setScenarios] = useState<CallScenario[]>([]);
+  const [patients, setPatients] = useState<Patient[]>([]);
   const [loading, setLoading] = useState(true);
   const [scenarioId, setScenarioId] = useState<string>("");
   const [destination, setDestination] = useState("");
-  const [patientId, setPatientId] = useState("");
+  const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
   const [fullName, setFullName] = useState("");
   const [dialing, setDialing] = useState(false);
   const [result, setResult] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    api
-      .communicationsScenarios()
-      .then((r) => {
-        const outbound = r.scenarios.filter(
+    Promise.all([
+      api.communicationsScenarios(),
+      api.listPatients(),
+    ])
+      .then(([sc, pt]) => {
+        const outbound = sc.scenarios.filter(
           (s) => s.direction === "outbound" && s.active,
         );
         setScenarios(outbound);
         if (outbound.length > 0 && !scenarioId) setScenarioId(outbound[0].id);
+        setPatients(pt.patients || []);
       })
-      .catch((e) => setError(e?.message || "Erro carregando cenários"))
+      .catch((e) => setError(e?.message || "Erro carregando dados"))
       .finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  function handleSelectPatient(p: Patient | null) {
+    setSelectedPatient(p);
+    if (p) {
+      // Auto-fill: telefone do responsável + nome do responsável
+      const respPhone = p.responsible?.phone?.replace(/\D/g, "") || "";
+      const respName = p.responsible?.name || "";
+      if (respPhone && !destination.trim()) setDestination(respPhone);
+      if (respName && !fullName.trim()) setFullName(respName);
+    }
+  }
 
   const selected = useMemo(
     () => scenarios.find((s) => s.id === scenarioId),
@@ -120,7 +137,7 @@ function NewCallPanel() {
       const r = await api.communicationsDial({
         scenario_id: scenarioId,
         destination: destination.trim().replace(/\D/g, ""),
-        patient_id: patientId.trim() || undefined,
+        patient_id: selectedPatient?.id || undefined,
         full_name: fullName.trim() || undefined,
       });
       setResult(`Ligação iniciada · call_id: ${r.call_id}`);
@@ -173,31 +190,34 @@ function NewCallPanel() {
           />
         </div>
 
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="text-xs uppercase tracking-wider text-muted-foreground">
-              Nome completo (override)
-            </label>
-            <input
-              type="text"
-              value={fullName}
-              onChange={(e) => setFullName(e.target.value)}
-              placeholder="Dr. Alexandre Veras"
-              className="w-full mt-1 px-3 py-2 rounded-lg bg-white/[0.03] border border-white/10 focus:border-accent-cyan outline-none text-sm"
+        <div>
+          <label className="text-xs uppercase tracking-wider text-muted-foreground">
+            Paciente vinculado (opcional — preenche telefone do responsável)
+          </label>
+          {selectedPatient ? (
+            <SelectedPatientCard
+              patient={selectedPatient}
+              onClear={() => handleSelectPatient(null)}
             />
-          </div>
-          <div>
-            <label className="text-xs uppercase tracking-wider text-muted-foreground">
-              Paciente ID (opcional)
-            </label>
-            <input
-              type="text"
-              value={patientId}
-              onChange={(e) => setPatientId(e.target.value)}
-              placeholder="UUID"
-              className="w-full mt-1 px-3 py-2 rounded-lg bg-white/[0.03] border border-white/10 focus:border-accent-cyan outline-none text-sm font-mono"
+          ) : (
+            <PatientPicker
+              patients={patients}
+              onSelect={handleSelectPatient}
             />
-          </div>
+          )}
+        </div>
+
+        <div>
+          <label className="text-xs uppercase tracking-wider text-muted-foreground">
+            Nome de quem atende (será usado na saudação)
+          </label>
+          <input
+            type="text"
+            value={fullName}
+            onChange={(e) => setFullName(e.target.value)}
+            placeholder="Dr. Alexandre Veras"
+            className="w-full mt-1 px-3 py-2 rounded-lg bg-white/[0.03] border border-white/10 focus:border-accent-cyan outline-none text-sm"
+          />
         </div>
 
         <button
@@ -482,6 +502,125 @@ function CallHistoryRow({
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── Patient picker (search por nome/apelido) ──────────────────────
+
+function PatientPicker({
+  patients,
+  onSelect,
+}: {
+  patients: Patient[];
+  onSelect: (p: Patient) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return patients.filter((p) => p.active).slice(0, 20);
+    return patients
+      .filter((p) => {
+        if (!p.active) return false;
+        const name = (p.full_name || "").toLowerCase();
+        const nick = (p.nickname || "").toLowerCase();
+        return name.includes(q) || nick.includes(q);
+      })
+      .slice(0, 20);
+  }, [patients, query]);
+
+  return (
+    <div className="relative">
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+        <input
+          type="text"
+          value={query}
+          onChange={(e) => {
+            setQuery(e.target.value);
+            setOpen(true);
+          }}
+          onFocus={() => setOpen(true)}
+          onBlur={() => setTimeout(() => setOpen(false), 150)}
+          placeholder="Buscar paciente por nome ou apelido…"
+          className="w-full mt-1 pl-9 pr-3 py-2 rounded-lg bg-white/[0.03] border border-white/10 focus:border-accent-cyan outline-none text-sm"
+        />
+      </div>
+      {open && filtered.length > 0 && (
+        <ul className="absolute z-30 mt-1 w-full max-h-64 overflow-y-auto rounded-lg border border-white/10 bg-[hsl(222,47%,9%)] shadow-2xl">
+          {filtered.map((p) => (
+            <li
+              key={p.id}
+              onMouseDown={() => {
+                onSelect(p);
+                setQuery("");
+                setOpen(false);
+              }}
+              className="px-3 py-2 cursor-pointer hover:bg-white/[0.04] border-b border-white/[0.04] last:border-0"
+            >
+              <div className="text-sm font-medium">
+                {p.nickname ? `${p.nickname} (${p.full_name})` : p.full_name}
+              </div>
+              <div className="text-[11px] text-muted-foreground flex items-center gap-2 mt-0.5">
+                {p.care_unit && <span>{p.care_unit}</span>}
+                {p.room_number && <span>· Quarto {p.room_number}</span>}
+                {p.responsible?.phone && (
+                  <span className="font-mono">
+                    · {p.responsible.name || "responsável"}: {p.responsible.phone}
+                  </span>
+                )}
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+      {open && query && filtered.length === 0 && (
+        <div className="absolute z-30 mt-1 w-full p-3 rounded-lg border border-white/10 bg-[hsl(222,47%,9%)] text-xs text-muted-foreground">
+          Nenhum paciente encontrado.
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SelectedPatientCard({
+  patient,
+  onClear,
+}: {
+  patient: Patient;
+  onClear: () => void;
+}) {
+  return (
+    <div className="mt-1 p-3 rounded-lg border border-accent-cyan/30 bg-accent-cyan/5 flex items-start justify-between gap-3">
+      <div className="min-w-0">
+        <div className="text-sm font-medium truncate">
+          {patient.nickname
+            ? `${patient.nickname} (${patient.full_name})`
+            : patient.full_name}
+        </div>
+        <div className="text-[11px] text-muted-foreground flex flex-wrap gap-x-3 gap-y-0.5 mt-0.5">
+          {patient.care_unit && <span>{patient.care_unit}</span>}
+          {patient.room_number && <span>Quarto {patient.room_number}</span>}
+          {patient.responsible?.name && (
+            <span>
+              {patient.responsible.relationship || "Responsável"}:{" "}
+              {patient.responsible.name}
+            </span>
+          )}
+          {patient.responsible?.phone && (
+            <span className="font-mono">📞 {patient.responsible.phone}</span>
+          )}
+        </div>
+      </div>
+      <button
+        onClick={onClear}
+        className="text-muted-foreground hover:text-foreground flex-shrink-0"
+        aria-label="Remover paciente"
+      >
+        <X className="h-4 w-4" />
+      </button>
     </div>
   );
 }
