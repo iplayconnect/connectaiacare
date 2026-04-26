@@ -104,7 +104,10 @@ def dial():
 
     def _on_call_state(call_id: str, state: str):
         logger.info("dial_state call_id=%s state=%s", call_id, state)
-        if state in ("DISCONNECTED", "DISCONNCTD"):  # PJSIP às vezes typo
+        if state == "CONFIRMED":
+            # Paciente atendeu — Sofia pode falar agora
+            asyncio.run_coroutine_threadsafe(grok.start_kickoff(), loop)
+        elif state in ("DISCONNECTED", "DISCONNCTD"):
             # Encerra Grok + para o loop
             asyncio.run_coroutine_threadsafe(grok.close(), loop)
             loop.call_later(2, loop.stop)

@@ -130,26 +130,35 @@ class GrokCallSession:
         }))
 
         self._receive_task = asyncio.create_task(self._receive_loop())
+        # Kickoff guardado mas NÃO disparado — quem dispara é a camada SIP
+        # via .start_kickoff() quando state == CONFIRMED (paciente atendeu).
+        self._kickoff_text = (
+            f"[INÍCIO DA LIGAÇÃO TELEFÔNICA] Cumprimente {first_name} pelo "
+            "primeiro nome com tom caloroso e curto (1 frase). Diga que é a "
+            "Sofia da ConnectaIACare. Em seguida pergunte como pode ajudar."
+        )
+        self._kickoff_sent = False
         logger.info(
             "grok_call_started session_id=%s persona=%s model=%s",
             self.session_id, self.persona, Config.GROK_VOICE_MODEL,
         )
 
-        # Kickoff: Sofia inicia a fala assim que a chamada conecta
-        kickoff = (
-            f"[INÍCIO DA LIGAÇÃO TELEFÔNICA] Cumprimente {first_name} pelo "
-            "primeiro nome com tom caloroso e curto (1 frase). Diga que é a "
-            "Sofia da ConnectaIACare. Em seguida pergunte como pode ajudar."
-        )
+    async def start_kickoff(self) -> None:
+        """Dispara a 1ª fala da Sofia. Chamado pela camada SIP ao detectar
+        CONFIRMED (paciente atendeu). Idempotente."""
+        if self._kickoff_sent or self._closed or not self._ws:
+            return
+        self._kickoff_sent = True
         await self._ws.send(json.dumps({
             "type": "conversation.item.create",
             "item": {
                 "type": "message",
                 "role": "user",
-                "content": [{"type": "input_text", "text": kickoff}],
+                "content": [{"type": "input_text", "text": self._kickoff_text}],
             },
         }))
         await self._ws.send(json.dumps({"type": "response.create"}))
+        logger.info("grok_call_kickoff_sent session_id=%s", self.session_id)
 
     async def feed_audio_24k(self, pcm16_24k: bytes) -> None:
         """Camada SIP empurra cada frame de áudio (já upsampleado pra 24k)."""
