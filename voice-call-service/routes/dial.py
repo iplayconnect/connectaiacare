@@ -127,6 +127,12 @@ def dial():
             # Paciente atendeu — Sofia pode falar agora
             asyncio.run_coroutine_threadsafe(grok.start_kickoff(), loop)
         elif state in ("DISCONNECTED", "DISCONNCTD"):
+            # Marca razão do disconnect pra UI ler depois (active-calls)
+            ctx = _active_calls.get(call_id)
+            if ctx:
+                # Se nunca atendeu (sem CONFIRMED), provavelmente foi
+                # bloqueado pelo trunk OU número não atendeu
+                ctx["disconnected_at"] = call_id
             # Encerra Grok + para o loop
             asyncio.run_coroutine_threadsafe(grok.close(), loop)
             loop.call_later(2, loop.stop)

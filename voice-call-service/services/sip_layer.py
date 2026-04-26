@@ -192,11 +192,25 @@ class SipLayer:
         return True
 
     def _normalize_dest(self, destination: str) -> str:
-        # Aceita "5551996161700" ou "+5551996161700" ou "sip:..."
+        """Normaliza destino pra o formato que o trunk Flux aceita.
+        Aceita várias entradas e força prefixo 55 quando parece BR sem
+        código de país. Trunk dá SIP 403 se faltar 55 no número.
+
+        Casos cobertos:
+          - "sip:..."             → passa direto
+          - "+5551996161700"      → 5551996161700 → sip:...
+          - "5551996161700"       → passa (já tem 55)
+          - "51996161700" (11)    → 5551996161700 (adiciona 55)
+          - "5196161700" (10)     → 555196161700 (adiciona 55, fixo)
+        """
         d = destination.strip().lstrip("+")
         if d.startswith("sip:"):
             return d
-        return f"sip:{d}@{Config.SIP_DOMAIN}"
+        digits = "".join(c for c in d if c.isdigit())
+        # 12-13 dígitos sem prefixo 55 → BR número completo (DDD+9+8 ou DDD+8)
+        if len(digits) in (10, 11) and not digits.startswith("55"):
+            digits = "55" + digits
+        return f"sip:{digits}@{Config.SIP_DOMAIN}"
 
 
 class CallContext:
