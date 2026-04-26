@@ -243,6 +243,14 @@ class GrokCallSession:
             except Exception:
                 pass
 
+        # Marca sessão como encerrada (fecha o registro pra histórico mostrar
+        # duração corretamente)
+        try:
+            from services.persistence import close_session
+            close_session(self.session_id)
+        except Exception as exc:
+            logger.warning("close_session_failed: %s", exc)
+
         # Memória — força extração no fim da chamada (replica
         # comportamento do GrokVoiceSession.close() do sofia-service)
         try:

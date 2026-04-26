@@ -466,11 +466,27 @@ function CallHistoryRow({
             </div>
           </div>
         </div>
-        <div className="text-xs text-muted-foreground flex items-center gap-1 tabular flex-shrink-0">
-          <Clock className="h-3 w-3" />
-          {item.last_active_at
-            ? new Date(item.last_active_at).toLocaleString("pt-BR")
-            : "—"}
+        <div className="text-xs text-muted-foreground flex flex-col items-end gap-0.5 tabular flex-shrink-0">
+          <div className="flex items-center gap-1">
+            <Clock className="h-3 w-3" />
+            {item.last_active_at
+              ? new Date(item.last_active_at).toLocaleString("pt-BR")
+              : "—"}
+          </div>
+          <div className="flex items-center gap-2 text-[10px]">
+            {item.duration_seconds != null && item.duration_seconds > 0 && (
+              <span>{formatDuration(item.duration_seconds)}</span>
+            )}
+            <span
+              className={`px-1.5 py-0.5 rounded ${
+                item.closed_at
+                  ? "bg-emerald-500/10 text-emerald-400"
+                  : "bg-amber-500/10 text-amber-400"
+              }`}
+            >
+              {item.closed_at ? "Encerrada" : "Em curso"}
+            </span>
+          </div>
         </div>
       </button>
       {open && (
@@ -504,6 +520,13 @@ function CallHistoryRow({
       )}
     </div>
   );
+}
+
+function formatDuration(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`;
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return s ? `${m}m${s}s` : `${m}min`;
 }
 
 // ─── Patient picker (search por nome/apelido) ──────────────────────

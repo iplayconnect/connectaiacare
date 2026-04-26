@@ -427,6 +427,8 @@ export interface CallHistoryItem {
   phone: string | null;
   created_at: string | null;
   last_active_at: string | null;
+  closed_at: string | null;
+  duration_seconds: number | null;
   patient_name: string | null;
   patient_nickname: string | null;
   caller_name: string | null;

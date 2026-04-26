@@ -98,6 +98,17 @@ def get_or_create_session(
     )
 
 
+def close_session(session_id: str | None) -> None:
+    """Marca a sessão como encerrada (closed_at = NOW). Idempotente."""
+    if not session_id:
+        return
+    _execute(
+        "UPDATE aia_health_sofia_sessions SET closed_at = NOW(), "
+        "last_active_at = NOW() WHERE id = %s AND closed_at IS NULL",
+        (session_id,),
+    )
+
+
 def append_message_voice_call(
     *, session_id: str, tenant_id: str, role: str, content: str | None = None,
     tool_name: str | None = None, tool_input: dict | None = None,
