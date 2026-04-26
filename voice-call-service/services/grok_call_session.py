@@ -218,6 +218,10 @@ class GrokCallSession:
     async def _handle_event(self, msg: dict) -> None:
         from services.persistence import append_message_voice_call
         etype = msg.get("type") or ""
+        # Diag: log todo evento (apenas tipo)
+        logger.info("grok_evt %s", etype)
+        if etype == "error":
+            logger.error("grok_error_full: %s", msg)
 
         # Áudio out (chegou da Grok) — manda pro callback (camada SIP injeta)
         if etype in ("response.output_audio.delta", "response.audio.delta"):
