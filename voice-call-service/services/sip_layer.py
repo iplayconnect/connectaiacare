@@ -143,7 +143,6 @@ class SipLayer:
             call_id_local=call_id,
             on_audio_in=on_audio_in,
             on_call_state=on_call_state,
-            pj=pj,
         )
         prm = pj.CallOpParam(True)
         call.makeCall(dest_uri, prm)
