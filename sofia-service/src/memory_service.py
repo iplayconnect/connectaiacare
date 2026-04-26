@@ -27,13 +27,12 @@ from src.llm_client import generate
 
 logger = logging.getLogger(__name__)
 
-# Default herda do modelo principal de chat (já testado/funcionando) pra
-# evitar trocar pra um preview que ainda não foi promovido. Override via
-# SOFIA_MEMORY_MODEL pra testar nano/Lite quando GA.
+# Default = mesmo modelo do chat (gemini-3-flash-preview). Override via
+# SOFIA_MEMORY_MODEL pra usar nano/Lite quando GA. Fallback 2.5 se 3 falhar.
 MEMORY_MODEL = (
     os.getenv("SOFIA_MEMORY_MODEL")
     or os.getenv("SOFIA_LLM_MODEL")
-    or "gemini-2.5-flash"
+    or "gemini-3-flash-preview"
 )
 
 # A cada N mensagens novas (user+assistant), re-summariza.
