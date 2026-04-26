@@ -132,9 +132,10 @@ class SipLayer:
             raise RuntimeError("sip_not_initialized")
 
         import pjsua2 as pj
+        import time as _time
         # destination: "5551996161700" → "sip:5551996161700@dominio"
         dest_uri = self._normalize_dest(destination)
-        call_id = f"call-{len(self._calls) + 1}-{int(asyncio.get_event_loop().time())}"
+        call_id = f"call-{len(self._calls) + 1}-{int(_time.time())}"
 
         # TODO_SMOKE: validar que MyCall recebe corretamente os frames de áudio
         call = _MyCall(
