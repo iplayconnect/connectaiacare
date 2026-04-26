@@ -402,6 +402,44 @@ export interface ClinicalAlertRow {
   } | null;
 }
 
+export interface CallScenario {
+  id: string;
+  code: string;
+  label: string;
+  direction: "outbound" | "inbound";
+  persona: string;
+  description: string | null;
+  system_prompt?: string;
+  voice: string;
+  allowed_tools: string[];
+  post_call_actions: string[];
+  pre_call_context_sql?: string | null;
+  max_duration_seconds: number;
+  active: boolean;
+  updated_at: string | null;
+}
+
+export interface CallHistoryItem {
+  id: string;
+  persona: string;
+  user_id: string | null;
+  patient_id: string | null;
+  phone: string | null;
+  created_at: string | null;
+  last_active_at: string | null;
+  patient_name: string | null;
+  patient_nickname: string | null;
+  caller_name: string | null;
+  message_count: number;
+}
+
+export interface TranscriptMessage {
+  role: "user" | "assistant" | "tool" | "system";
+  content: string | null;
+  created_at: string | null;
+  tool_name: string | null;
+}
+
 export const api = {
   // Auth
   me: () => request<{ status: "ok"; user: AuthUser }>("/api/auth/me"),
@@ -551,6 +589,67 @@ export const api = {
       method: "POST",
       body: JSON.stringify({}),
     }),
+
+  // ─── Comunicações (Sofia VoIP outbound) ────
+  communicationsScenarios: () =>
+    request<{ status: "ok"; scenarios: CallScenario[] }>(
+      "/api/communications/scenarios",
+    ),
+  communicationsScenarioGet: (id: string) =>
+    request<{ status: "ok"; scenario: CallScenario }>(
+      `/api/communications/scenarios/${id}`,
+    ),
+  communicationsScenarioCreate: (body: Partial<CallScenario>) =>
+    request<{ status: "ok"; scenario: CallScenario }>(
+      "/api/communications/scenarios",
+      { method: "POST", body: JSON.stringify(body) },
+    ),
+  communicationsScenarioUpdate: (id: string, body: Partial<CallScenario>) =>
+    request<{ status: "ok"; scenario: CallScenario }>(
+      `/api/communications/scenarios/${id}`,
+      { method: "PATCH", body: JSON.stringify(body) },
+    ),
+  communicationsScenarioDelete: (id: string) =>
+    request<{ status: "ok" }>(
+      `/api/communications/scenarios/${id}`,
+      { method: "DELETE" },
+    ),
+  communicationsDial: (body: {
+    scenario_code?: string;
+    scenario_id?: string;
+    destination: string;
+    patient_id?: string;
+    user_id?: string;
+    full_name?: string;
+    extra_context?: Record<string, unknown>;
+  }) =>
+    request<{ status: "ok"; call_id: string; scenario_code?: string }>(
+      "/api/communications/dial",
+      { method: "POST", body: JSON.stringify(body) },
+    ),
+  communicationsHangup: (call_id: string) =>
+    request<{ status: "ok" }>("/api/communications/hangup", {
+      method: "POST",
+      body: JSON.stringify({ call_id }),
+    }),
+  communicationsActiveCalls: () =>
+    request<{ status: string; active_count: number; calls: string[] }>(
+      "/api/communications/active-calls",
+    ),
+  communicationsHistory: (params?: { patient_id?: string; user_id?: string; limit?: number }) => {
+    const qs = new URLSearchParams();
+    if (params?.patient_id) qs.set("patient_id", params.patient_id);
+    if (params?.user_id) qs.set("user_id", params.user_id);
+    if (params?.limit) qs.set("limit", String(params.limit));
+    const q = qs.toString();
+    return request<{ status: "ok"; count: number; history: CallHistoryItem[] }>(
+      `/api/communications/history${q ? `?${q}` : ""}`,
+    );
+  },
+  communicationsTranscript: (session_id: string) =>
+    request<{ status: "ok"; transcript: TranscriptMessage[] }>(
+      `/api/communications/history/${session_id}/transcript`,
+    ),
 
   // ─── Alertas clínicos (dose validator + cruzamentos) ────
   listClinicalAlerts: (params?: {

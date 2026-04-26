@@ -16,6 +16,7 @@ import {
   Users,
   KeyRound,
   Stethoscope,
+  Phone,
 } from "lucide-react";
 
 import { useAuth } from "@/context/auth-context";
@@ -48,6 +49,7 @@ const NAV_ITEMS: NavItem[] = [
   { href: "/patients", label: "Pacientes", icon: UsersRound, permissions: ["patients:read"] },
   { href: "/teleconsulta", label: "Teleconsulta", icon: Video, permissions: ["teleconsulta:read"] },
   { href: "/sofia", label: "Sofia Chat", icon: Sparkles },
+  { href: "/comunicacao", label: "Comunicação", icon: Phone },
   { href: "/equipe", label: "Equipe", icon: UserCog, permissions: ["caregivers:read"] },
   // Admin section
   {
@@ -68,6 +70,13 @@ const NAV_ITEMS: NavItem[] = [
     href: "/admin/regras-clinicas",
     label: "Regras Clínicas",
     icon: Stethoscope,
+    roles: ["super_admin", "admin_tenant"],
+    group: "admin",
+  },
+  {
+    href: "/admin/cenarios-sofia",
+    label: "Cenários Sofia",
+    icon: Phone,
     roles: ["super_admin", "admin_tenant"],
     group: "admin",
   },
