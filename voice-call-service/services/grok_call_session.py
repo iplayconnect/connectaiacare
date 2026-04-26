@@ -79,13 +79,23 @@ class GrokCallSession:
         instructions = build_persona_prompt(self.persona_ctx)
 
         url = f"{Config.GROK_REALTIME_URL}?model={Config.GROK_VOICE_MODEL}"
-        self._ws = await websockets.connect(
-            url,
-            additional_headers=[("Authorization", f"Bearer {Config.XAI_API_KEY}")],
-            max_size=None,
-            ping_interval=20,
-            ping_timeout=20,
+        # websockets 12.x: tenta additional_headers (novo) e cai pra
+        # extra_headers (legacy) se a versão instalada não aceitar.
+        connect_kwargs = dict(
+            max_size=None, ping_interval=20, ping_timeout=20,
         )
+        try:
+            self._ws = await websockets.connect(
+                url,
+                additional_headers=[("Authorization", f"Bearer {Config.XAI_API_KEY}")],
+                **connect_kwargs,
+            )
+        except TypeError:
+            self._ws = await websockets.connect(
+                url,
+                extra_headers=[("Authorization", f"Bearer {Config.XAI_API_KEY}")],
+                **connect_kwargs,
+            )
 
         # session.update — mesma config validada com browser
         first_name = (
