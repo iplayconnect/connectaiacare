@@ -103,7 +103,7 @@ def create_scenario():
             bool(body.get("active", True)),
         ),
     )
-    audit_log(action="rule.scenario.create", details={
+    audit_log(action="rule.scenario.create", payload={
         "id": str(row["id"]), "code": body["code"],
     })
     return jsonify({"status": "ok", "scenario": _serialize(row)}), 201
@@ -131,7 +131,7 @@ def update_scenario(sid: str):
     )
     if not row:
         return jsonify({"status": "error", "reason": "not_found"}), 404
-    audit_log(action="rule.scenario.update", details={
+    audit_log(action="rule.scenario.update", payload={
         "id": sid, "fields_changed": list(body.keys()),
     })
     return jsonify({"status": "ok", "scenario": _serialize(row)})
@@ -147,7 +147,7 @@ def delete_scenario(sid: str):
     )
     if not row:
         return jsonify({"status": "error", "reason": "not_found"}), 404
-    audit_log(action="rule.scenario.delete", details={"id": sid})
+    audit_log(action="rule.scenario.delete", payload={"id": sid})
     return jsonify({"status": "ok"})
 
 
@@ -252,7 +252,7 @@ def dial():
         }), 502
 
     out = resp.json() or {}
-    audit_log(action="communication.dial", details={
+    audit_log(action="communication.dial", payload={
         "scenario_code": scenario["code"],
         "destination": destination,
         "patient_id": body.get("patient_id"),
