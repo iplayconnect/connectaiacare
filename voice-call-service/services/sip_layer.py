@@ -212,9 +212,13 @@ def _make_my_call_class(pj):
     """Definido dentro de função pq pjsua2 importa lazy (só após
     initialize)."""
 
+    # PCM 8kHz mono 16-bit, 20ms frame = 160 samples * 2 bytes = 320 bytes.
+    # Pattern validado pelo voip-service que roda em produção.
+    PJSIP_FRAME_SIZE_BYTES = 320
+
     class _SocketToSipPort(pj.AudioMediaPort):
         """Frames que VÃO PRA SIP (Sofia → telefone do paciente).
-        Buffer pulado em chunks pelo audio_bridge externo via feed_audio_to_sip.
+        Buffer empurrado pelo audio_bridge via feed().
         """
         def __init__(self):
             super().__init__()
@@ -226,32 +230,47 @@ def _make_my_call_class(pj):
                 self._buf.extend(pcm16_8k)
 
         def onFrameRequested(self, frame):
-            # PJSIP pede um frame — devolve do buffer (ou silêncio)
-            # TODO_SMOKE: ajustar frame.size conforme PJSIP requisita
-            need = frame.size
-            with self._lock:
-                if len(self._buf) >= need:
-                    chunk = bytes(self._buf[:need])
-                    del self._buf[:need]
-                else:
-                    # silence
-                    chunk = b"\x00" * need
-            frame.buf = chunk
-            frame.type = pj.PJMEDIA_FRAME_TYPE_AUDIO
+            # PJMEDIA_FRAME_TYPE_AUDIO = 1
+            frame.type = 1
+            try:
+                with self._lock:
+                    if len(self._buf) >= PJSIP_FRAME_SIZE_BYTES:
+                        chunk = bytes(self._buf[:PJSIP_FRAME_SIZE_BYTES])
+                        del self._buf[:PJSIP_FRAME_SIZE_BYTES]
+                    else:
+                        chunk = b"\x00" * PJSIP_FRAME_SIZE_BYTES
+                # PJSIP swig binding exige ByteVector, não bytes raw
+                frame.buf = pj.ByteVector(chunk)
+            except Exception:
+                frame.buf = pj.ByteVector(b"\x00" * PJSIP_FRAME_SIZE_BYTES)
+
+        def onFrameReceived(self, frame):
+            pass
 
     class _SipToSocketPort(pj.AudioMediaPort):
-        """Frames que VÊM DO SIP (telefone do paciente → Sofia).
-        Cada frame chama o callback externo on_audio_in.
-        """
+        """Frames que VÊM DO SIP (telefone do paciente → Sofia)."""
         def __init__(self, on_audio_in):
             super().__init__()
             self._on_audio_in = on_audio_in
+            self._frame_count = 0
+
+        def onFrameRequested(self, frame):
+            # Direção reversa — devolve silêncio
+            frame.type = 1
+            frame.buf = pj.ByteVector(b"\x00" * PJSIP_FRAME_SIZE_BYTES)
 
         def onFrameReceived(self, frame):
             try:
-                pcm = bytes(frame.buf)
-                if pcm:
-                    self._on_audio_in(pcm)
+                # PJMEDIA_FRAME_TYPE_NONE = 0 (silêncio/CNG) → ignorar
+                if frame.type == 0:
+                    return
+                audio_data = bytes(frame.buf)
+                if not audio_data:
+                    return
+                self._frame_count += 1
+                if self._frame_count == 1:
+                    logger.info("first_audio_frame_received bytes=%d", len(audio_data))
+                self._on_audio_in(audio_data)
             except Exception as exc:
                 logger.warning("on_frame_received_error: %s", exc)
 
