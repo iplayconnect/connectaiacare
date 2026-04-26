@@ -90,7 +90,31 @@ class GrokCallSession:
             channel="voice_call",
         )
         self.session_id = str(session_row["id"])
-        instructions = build_persona_prompt(self.persona_ctx)
+        # Scenario override (do backend /api/communications/dial). Se houver
+        # scenario_system_prompt, usamos ELE como base + injetamos memória
+        # cross-session + contexto do paciente.
+        scenario_prompt = self.persona_ctx.get("scenario_system_prompt")
+        if scenario_prompt:
+            from services.persistence import _load_memory_block
+            instructions = scenario_prompt
+            mem = _load_memory_block(self.persona_ctx.get("user_id"))
+            if mem:
+                instructions += "\n\n" + mem
+            # Injeta contexto do paciente extra (vem do backend já carregado)
+            extra = self.persona_ctx.get("extra_context") or {}
+            patient = extra.get("patient")
+            if patient:
+                instructions += (
+                    "\n\n# CONTEXTO DO PACIENTE NA LIGAÇÃO\n"
+                    f"Nome: {patient.get('full_name')} "
+                    f"(apelido: {patient.get('nickname') or '—'})\n"
+                    f"Condições: {', '.join(patient.get('conditions') or []) or '—'}\n"
+                    f"Alergias: {', '.join(patient.get('allergies') or []) or '—'}\n"
+                    f"Unidade: {patient.get('care_unit') or '—'} "
+                    f"Quarto: {patient.get('room_number') or '—'}"
+                )
+        else:
+            instructions = build_persona_prompt(self.persona_ctx)
 
         url = f"{Config.GROK_REALTIME_URL}?model={Config.GROK_VOICE_MODEL}"
         # websockets 12.x: tenta additional_headers (novo) e cai pra
@@ -146,7 +170,10 @@ class GrokCallSession:
                     "silence_duration_ms": 700,  # +100ms vs browser pq lag SIP
                 },
                 "input_audio_transcription": {"model": "whisper-1"},
-                "tools": _build_tools_for_call(self.persona),
+                "tools": _build_tools_for_call(
+                    self.persona,
+                    allowed=self.persona_ctx.get("scenario_allowed_tools") or None,
+                ),
                 "tool_choice": "auto",
                 "temperature": 0.7,
             },
@@ -320,8 +347,14 @@ class GrokCallSession:
         await self._ws.send(json.dumps({"type": "response.create"}))
 
 
-def _build_tools_for_call(persona: str) -> list[dict]:
-    """Tools acessíveis durante a ligação. Inclui:
+def _build_tools_for_call(
+    persona: str,
+    allowed: list[str] | None = None,
+) -> list[dict]:
+    """Tools acessíveis durante a ligação. Filtra pelo `allowed` quando
+    o scenario impõe lista — caso contrário usa default por persona.
+
+    Inclui:
     - leitura: get_patient_summary, list_medication_schedules,
       get_patient_vitals, query_drug_rules, check_drug_interaction
     - escrita: create_care_event, schedule_teleconsulta
@@ -395,6 +428,10 @@ def _build_tools_for_call(persona: str) -> list[dict]:
     ]
 
     # Tools clínicas avançadas (motor de cruzamentos) — só pra profissionais
+    if persona in ("medico", "enfermeiro", "admin_tenant", "super_admin", "comercial"):
+        # Comercial NÃO pega motor clínico — só leitura básica de paciente.
+        # Os profissionais clínicos pegam tudo abaixo.
+        pass
     if persona in ("medico", "enfermeiro", "admin_tenant", "super_admin"):
         base.extend([
             {
@@ -442,4 +479,10 @@ def _build_tools_for_call(persona: str) -> list[dict]:
             },
         ])
 
+    # Filtro final: se scenario passou allowed, intersecciona
+    if allowed:
+        allowed_set = set(allowed)
+        base = [t for t in base if t["name"] in allowed_set]
+        # Tools no allowed que não temos definidas aqui são ignoradas
+        # silenciosamente (admin pode adicionar depois).
     return base

@@ -55,6 +55,12 @@ def dial():
         "full_name": body.get("full_name"),
         "tenant_id": body.get("tenant_id") or Config.DEFAULT_TENANT,
         "phone": destination,
+        # Scenario overrides (vem do /api/communications/dial do backend)
+        "scenario_code": body.get("scenario_code"),
+        "scenario_system_prompt": body.get("scenario_system_prompt"),
+        "scenario_voice": body.get("scenario_voice"),
+        "scenario_allowed_tools": body.get("scenario_allowed_tools") or [],
+        "extra_context": body.get("extra_context") or {},
     }
 
     sip = SipLayer.get()

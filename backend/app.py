@@ -5,6 +5,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 
 from config.settings import settings
 from src.handlers.alerts_routes import bp as alerts_bp
+from src.handlers.communications_routes import bp as communications_bp
 from src.handlers.auth_routes import (
     authenticate_request,
     bp as auth_bp,
@@ -74,6 +75,7 @@ def create_app() -> Flask:
     app.register_blueprint(voip_bp, url_prefix="/api")
     app.register_blueprint(caregivers_bp, url_prefix="/api")
     app.register_blueprint(alerts_bp, url_prefix="/api")
+    app.register_blueprint(communications_bp)
 
     # JWT middleware: protege /api/* exceto rotas públicas (auth, webhook,
     # portal do paciente com PIN, onboarding B2C).
