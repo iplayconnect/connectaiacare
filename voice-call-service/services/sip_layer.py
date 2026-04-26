@@ -81,6 +81,14 @@ class SipLayer:
                 ep.libStart()
                 self._endpoint = ep
 
+                # Container Docker não tem sound card → null device.
+                # Sem isso, makeCall() estoura PJMEDIA_EAUD_NODEFDEV.
+                # Áudio bidirecional vai 100% via AudioMediaPort custom.
+                try:
+                    ep.audDevManager().setNullDev()
+                except Exception as exc:
+                    logger.warning("set_null_dev_failed: %s", exc)
+
                 # Conta
                 acc_cfg = pj.AccountConfig()
                 acc_cfg.idUri = f"sip:{Config.SIP_USER}@{Config.SIP_DOMAIN}"
