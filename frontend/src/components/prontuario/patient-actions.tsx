@@ -2,6 +2,7 @@ import Link from "next/link";
 import { FileText, MessageSquare, Video } from "lucide-react";
 
 import type { CareEvent, Patient } from "@/mocks/patients";
+import { SofiaCallButton } from "./sofia-call-button";
 
 interface Props {
   patient: Patient;
@@ -42,6 +43,23 @@ export function PatientActions({ patient, care_events }: Props) {
           Agendar teleconsulta
         </Link>
       )}
+
+      {/* Ligar via Sofia (CTA contextual — pode ser usado pra avisar familiar
+          de evento, retorno com cuidador sobre relato, etc.) */}
+      {(() => {
+        // patient.responsible no mock é array; pega o primary OU primeiro
+        const primary =
+          patient.responsible.find((r) => r.is_primary) ||
+          patient.responsible[0];
+        return (
+          <SofiaCallButton
+            patientId={patient.id}
+            patientName={patient.nickname || patient.full_name}
+            responsibleName={primary?.name}
+            responsiblePhone={primary?.phone}
+          />
+        );
+      })()}
 
       {/* Ações secundárias */}
       <div className="grid grid-cols-2 gap-2">
