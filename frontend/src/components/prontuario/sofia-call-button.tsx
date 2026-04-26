@@ -102,11 +102,40 @@ function SofiaCallModal({
         full_name: calleeName.trim() || undefined,
       });
       setResult(`Discando · ${r.call_id}`);
-      setTimeout(onClose, 2500);
+      // Polling: confirma se a call estabilizou no _active_calls.
+      // Se sumir em <5s sem ter aparecido = trunk bloqueou ou rejeitou rapidinho.
+      const callId = r.call_id;
+      let appeared = false;
+      const startTs = Date.now();
+      const interval = setInterval(async () => {
+        const elapsed = Date.now() - startTs;
+        try {
+          const a = await api.communicationsActiveCalls();
+          const present = (a.calls || []).includes(callId);
+          if (present) appeared = true;
+          if (elapsed > 6000) {
+            clearInterval(interval);
+            setDialing(false);
+            if (!appeared) {
+              setError(
+                "Ligação caiu antes de tocar. Pode ser bloqueio do operador (verifique saldo/status do trunk SIP).",
+              );
+              setResult(null);
+            } else {
+              setResult("Ligação em curso");
+              setTimeout(onClose, 1500);
+            }
+          }
+        } catch {
+          // ignora erro de polling
+        }
+      }, 1200);
     } catch (e: any) {
       setError(e?.message || "Falha ao iniciar ligação");
-    } finally {
       setDialing(false);
+      return;
+    } finally {
+      // Mantém dialing=true até o polling resolver, pra desabilitar o botão
     }
   }
 
