@@ -80,13 +80,15 @@ const NAV_ITEMS: NavItem[] = [
     roles: ["super_admin", "admin_tenant"],
     group: "admin",
   },
-  {
-    href: "/admin/auditoria",
-    label: "Auditoria",
-    icon: ClipboardList,
-    permissions: ["audit:read"],
-    group: "admin",
-  },
+  // /admin/auditoria — desabilitado até página ser criada
+  // (prefetch do Next.js gerava 404 no console)
+  // {
+  //   href: "/admin/auditoria",
+  //   label: "Auditoria",
+  //   icon: ClipboardList,
+  //   permissions: ["audit:read"],
+  //   group: "admin",
+  // },
   // Settings (todos têm acesso ao próprio settings)
   { href: "/configuracoes", label: "Configurações", icon: Settings, group: "admin" },
 ];
