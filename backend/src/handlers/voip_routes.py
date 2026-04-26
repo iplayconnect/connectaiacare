@@ -200,3 +200,76 @@ def voip_health():
         "active_calls": data.get("active_calls", 0),
         "tenant_id": VOIP_TENANT_ID,
     }), 200
+
+
+# ══════════════════════════════════════════════════════════════════
+# voice-call-service — ligações via Sofia (Grok Realtime)
+# Container DEDICADO (não confundir com o voip-service legado acima
+# que usa Deepgram+ElevenLabs). Esse fluxo dá Sofia full: persona +
+# memory + tools.
+# ══════════════════════════════════════════════════════════════════
+
+VOICE_CALL_SERVICE_URL = os.getenv(
+    "VOICE_CALL_SERVICE_URL", "http://voice-call-service:5040"
+)
+
+
+@bp.post("/voice-call/dial")
+def voice_call_dial():
+    """Origina ligação Sofia↔paciente/familiar via Grok.
+
+    Body:
+        destination: "5551996161700" (E.164 sem +)
+        persona: medico|enfermeiro|cuidador_pro|familia|paciente_b2c
+        user_id: uuid (caller, pra carregar memória cross-session)
+        full_name: "Dr. Alexandre"
+        patient_id: uuid (opcional — paciente alvo da call)
+        tenant_id: opcional (default connectaiacare_demo)
+    """
+    body = request.get_json(silent=True) or {}
+    if not body.get("destination"):
+        return jsonify({"status": "error", "reason": "destination_required"}), 400
+    payload = {
+        "destination": body["destination"],
+        "persona": body.get("persona") or "medico",
+        "user_id": body.get("user_id"),
+        "full_name": body.get("full_name"),
+        "patient_id": body.get("patient_id"),
+        "tenant_id": body.get("tenant_id") or VOIP_TENANT_ID,
+    }
+    try:
+        resp = _client.post(
+            f"{VOICE_CALL_SERVICE_URL}/api/voice-call/dial",
+            json=payload, timeout=20.0,
+        )
+    except httpx.RequestError as exc:
+        logger.warning("voice_call_unreachable: %s", exc)
+        return jsonify({"status": "error", "reason": "voice_call_unreachable"}), 503
+    if resp.status_code >= 400:
+        return jsonify({"status": "error", "reason": f"upstream_{resp.status_code}",
+                        "detail": resp.text[:300]}), 502
+    return jsonify(resp.json()), 200
+
+
+@bp.post("/voice-call/hangup")
+def voice_call_hangup():
+    body = request.get_json(silent=True) or {}
+    if not body.get("call_id"):
+        return jsonify({"status": "error", "reason": "call_id_required"}), 400
+    try:
+        resp = _client.post(
+            f"{VOICE_CALL_SERVICE_URL}/api/voice-call/hangup",
+            json={"call_id": body["call_id"]}, timeout=10.0,
+        )
+    except httpx.RequestError:
+        return jsonify({"status": "error", "reason": "voice_call_unreachable"}), 503
+    return jsonify(resp.json()), resp.status_code
+
+
+@bp.get("/voice-call/health")
+def voice_call_health():
+    try:
+        resp = _client.get(f"{VOICE_CALL_SERVICE_URL}/health", timeout=3.0)
+        return jsonify(resp.json()), resp.status_code
+    except httpx.RequestError:
+        return jsonify({"available": False, "reason": "unreachable"}), 200

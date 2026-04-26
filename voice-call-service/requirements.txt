@@ -1,0 +1,23 @@
+# voice-call-service — deps Python
+# (PJSIP 2.14 entra via build nativo no Dockerfile, NÃO via pip)
+
+# Web/API
+flask==3.0.3
+
+# WebSocket cliente pro Grok Realtime
+websockets==12.0
+
+# HTTP cliente (proxy backend / persistence)
+httpx==0.27.2
+requests==2.32.3
+
+# DB direto (persistência em aia_health_sofia_messages, audit, memory)
+psycopg2-binary==2.9.9
+
+# Numpy só pra resample de áudio (audioop foi removido em 3.13;
+# 3.11 ainda tem, mas mantemos numpy como fallback robusto)
+numpy>=1.26.0
+
+# Utilitários
+python-dotenv==1.0.1
+structlog==24.4.0
