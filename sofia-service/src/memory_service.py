@@ -27,7 +27,14 @@ from src.llm_client import generate
 
 logger = logging.getLogger(__name__)
 
-MEMORY_MODEL = os.getenv("SOFIA_MEMORY_MODEL") or "gemini-3-flash-preview"
+# Default herda do modelo principal de chat (já testado/funcionando) pra
+# evitar trocar pra um preview que ainda não foi promovido. Override via
+# SOFIA_MEMORY_MODEL pra testar nano/Lite quando GA.
+MEMORY_MODEL = (
+    os.getenv("SOFIA_MEMORY_MODEL")
+    or os.getenv("SOFIA_LLM_MODEL")
+    or "gemini-2.5-flash"
+)
 
 # A cada N mensagens novas (user+assistant), re-summariza.
 RESUMMARY_THRESHOLD = int(os.getenv("SOFIA_MEMORY_THRESHOLD") or "20")
@@ -226,7 +233,7 @@ def update_user_memory(user_id: str, force: bool = False) -> dict | None:
             system_prompt=EXTRACT_PROMPT,
             messages=[{"role": "user", "content": user_prompt}],
             model=MEMORY_MODEL,
-            max_output_tokens=600,
+            max_output_tokens=1500,
             thinking_level="low",
         )
     except Exception as exc:
