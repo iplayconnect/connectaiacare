@@ -39,6 +39,18 @@ app = Flask(__name__)
 INTERNAL_KEY = os.getenv("SOFIA_INTERNAL_KEY", "")
 
 
+# ──── Collective Insights Scheduler ────
+# Roda extração diária de padrões anonimizados das interações Sofia↔
+# Profissional, gera knowledge_chunks com domain='collective_insight'.
+# Lock advisory garante single-writer entre workers Gunicorn.
+if os.getenv("ENABLE_COLLECTIVE_MEMORY", "true").lower() == "true":
+    try:
+        from src.collective_insights_scheduler import get_scheduler
+        get_scheduler().start()
+    except Exception as _exc:
+        logger.warning("collective_insights_scheduler_failed_to_start: %s", _exc)
+
+
 def _check_internal_auth() -> tuple | None:
     """Valida X-Internal-Key se configurado. Retorna (response, status) se falhar."""
     if not INTERNAL_KEY:
@@ -203,6 +215,51 @@ def tts():
         "durationSeconds": out["duration_seconds"],
         "model": out["model"],
         "voice": out["voice"],
+    })
+
+
+@app.post("/sofia/collective/trigger")
+def collective_trigger():
+    """Roda 1 ciclo de extração de insights coletivos sob demanda.
+    Protegido por X-Internal-Key. Útil pra forçar fora do cron diário."""
+    auth_err = _check_internal_auth()
+    if auth_err:
+        return auth_err
+    from src import collective_memory_service
+    try:
+        stats = collective_memory_service.run_one_cycle()
+    except Exception as exc:
+        logger.exception("collective_trigger_failed")
+        return jsonify({"status": "error", "reason": str(exc)}), 500
+    return jsonify({"status": "ok", "stats": stats})
+
+
+@app.get("/sofia/collective/status")
+def collective_status():
+    """Retorna métricas do último ciclo + contagens atuais."""
+    auth_err = _check_internal_auth()
+    if auth_err:
+        return auth_err
+    cursor = persistence.fetch_one(
+        "SELECT * FROM aia_health_sofia_collective_cursor WHERE id = 1"
+    )
+    raw_stats = persistence.fetch_one(
+        """SELECT COUNT(*) AS total,
+                  COUNT(*) FILTER (WHERE promoted) AS promoted,
+                  COUNT(*) FILTER (WHERE NOT promoted AND frequency >= 3) AS pending_promote,
+                  AVG(frequency)::float AS avg_freq,
+                  MAX(frequency) AS max_freq
+           FROM aia_health_sofia_collective_insights_raw"""
+    )
+    chunks_published = persistence.fetch_one(
+        """SELECT COUNT(*) AS n FROM aia_health_knowledge_chunks
+           WHERE domain = 'collective_insight' AND active = TRUE"""
+    )
+    return jsonify({
+        "status": "ok",
+        "cursor": cursor,
+        "raw_insights": raw_stats,
+        "chunks_published": (chunks_published or {}).get("n") or 0,
     })
 
 
