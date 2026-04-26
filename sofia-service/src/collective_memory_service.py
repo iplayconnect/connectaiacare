@@ -249,7 +249,7 @@ def upsert_insight(
         )
         return existing["id"]
 
-    row = persistence.fetch_one(
+    row = persistence.insert_returning(
         """INSERT INTO aia_health_sofia_collective_insights_raw
             (insight_type, title, summary, detail, keywords,
              therapeutic_classes, conditions,
@@ -310,7 +310,7 @@ def promote_above_threshold() -> int:
             content_parts.append("\n\n" + "\n".join(meta_lines))
         content = "\n".join(content_parts)
 
-        chunk_row = persistence.fetch_one(
+        chunk_row = persistence.insert_returning(
             """INSERT INTO aia_health_knowledge_chunks
                 (tenant_id, domain, subdomain, title, content, summary,
                  keywords, priority, confidence, source, source_type)
