@@ -175,6 +175,15 @@ class SipLayer:
         if ctx and ctx.pj_call:
             ctx.pj_call.feed_audio_to_sip(pcm16_8k)
 
+    def drain_outbound_audio(self, call_id: str) -> int:
+        """Esvazia o buffer de áudio Sofia→SIP. Usado quando o usuário
+        interrompe a fala da Sofia — mata o áudio em curso na hora.
+        Retorna bytes drenados (telemetria)."""
+        ctx = self._calls.get(call_id)
+        if ctx and ctx.pj_call:
+            return ctx.pj_call.drain_outbound_buffer()
+        return 0
+
     def hangup(self, call_id: str) -> bool:
         ctx = self._calls.pop(call_id, None)
         if not ctx:
@@ -228,6 +237,13 @@ def _make_my_call_class(pj):
         def feed(self, pcm16_8k: bytes):
             with self._lock:
                 self._buf.extend(pcm16_8k)
+
+        def drain(self) -> int:
+            """Esvazia buffer (interrupção). Retorna bytes descartados."""
+            with self._lock:
+                n = len(self._buf)
+                self._buf.clear()
+                return n
 
         def onFrameRequested(self, frame):
             # PJMEDIA_FRAME_TYPE_AUDIO = 1
@@ -286,6 +302,11 @@ def _make_my_call_class(pj):
         def feed_audio_to_sip(self, pcm16_8k: bytes):
             if self._sock_to_sip:
                 self._sock_to_sip.feed(pcm16_8k)
+
+        def drain_outbound_buffer(self) -> int:
+            if self._sock_to_sip:
+                return self._sock_to_sip.drain()
+            return 0
 
         def onCallState(self, prm):
             try:

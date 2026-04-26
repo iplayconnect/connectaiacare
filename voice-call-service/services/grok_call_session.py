@@ -59,13 +59,16 @@ class GrokCallSession:
         *,
         persona_ctx: dict,
         on_audio_chunk_24k: AudioOutCallback,
+        on_user_interrupt: Callable[[], None] | None = None,
         on_call_metric: Callable[[dict], None] | None = None,
     ):
         self.persona_ctx = persona_ctx
         self.persona = persona_ctx.get("persona") or "anonymous"
         self.tenant_id = persona_ctx.get("tenant_id") or Config.DEFAULT_TENANT
         self.on_audio_chunk_24k = on_audio_chunk_24k
+        self.on_user_interrupt = on_user_interrupt or (lambda: None)
         self.on_call_metric = on_call_metric or (lambda _: None)
+        self._sofia_speaking = False  # True quando estamos enviando audio da Sofia
 
         self.session_id: str | None = None
         self._ws: websockets.WebSocketClientProtocol | None = None
@@ -282,16 +285,51 @@ class GrokCallSession:
         if etype == "error":
             logger.error("grok_error_full: %s", msg)
 
+        # ── INTERRUPÇÃO: usuário começou a falar enquanto Sofia falava ──
+        # Server-side VAD detectou voz no input. Sofia DEVE parar agora.
+        # Sequência:
+        #   1. Drenar buffer SIP outbound (mata áudio em curso no telefone)
+        #   2. Cancelar response.create na Grok (para gerar mais)
+        # Sem isso, paciente fica falando por cima da Sofia que continua
+        # rodando audio bufferizado.
+        if etype == "input_audio_buffer.speech_started":
+            if self._sofia_speaking:
+                logger.info(
+                    "user_interrupted session_id=%s — draining + cancelling",
+                    self.session_id,
+                )
+                # Drain SIP buffer (cross-thread: sync call ok)
+                try:
+                    self.on_user_interrupt()
+                except Exception as exc:
+                    logger.warning("on_user_interrupt_failed: %s", exc)
+                # Cancela geração da Grok
+                try:
+                    if self._ws:
+                        await self._ws.send(json.dumps({"type": "response.cancel"}))
+                except Exception as exc:
+                    logger.warning("response_cancel_failed: %s", exc)
+                self._sofia_speaking = False
+            return
+
         # Áudio out (chegou da Grok) — manda pro callback (camada SIP injeta)
         if etype in ("response.output_audio.delta", "response.audio.delta"):
             delta_b64 = msg.get("delta")
             if delta_b64:
+                self._sofia_speaking = True  # Sofia está produzindo áudio
                 try:
                     pcm = base64.b64decode(delta_b64)
                     await self.on_audio_chunk_24k(pcm)
                 except Exception as exc:
                     logger.warning("audio_callback_failed: %s", exc)
             return
+
+        # Sofia terminou normalmente o turn dela
+        if etype in ("response.output_audio.done", "response.audio.done",
+                     "response.done"):
+            self._sofia_speaking = False
+            # Não retornamos aqui — outros handlers podem precisar do evento
+            # (ex: response.done usado em outro lugar)
 
         # Transcript Sofia (output)
         if etype in (

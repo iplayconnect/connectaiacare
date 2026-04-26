@@ -86,9 +86,22 @@ def dial():
         pcm_8k = downsample_24k_to_8k(pcm16_24k)
         sip.push_audio_8k(bridge_state["sip_call_id"], pcm_8k)
 
+    def _on_user_interrupt():
+        """Usuário começou a falar — dropa qualquer áudio bufferizado da
+        Sofia pra ela calar a boca IMEDIATAMENTE no telefone."""
+        if not bridge_state["sip_call_id"]:
+            return
+        n = sip.drain_outbound_audio(bridge_state["sip_call_id"])
+        if n:
+            logger.info(
+                "interrupt_drained call_id=%s bytes=%d",
+                bridge_state["sip_call_id"], n,
+            )
+
     grok = GrokCallSession(
         persona_ctx=persona_ctx,
         on_audio_chunk_24k=_on_audio_out_from_grok,
+        on_user_interrupt=_on_user_interrupt,
     )
     bridge_state["grok"] = grok
 
