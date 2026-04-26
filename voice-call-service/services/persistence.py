@@ -193,44 +193,89 @@ def _load_memory_block(user_id: str | None) -> str:
 
 
 def update_user_memory_force(user_id: str | None) -> None:
-    """No fim da ligação chama o sofia-service via HTTP pra força update.
-    Mantém a lógica de extração centralizada lá."""
+    """No fim da ligação dispara extração de memória user no sofia-service.
+    Chamada não-bloqueante: se falhar, próxima sessão da Sofia faz."""
     if not user_id:
         return
     try:
         import httpx
-        url = f"{Config.SOFIA_SERVICE_URL}/sofia/collective/trigger"
-        # Nota: na fase 1 isso é noop se sofia-service não tiver endpoint
-        # específico de memória user. Replicar update_user_memory aqui
-        # exigiria copiar o llm_client+prompt — adiamos pra fase 2.
-        # Por enquanto, a extração ocorre na próxima vez que o usuário
-        # interagir via chat/voz — base_agent.run() chama maybe_update_async.
-        return
-    except Exception:
-        return
+        url = f"{Config.SOFIA_SERVICE_URL}/sofia/memory/update"
+        r = httpx.post(url, json={"user_id": user_id}, timeout=20.0)
+        if r.status_code == 200:
+            data = r.json()
+            logger.info(
+                "memory_writeback_done user_id=%s updated=%s summary_chars=%d facts=%s",
+                user_id,
+                data.get("updated"),
+                data.get("summary_chars") or 0,
+                data.get("facts_keys") or [],
+            )
+        else:
+            logger.warning(
+                "memory_writeback_http_%d body=%s",
+                r.status_code, r.text[:200],
+            )
+    except Exception as exc:
+        logger.warning("memory_writeback_failed user_id=%s: %s", user_id, exc)
 
 
 # ─── Tools (replica enxuta do execute_tool sofia-service) ───
 
-_VOICE_TOOLS = {
+# Tools com handler local (DB direto)
+_LOCAL_TOOLS = {
     "get_patient_summary": "_tool_get_patient_summary",
     "create_care_event": "_tool_create_care_event",
     "schedule_teleconsulta": "_tool_schedule_teleconsulta",
+    "list_medication_schedules": "_tool_list_medication_schedules",
+    "get_patient_vitals": "_tool_get_patient_vitals",
+}
+
+# Tools que delegamos via HTTP pro sofia-service (motor de cruzamentos
+# pesado — evita duplicar ~700 linhas de lógica)
+_REMOTE_TOOLS = {
+    "query_drug_rules",
+    "check_drug_interaction",
+    "list_beers_avoid_in_condition",
+    "check_medication_safety",
+    "query_clinical_guidelines",
 }
 
 
 def execute_voice_tool(name: str, args: dict, persona_ctx: dict) -> dict:
-    """Tools essenciais pra ligação (3 nessa fase). Replica execute_tool
-    do sofia-service mas com escopo reduzido — evita import cross-container."""
-    if name not in _VOICE_TOOLS:
-        return {"ok": False, "error": f"tool_not_available_in_voice:{name}"}
-    handler = globals().get(_VOICE_TOOLS[name])
-    if not handler:
-        return {"ok": False, "error": "handler_missing"}
+    """Roteia tool: handler local ou HTTP pro sofia-service."""
+    if name in _LOCAL_TOOLS:
+        handler = globals().get(_LOCAL_TOOLS[name])
+        if not handler:
+            return {"ok": False, "error": "handler_missing"}
+        try:
+            return handler(persona_ctx=persona_ctx, **args)
+        except Exception as exc:
+            logger.exception("voice_tool_local_failed name=%s", name)
+            return {"ok": False, "error": str(exc)}
+
+    if name in _REMOTE_TOOLS:
+        return _execute_remote_tool(name, args, persona_ctx)
+
+    return {"ok": False, "error": f"tool_not_available_in_voice:{name}"}
+
+
+def _execute_remote_tool(name: str, args: dict, persona_ctx: dict) -> dict:
+    """HTTP POST pro sofia-service /sofia/tool/execute. Evita duplicar
+    código pesado (dose_validator, queries do motor)."""
     try:
-        return handler(persona_ctx=persona_ctx, **args)
+        import httpx
+        url = f"{Config.SOFIA_SERVICE_URL}/sofia/tool/execute"
+        payload = {"name": name, "args": args, "persona": persona_ctx}
+        r = httpx.post(url, json=payload, timeout=10.0)
+        if r.status_code != 200:
+            return {
+                "ok": False, "error": f"sofia_tool_http_{r.status_code}",
+                "body": r.text[:300],
+            }
+        data = r.json()
+        return data.get("output") or data
     except Exception as exc:
-        logger.exception("voice_tool_failed name=%s", name)
+        logger.exception("voice_tool_remote_failed name=%s", name)
         return {"ok": False, "error": str(exc)}
 
 
@@ -283,6 +328,59 @@ def _tool_create_care_event(
          patient_id, summary, classification),
     )
     return {"ok": True, "care_event_id": str(row["id"])}
+
+
+def _tool_list_medication_schedules(
+    *, persona_ctx: dict, patient_id: str | None = None, **_: Any,
+) -> dict:
+    pid = patient_id or persona_ctx.get("patient_id")
+    if not pid:
+        return {"ok": False, "error": "no_patient"}
+    rows = _fetch_one  # placeholder, vamos usar fetch_all
+    with _cursor(commit=False) as cur:
+        cur.execute(
+            """SELECT medication_name, dose, dose_form, route,
+                      schedule_type, times_of_day, with_food,
+                      special_instructions, warnings
+               FROM aia_health_medication_schedules
+               WHERE patient_id = %s AND active = TRUE
+               ORDER BY medication_name""",
+            (pid,),
+        )
+        meds = [dict(r) for r in cur.fetchall()]
+    # Sanitize times_of_day (pg time array → strings)
+    for m in meds:
+        tods = m.get("times_of_day") or []
+        m["times_of_day"] = [
+            t.strftime("%H:%M") if hasattr(t, "strftime") else str(t)
+            for t in tods
+        ]
+    return {"ok": True, "patient_id": str(pid), "count": len(meds), "medications": meds}
+
+
+def _tool_get_patient_vitals(
+    *, persona_ctx: dict, patient_id: str | None = None, days: int = 7, **_: Any,
+) -> dict:
+    pid = patient_id or persona_ctx.get("patient_id")
+    if not pid:
+        return {"ok": False, "error": "no_patient"}
+    days = max(1, min(int(days or 7), 90))
+    with _cursor(commit=False) as cur:
+        cur.execute(
+            """SELECT measured_at, bp_systolic, bp_diastolic, heart_rate,
+                      respiratory_rate, oxygen_saturation, temperature_c,
+                      blood_glucose, notes
+               FROM aia_health_vital_measurements
+               WHERE patient_id = %s
+                 AND measured_at > NOW() - INTERVAL '%s days'
+               ORDER BY measured_at DESC LIMIT 30""",
+            (pid, days),
+        )
+        rows = [dict(r) for r in cur.fetchall()]
+    for r in rows:
+        if r.get("measured_at"):
+            r["measured_at"] = r["measured_at"].isoformat()
+    return {"ok": True, "patient_id": str(pid), "days": days, "count": len(rows), "vitals": rows}
 
 
 def _tool_schedule_teleconsulta(

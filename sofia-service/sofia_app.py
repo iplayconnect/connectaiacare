@@ -263,6 +263,44 @@ def collective_status():
     })
 
 
+@app.post("/sofia/tool/execute")
+def sofia_tool_execute():
+    """Executa uma tool do registry. Usado pelo voice-call-service pra
+    delegar tools clínicas pesadas (motor de cruzamentos) sem duplicar
+    código. Persona vem no body (não usa JWT — chamada interna)."""
+    body = request.get_json(silent=True) or {}
+    name = body.get("name") or ""
+    args = body.get("args") or {}
+    persona_ctx = body.get("persona") or {}
+    if not name:
+        return jsonify({"status": "error", "reason": "name_required"}), 400
+    from src import tools as tools_module
+    output = tools_module.execute_tool(name, args, persona_ctx)
+    return jsonify({"status": "ok", "output": output})
+
+
+@app.post("/sofia/memory/update")
+def sofia_memory_update():
+    """Força extração de memória cross-session pra um user_id.
+    Chamado pelo voice-call-service no fim da chamada."""
+    body = request.get_json(silent=True) or {}
+    user_id = body.get("user_id")
+    if not user_id:
+        return jsonify({"status": "error", "reason": "user_id_required"}), 400
+    from src import memory_service
+    try:
+        result = memory_service.update_user_memory(user_id, force=True)
+    except Exception as exc:
+        logger.exception("memory_update_failed")
+        return jsonify({"status": "error", "reason": str(exc)}), 500
+    return jsonify({
+        "status": "ok",
+        "updated": bool(result),
+        "summary_chars": len((result or {}).get("summary") or ""),
+        "facts_keys": list(((result or {}).get("key_facts") or {}).keys()),
+    })
+
+
 @app.errorhandler(404)
 def not_found(_):
     return jsonify({"status": "error", "reason": "not_found"}), 404

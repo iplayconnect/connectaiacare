@@ -1,14 +1,5 @@
 """GrokCallSession — variante do GrokVoiceSession (sofia-service) adaptada
-pra fonte de áudio SIP (já em PCM linear, taxa nativa Grok 24k).
-
-Reusa o protocolo OpenAI Realtime que já validamos com sofia-service.
-Diferenças do irmão browser:
-  - Áudio in/out já chega em 24k (audio_bridge converte 8k↔24k antes/depois)
-  - Saída vai pra `on_audio_chunk` callback, não pra browser ws
-  - System prompt + memória vem do PG (mesmas tabelas que sofia-service usa)
-  - Tools chamadas via DB direto (replica execute_tool minimal aqui pra
-    evitar acoplamento HTTP — primeira fase só com 3 tools essenciais)
-"""
+pra fonte de áudio SIP (já em PCM linear, taxa nativa Grok 24k)."""
 from __future__ import annotations
 
 import asyncio
@@ -17,13 +8,36 @@ import json
 import logging
 import os
 import uuid
+from datetime import datetime
 from typing import Any, Awaitable, Callable
+from zoneinfo import ZoneInfo
 
 import websockets
 
 from config import Config
 
 logger = logging.getLogger("grok_call_session")
+
+BR_TZ = ZoneInfo("America/Sao_Paulo")
+
+
+def _time_period_pt() -> tuple[str, str, str]:
+    """Retorna (saudacao, despedida, hora_str_BRT) baseado no horário BRT."""
+    now = datetime.now(BR_TZ)
+    h = now.hour
+    if 5 <= h < 12:
+        greet = "Bom dia"
+        farewell = "Tenha um excelente dia"
+    elif 12 <= h < 18:
+        greet = "Boa tarde"
+        farewell = "Tenha uma ótima tarde"
+    elif 18 <= h < 24:
+        greet = "Boa noite"
+        farewell = "Tenha uma boa noite"
+    else:  # 0 <= h < 5
+        greet = "Olá"  # madrugada — não soa natural saudação de período
+        farewell = "Tenha uma boa madrugada e descanse"
+    return greet, farewell, now.strftime("%H:%M")
 
 
 def _b64(data: bytes) -> str:
@@ -101,11 +115,20 @@ class GrokCallSession:
         first_name = (
             self.persona_ctx.get("full_name") or "amigo(a)"
         ).split(" ")[0]
+        greet, farewell, hora_brt = _time_period_pt()
         instructions += (
-            f"\n\n# CONTEXTO IMEDIATO\nVocê está em uma LIGAÇÃO TELEFÔNICA "
-            f"ao vivo com {first_name}. Áudio é do telefone — mantenha "
-            "frases CURTAS, tom natural, paciência pra silêncios. Não fale "
-            "'olá' duas vezes."
+            f"\n\n# CONTEXTO IMEDIATO\n"
+            f"Você está em uma LIGAÇÃO TELEFÔNICA ao vivo com {first_name}.\n"
+            f"Horário atual no Brasil: {hora_brt} (BRT).\n"
+            f"Cumprimento adequado: '{greet}'.\n"
+            f"Despedida adequada: '{farewell}'.\n\n"
+            "REGRAS DA LIGAÇÃO:\n"
+            "- Áudio vai por telefone — frases CURTAS, tom natural, "
+            "paciência pra silêncios.\n"
+            "- Não fale 'olá' duas vezes.\n"
+            f"- Use '{greet}' no início e '{farewell}' ao se despedir.\n"
+            "- Quando o usuário disser 'tchau', 'até mais', 'pode desligar' "
+            "ou similar, despeça-se brevemente e a ligação será encerrada."
         )
 
         await self._ws.send(json.dumps({
@@ -134,8 +157,9 @@ class GrokCallSession:
         # via .start_kickoff() quando state == CONFIRMED (paciente atendeu).
         self._kickoff_text = (
             f"[INÍCIO DA LIGAÇÃO TELEFÔNICA] Cumprimente {first_name} pelo "
-            "primeiro nome com tom caloroso e curto (1 frase). Diga que é a "
-            "Sofia da ConnectaIACare. Em seguida pergunte como pode ajudar."
+            f"primeiro nome com '{greet}' e tom caloroso (1 frase curta). "
+            "Diga que é a Sofia da ConnectaIACare. Em seguida pergunte como "
+            "pode ajudar."
         )
         self._kickoff_sent = False
         logger.info(
@@ -297,13 +321,21 @@ class GrokCallSession:
 
 
 def _build_tools_for_call(persona: str) -> list[dict]:
-    """Tools mais essenciais pra ligação. Mantemos enxuto pra reduzir
-    latência. Lista cresce conforme casos reais aparecerem."""
-    return [
+    """Tools acessíveis durante a ligação. Inclui:
+    - leitura: get_patient_summary, list_medication_schedules,
+      get_patient_vitals, query_drug_rules, check_drug_interaction
+    - escrita: create_care_event, schedule_teleconsulta
+    - cruzamento: check_medication_safety (validação determinística antes
+      do médico falar a prescrição)
+
+    Filtramos por persona — paciente_b2c/familia não vê tools clínicas
+    de cruzamento, só leitura básica.
+    """
+    base = [
         {
             "type": "function",
             "name": "get_patient_summary",
-            "description": "Resumo do paciente (condições, meds, alertas) por id.",
+            "description": "Resumo do paciente (condições, meds, alergias, último relato, vitais recentes). Use ao iniciar a ligação se patient_id estiver no contexto.",
             "parameters": {
                 "type": "object",
                 "properties": {"patient_id": {"type": "string"}},
@@ -311,13 +343,34 @@ def _build_tools_for_call(persona: str) -> list[dict]:
         },
         {
             "type": "function",
-            "name": "create_care_event",
-            "description": "Registra um relato/evento clínico mencionado na ligação.",
+            "name": "list_medication_schedules",
+            "description": "Lista medicações ativas do paciente (nome, dose, horários, with_food, warnings). Use quando alguém perguntar 'que remédios ele toma?'.",
+            "parameters": {
+                "type": "object",
+                "properties": {"patient_id": {"type": "string"}},
+            },
+        },
+        {
+            "type": "function",
+            "name": "get_patient_vitals",
+            "description": "Sinais vitais (PA, FC, FR, SatO2, temperatura, glicemia) dos últimos N dias.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "patient_id": {"type": "string"},
-                    "summary": {"type": "string"},
+                    "days": {"type": "integer", "description": "Padrão 7"},
+                },
+            },
+        },
+        {
+            "type": "function",
+            "name": "create_care_event",
+            "description": "Registra um relato/evento clínico mencionado na ligação. Use quando o cuidador/familiar relatar uma queixa, queda, mudança de comportamento.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "patient_id": {"type": "string"},
+                    "summary": {"type": "string", "description": "Resumo factual do que foi reportado"},
                     "classification": {
                         "type": "string",
                         "enum": ["routine", "attention", "urgent", "critical"],
@@ -329,14 +382,64 @@ def _build_tools_for_call(persona: str) -> list[dict]:
         {
             "type": "function",
             "name": "schedule_teleconsulta",
-            "description": "Agenda solicitação de teleconsulta a partir da ligação.",
+            "description": "Cria solicitação de teleconsulta. Use quando combinarem agendamento durante a ligação.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "patient_id": {"type": "string"},
-                    "requested_for": {"type": "string"},
+                    "requested_for": {"type": "string", "description": "Data/hora ISO 8601 desejada"},
                 },
                 "required": ["patient_id", "requested_for"],
             },
         },
     ]
+
+    # Tools clínicas avançadas (motor de cruzamentos) — só pra profissionais
+    if persona in ("medico", "enfermeiro", "admin_tenant", "super_admin"):
+        base.extend([
+            {
+                "type": "function",
+                "name": "query_drug_rules",
+                "description": "Devolve TODAS as regras carregadas para um princípio ativo: dose, interações, contraindicações, ajustes renal/hepático, ACB, fall risk, alergias. Use pra 'me conta tudo sobre X' ou 'quais regras temos pra Y'.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"medication_name": {"type": "string"}},
+                    "required": ["medication_name"],
+                },
+            },
+            {
+                "type": "function",
+                "name": "check_drug_interaction",
+                "description": "Valida par de medicamentos: severity, mecanismo, recomendação, time_separation. Use pra 'posso usar X com Y?'.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "med_a": {"type": "string"},
+                        "med_b": {"type": "string"},
+                    },
+                    "required": ["med_a", "med_b"],
+                },
+            },
+            {
+                "type": "function",
+                "name": "check_medication_safety",
+                "description": "Roda o motor de cruzamentos (12 dimensões: dose, Beers, alergias, interações, contraindicações, ACB, fall risk, renal, hepático, vitais) em uma prescrição candidata SEM persistir. Use ANTES de o médico confirmar uma nova prescrição na ligação.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "medication_name": {"type": "string"},
+                        "dose": {"type": "string"},
+                        "patient_id": {"type": "string"},
+                        "times_of_day": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Horários HH:MM, ex: ['08:00','20:00']",
+                        },
+                        "route": {"type": "string"},
+                    },
+                    "required": ["medication_name", "dose"],
+                },
+            },
+        ])
+
+    return base
