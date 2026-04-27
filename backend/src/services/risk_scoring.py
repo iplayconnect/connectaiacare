@@ -72,16 +72,16 @@ def compute_for_patient(patient_id: str, tenant_id: str | None = None) -> dict:
             return {"ok": False, "error": "patient_not_found"}
         tenant_id = prow["tenant_id"]
 
-    # Sinal 1: queixas (care_events) últimos 7d (qualquer severity)
+    # Sinal 1: queixas (care_events) últimos 7d (qualquer classification)
     s1 = db.fetch_one(
         """SELECT COUNT(*) AS n FROM aia_health_care_events
-           WHERE patient_id = %s AND created_at > NOW() - INTERVAL '7 days'""",
+           WHERE patient_id = %s AND opened_at > NOW() - INTERVAL '7 days'""",
         (patient_id,),
     )
     complaints_7d = int((s1 or {}).get("n") or 0)
     complaints_score = _bucket(complaints_7d, COMPLAINTS_THRESHOLDS)
 
-    # Sinal 2: adesão medicação 7d (% confirmados / planejados)
+    # Sinal 2: adesão medicação 7d (status confirmed = tomou)
     s2 = db.fetch_one(
         """SELECT
             COUNT(*) FILTER (WHERE status = 'confirmed') AS confirmed,
@@ -94,15 +94,15 @@ def compute_for_patient(patient_id: str, tenant_id: str | None = None) -> dict:
     )
     confirmed = int((s2 or {}).get("confirmed") or 0)
     total = int((s2 or {}).get("total") or 0)
-    adherence_pct = (confirmed / total * 100) if total > 0 else 100  # sem dados = assume ok
+    adherence_pct = (confirmed / total * 100) if total > 0 else 100
     adherence_score = _bucket_inverse(adherence_pct, ADHERENCE_THRESHOLDS) if total >= 5 else 0
 
-    # Sinal 3: care_events urgent/critical últimos 7d
+    # Sinal 3: care_events urgent/critical últimos 7d (current_classification)
     s3 = db.fetch_one(
         """SELECT COUNT(*) AS n FROM aia_health_care_events
            WHERE patient_id = %s
-             AND classification IN ('urgent', 'critical')
-             AND created_at > NOW() - INTERVAL '7 days'""",
+             AND current_classification IN ('urgent', 'critical')
+             AND opened_at > NOW() - INTERVAL '7 days'""",
         (patient_id,),
     )
     urgent_7d = int((s3 or {}).get("n") or 0)
