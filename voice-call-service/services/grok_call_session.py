@@ -161,6 +161,17 @@ class GrokCallSession:
             "ou similar, despeça-se brevemente e a ligação será encerrada."
         )
 
+        # VAD tuning pra telefone (vs browser):
+        # - threshold 0.3 (vs 0.5 browser): voz idoso ao telefone tem
+        #   energia atenuada (codec PCMU 8kHz + ruído ambiente). Threshold
+        #   alto perde fala baixa, especialmente em interrupção.
+        # - silence_duration_ms 500: resposta mais rápida, conversa fluida.
+        #   Antes 700ms gerava percepção de "Sofia lenta pra responder".
+        # Configuráveis via env pra ajuste fino sem rebuild.
+        vad_threshold = float(os.getenv("GROK_VAD_THRESHOLD", "0.3"))
+        vad_prefix_ms = int(os.getenv("GROK_VAD_PREFIX_PADDING_MS", "300"))
+        vad_silence_ms = int(os.getenv("GROK_VAD_SILENCE_DURATION_MS", "500"))
+
         await self._ws.send(json.dumps({
             "type": "session.update",
             "session": {
@@ -171,9 +182,9 @@ class GrokCallSession:
                 "output_audio_format": "pcm16",
                 "turn_detection": {
                     "type": "server_vad",
-                    "threshold": 0.5,
-                    "prefix_padding_ms": 300,
-                    "silence_duration_ms": 700,  # +100ms vs browser pq lag SIP
+                    "threshold": vad_threshold,
+                    "prefix_padding_ms": vad_prefix_ms,
+                    "silence_duration_ms": vad_silence_ms,
                 },
                 "input_audio_transcription": {"model": "whisper-1"},
                 "tools": _build_tools_for_call(
