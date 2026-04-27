@@ -137,6 +137,59 @@ def circuit_reset():
 
 # ──────────── Stats / Health ────────────
 
+# ──────────── Patient Risk Scoring ────────────
+
+@bp.get("/api/safety/risk-score/<patient_id>")
+@require_role("super_admin", "admin_tenant", "medico", "enfermeiro", "cuidador_pro", "familia")
+def get_risk_score(patient_id: str):
+    row = get_postgres().fetch_one(
+        "SELECT * FROM aia_health_patient_risk_score WHERE patient_id = %s",
+        (patient_id,),
+    )
+    if not row:
+        return jsonify({"status": "ok", "score": None, "message": "not_computed_yet"})
+    out = dict(row)
+    for k, v in list(out.items()):
+        if hasattr(v, "isoformat"):
+            out[k] = v.isoformat()
+    return jsonify({"status": "ok", **out})
+
+
+@bp.post("/api/safety/risk-score/<patient_id>/compute")
+@require_role("super_admin", "admin_tenant", "medico", "enfermeiro")
+def compute_risk_score(patient_id: str):
+    from src.services import risk_scoring
+    result = risk_scoring.compute_for_patient(patient_id)
+    return jsonify({"status": "ok", **result})
+
+
+@bp.get("/api/safety/risk-score/high")
+@require_role("super_admin", "admin_tenant", "medico", "enfermeiro")
+def list_high_risk():
+    user_ctx = getattr(g, "user", None) or {}
+    tenant_id = user_ctx.get("tenant_id") or "connectaiacare_demo"
+    from src.services import risk_scoring
+    items = risk_scoring.list_high_risk(tenant_id, limit=int(request.args.get("limit", 20)))
+    out = []
+    for r in items:
+        d = dict(r)
+        for k, v in list(d.items()):
+            if hasattr(v, "isoformat"):
+                d[k] = v.isoformat()
+        out.append(d)
+    return jsonify({"status": "ok", "count": len(out), "items": out})
+
+
+@bp.post("/api/safety/risk-score/recompute-all")
+@require_role("super_admin")
+def recompute_all_risk():
+    user_ctx = getattr(g, "user", None) or {}
+    tenant_id = user_ctx.get("tenant_id") or "connectaiacare_demo"
+    from src.services import risk_scoring
+    result = risk_scoring.compute_for_all_active(tenant_id)
+    return jsonify({"status": "ok", **result})
+
+
 @bp.get("/api/safety/stats")
 @require_role("super_admin", "admin_tenant")
 def stats():
