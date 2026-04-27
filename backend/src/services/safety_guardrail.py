@@ -344,7 +344,7 @@ def route_action(
     if severity == "critical" and auto_critical:
         auto_execute_after = datetime.now(timezone.utc) + timedelta(seconds=timeout_seconds)
 
-    queue_row = get_postgres().fetch_one(
+    queue_row = get_postgres().insert_returning(
         """INSERT INTO aia_health_action_review_queue
             (tenant_id, patient_id, sofia_session_id, triggered_by_tool,
              triggered_by_persona, action_type, severity, summary, details,
