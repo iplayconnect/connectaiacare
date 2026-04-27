@@ -6,6 +6,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 from config.settings import settings
 from src.handlers.alerts_routes import bp as alerts_bp
 from src.handlers.communications_routes import bp as communications_bp
+from src.handlers.safety_routes import bp as safety_bp
 from src.handlers.auth_routes import (
     authenticate_request,
     bp as auth_bp,
@@ -76,6 +77,7 @@ def create_app() -> Flask:
     app.register_blueprint(caregivers_bp, url_prefix="/api")
     app.register_blueprint(alerts_bp, url_prefix="/api")
     app.register_blueprint(communications_bp)
+    app.register_blueprint(safety_bp)
 
     # JWT middleware: protege /api/* exceto rotas públicas (auth, webhook,
     # portal do paciente com PIN, onboarding B2C).
@@ -157,6 +159,16 @@ def create_app() -> Flask:
             logger.info("checkin_scheduler_thread_started")
         except Exception as exc:
             logger.error("checkin_scheduler_failed_to_start", error=str(exc))
+
+    # Safety Queue Executor — processa timeouts da fila de revisão
+    # do guardrail (auto-execute critical, expire others).
+    if os.getenv("ENABLE_SAFETY_QUEUE_EXECUTOR", "true").lower() == "true":
+        try:
+            from src.services.safety_queue_executor import get_executor
+            get_executor().start()
+            logger.info("safety_queue_executor_thread_started")
+        except Exception as exc:
+            logger.error("safety_queue_executor_failed_to_start", error=str(exc))
 
     # Dose Revalidation Scheduler — re-roda o motor de cruzamentos sobre
     # prescrições ativas a cada 7 dias (cobre regras novas adicionadas pelo
