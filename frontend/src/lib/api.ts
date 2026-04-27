@@ -504,6 +504,33 @@ export interface PatientRiskRow {
   trend: string | null;
   breakdown: Record<string, unknown>;
   computed_at: string;
+  // Fase 2 — baseline individual
+  has_baseline?: boolean;
+  baseline_complaints_z?: number | null;
+  baseline_adherence_z?: number | null;
+  baseline_urgent_z?: number | null;
+  baseline_deviation_score?: number | null;
+  combined_score?: number | null;
+  combined_level?: "low" | "moderate" | "high" | "critical" | null;
+}
+
+export interface PatientBaseline {
+  patient_id: string;
+  tenant_id: string;
+  period_days: number;
+  weeks_observed: number;
+  complaints_median: number | null;
+  complaints_mad: number | null;
+  complaints_history: number[];
+  adherence_median: number | null;
+  adherence_mad: number | null;
+  adherence_history: number[];
+  urgent_median: number | null;
+  urgent_mad: number | null;
+  urgent_history: number[];
+  has_sufficient_data: boolean;
+  insufficient_reason: string | null;
+  last_computed_at: string;
 }
 
 // ───────── Proactive Caller types ─────────
@@ -1179,6 +1206,39 @@ export const api = {
       processed: number;
       by_level: { low: number; moderate: number; high: number; critical: number };
     }>(`/api/safety/risk-score/recompute-all`, { method: "POST" }),
+
+  // Fase 2 — baseline individual
+  riskBaselineGet: (patientId: string) =>
+    request<{
+      status: "ok";
+      has_baseline: boolean;
+      baseline?: PatientBaseline;
+      message?: string;
+    }>(`/api/safety/risk-score/${patientId}/baseline`),
+
+  riskBaselineCompute: (patientId: string, periodDays?: number) =>
+    request<{
+      status: "ok";
+      ok: boolean;
+      patient_id: string;
+      weeks_observed: number;
+      has_sufficient_data: boolean;
+      insufficient_reason: string | null;
+      complaints: { median: number | null; mad: number | null; n: number };
+      adherence: { median: number | null; mad: number | null; n: number };
+      urgent: { median: number | null; mad: number | null; n: number };
+    }>(`/api/safety/risk-score/${patientId}/baseline/compute`, {
+      method: "POST",
+      body: JSON.stringify(periodDays ? { period_days: periodDays } : {}),
+    }),
+
+  riskBaselineRecomputeAll: () =>
+    request<{
+      status: "ok";
+      ok: boolean;
+      processed: number;
+      with_sufficient_data: number;
+    }>(`/api/safety/risk-score/baseline/recompute-all`, { method: "POST" }),
 
   // ───────── Prompt versioning (cenários Sofia) ─────────
   scenarioVersionsList: (scenarioId: string) =>

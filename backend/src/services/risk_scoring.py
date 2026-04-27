@@ -8,8 +8,10 @@ Score 0-100 agregado de 3 sinais determinísticos (Fase 1):
 Saída: aia_health_patient_risk_score com breakdown JSONB pra UI explicar
 "por que esse paciente está em alto risco".
 
-Pra Fase 2 (próxima sprint): baseline individual + drift detection
-(comparar paciente contra ele mesmo, não threshold absoluto).
+Fase 2 (implementada em risk_baseline.py):
+  - Cada paciente tem baseline individual (median + MAD por sinal)
+  - Robust z-score detecta desvios mesmo abaixo do threshold absoluto
+  - combined_score = max(phase1, phase1 + bonus_deviation)
 """
 from __future__ import annotations
 
@@ -128,10 +130,28 @@ def compute_for_patient(patient_id: str, tenant_id: str | None = None) -> dict:
         else:
             trend = "stable"
 
+    # ── Fase 2: baseline individual (se disponível) ──
+    from src.services import risk_baseline
+    deviation = risk_baseline.compute_deviation_score(
+        patient_id,
+        current_complaints_7d=complaints_7d,
+        current_adherence_pct=adherence_pct,
+        current_urgent_7d=urgent_7d,
+        current_adherence_total=total,
+    )
+    combined_score, combined_level = risk_baseline.combine_scores(
+        total_score, deviation.get("deviation_score"),
+    )
+
     breakdown = {
         "complaints": {"count_7d": complaints_7d, "score": complaints_score},
         "adherence": {"pct": round(adherence_pct, 1), "events_7d": total, "score": adherence_score},
         "urgent_events": {"count_7d": urgent_7d, "score": urgent_score},
+        "phase2_baseline": deviation,
+        "phase1_score": total_score,
+        "phase1_level": level,
+        "combined_score": combined_score,
+        "combined_level": combined_level,
     }
 
     db.execute(
@@ -140,8 +160,12 @@ def compute_for_patient(patient_id: str, tenant_id: str | None = None) -> dict:
              signal_complaints_7d, signal_complaints_score,
              signal_adherence_pct, signal_adherence_score,
              signal_urgent_events_7d, signal_urgent_events_score,
-             trend, previous_score, breakdown, last_computed_at)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, NOW())
+             trend, previous_score, breakdown,
+             baseline_complaints_z, baseline_adherence_z, baseline_urgent_z,
+             baseline_deviation_score, combined_score, combined_level,
+             has_baseline, last_computed_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb,
+                %s, %s, %s, %s, %s, %s, %s, NOW())
         ON CONFLICT (patient_id) DO UPDATE SET
             score = EXCLUDED.score,
             risk_level = EXCLUDED.risk_level,
@@ -154,6 +178,13 @@ def compute_for_patient(patient_id: str, tenant_id: str | None = None) -> dict:
             trend = EXCLUDED.trend,
             previous_score = aia_health_patient_risk_score.score,
             breakdown = EXCLUDED.breakdown,
+            baseline_complaints_z = EXCLUDED.baseline_complaints_z,
+            baseline_adherence_z = EXCLUDED.baseline_adherence_z,
+            baseline_urgent_z = EXCLUDED.baseline_urgent_z,
+            baseline_deviation_score = EXCLUDED.baseline_deviation_score,
+            combined_score = EXCLUDED.combined_score,
+            combined_level = EXCLUDED.combined_level,
+            has_baseline = EXCLUDED.has_baseline,
             last_computed_at = NOW()""",
         (
             patient_id, tenant_id, total_score, level,
@@ -162,11 +193,20 @@ def compute_for_patient(patient_id: str, tenant_id: str | None = None) -> dict:
             urgent_7d, urgent_score,
             trend, prev_score,
             json.dumps(breakdown),
+            deviation.get("complaints_z"),
+            deviation.get("adherence_z"),
+            deviation.get("urgent_z"),
+            deviation.get("deviation_score"),
+            combined_score, combined_level,
+            bool(deviation.get("has_baseline")),
         ),
     )
     return {
         "ok": True, "patient_id": patient_id, "score": total_score,
         "risk_level": level, "trend": trend, "breakdown": breakdown,
+        "combined_score": combined_score,
+        "combined_level": combined_level,
+        "deviation": deviation,
     }
 
 
