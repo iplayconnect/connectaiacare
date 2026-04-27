@@ -50,6 +50,15 @@ if os.getenv("ENABLE_COLLECTIVE_MEMORY", "true").lower() == "true":
     except Exception as _exc:
         logger.warning("collective_insights_scheduler_failed_to_start: %s", _exc)
 
+# ──── Embedding Worker ────
+# Gera embeddings vetoriais pra messages históricas (recall semântico).
+if os.getenv("ENABLE_EMBEDDING_WORKER", "true").lower() == "true":
+    try:
+        from src.embedding_service import get_worker
+        get_worker().start()
+    except Exception as _exc:
+        logger.warning("embedding_worker_failed_to_start: %s", _exc)
+
 
 def _check_internal_auth() -> tuple | None:
     """Valida X-Internal-Key se configurado. Retorna (response, status) se falhar."""

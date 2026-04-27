@@ -62,7 +62,15 @@ class BaseAgent:
         except Exception:
             mem_block = ""
 
-        return f"{base}\n\n{persona_prompt}{ctx}{mem_block}"
+        # Active context cross-channel (últimos 45min de outros canais)
+        try:
+            from src import active_context
+            ac_turns = active_context.get_recent_turns(persona_ctx=persona_ctx)
+            ac_block = active_context.format_for_prompt(ac_turns)
+        except Exception:
+            ac_block = ""
+
+        return f"{base}\n\n{persona_prompt}{ctx}{mem_block}{ac_block}"
 
     @classmethod
     def tool_definitions(cls, persona: str) -> list[ToolDefinition]:
@@ -109,6 +117,15 @@ class BaseAgent:
             role="user",
             content=user_message,
         )
+        # Active context cross-channel
+        try:
+            from src import active_context
+            active_context.append_turn(
+                persona_ctx=persona_ctx, role="user",
+                content=user_message, channel="web",
+            )
+        except Exception:
+            pass
 
         # Histórico recente (já inclui a que acabou de entrar)
         history = persistence.list_recent_messages(session_id, limit=30)
@@ -144,6 +161,15 @@ class BaseAgent:
                     tokens_in=result.tokens_in,
                     tokens_out=result.tokens_out,
                 )
+                # Active context cross-channel
+                try:
+                    from src import active_context
+                    active_context.append_turn(
+                        persona_ctx=persona_ctx, role="assistant",
+                        content=last_text, channel="web",
+                    )
+                except Exception:
+                    pass
                 break
 
             # Executa cada tool e adiciona ao histórico como role=tool

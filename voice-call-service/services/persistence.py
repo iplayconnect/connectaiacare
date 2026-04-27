@@ -98,6 +98,89 @@ def get_or_create_session(
     )
 
 
+def _load_active_context_block(persona_ctx: dict) -> str:
+    """Lê últimos turnos cross-channel pra injetar no system prompt."""
+    user_id = persona_ctx.get("user_id")
+    phone = persona_ctx.get("phone")
+    patient_id = persona_ctx.get("patient_id")
+    if user_id:
+        key = f"user:{user_id}"
+    elif phone:
+        key = f"phone:{phone}"
+    elif patient_id:
+        key = f"patient:{patient_id}"
+    else:
+        return ""
+    rows = []
+    try:
+        with _cursor(commit=False) as cur:
+            cur.execute(
+                """SELECT role, content, channel, tool_name
+                   FROM aia_health_sofia_active_context
+                   WHERE context_key = %s AND expires_at > NOW()
+                   ORDER BY created_at DESC LIMIT 8""",
+                (key,),
+            )
+            rows = [dict(r) for r in cur.fetchall()]
+    except Exception as exc:
+        logger.warning("active_context_load_failed: %s", exc)
+        return ""
+    if not rows:
+        return ""
+    rows = list(reversed(rows))
+    parts = ["# CONTEXTO ATIVO (de outros canais nos últimos 45min)"]
+    parts.append(
+        "Estes turnos vieram de chat ou ligação anterior. Use pra "
+        "manter continuidade — é a MESMA conversa, só mudou de canal."
+    )
+    parts.append("")
+    for r in rows:
+        ch = r.get("channel") or "?"
+        role = r.get("role") or "?"
+        content = (r.get("content") or "")[:300]
+        parts.append(f"[{ch}/{role}] {content}")
+    return "\n".join(parts)
+
+
+def append_active_context(
+    *, persona_ctx: dict, patient_id: str | None,
+    role: str, content: str | None, channel: str = "voice_call",
+    tool_name: str | None = None, ttl_minutes: int = 45,
+) -> None:
+    """Espelha active_context.append_turn do sofia-service. Mesma tabela
+    UNLOGGED, cross-channel."""
+    user_id = persona_ctx.get("user_id")
+    phone = persona_ctx.get("phone")
+    if user_id:
+        key = f"user:{user_id}"
+    elif phone:
+        key = f"phone:{phone}"
+    elif patient_id:
+        key = f"patient:{patient_id}"
+    else:
+        return
+    if not content and not tool_name:
+        return
+    try:
+        _execute(
+            """INSERT INTO aia_health_sofia_active_context
+                (tenant_id, user_id, patient_id, context_key, channel,
+                 role, content, tool_name, expires_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW() + (%s || ' minutes')::interval)""",
+            (
+                persona_ctx.get("tenant_id") or "connectaiacare_demo",
+                user_id,
+                patient_id or persona_ctx.get("patient_id"),
+                key, channel, role,
+                (content or "")[:500],
+                tool_name,
+                str(ttl_minutes),
+            ),
+        )
+    except Exception as exc:
+        logger.warning("active_context_append_failed: %s", exc)
+
+
 def close_session(session_id: str | None) -> None:
     """Marca a sessão como encerrada (closed_at = NOW). Idempotente."""
     if not session_id:

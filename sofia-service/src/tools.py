@@ -708,6 +708,50 @@ def _tool_list_beers_avoid_in_condition(
     }
 
 
+def _tool_recall_semantic(
+    *,
+    persona_ctx: dict,
+    query: str,
+    patient_id: str | None = None,
+    top_k: int = 5,
+    days: int = 90,
+    **_: Any,
+) -> dict:
+    """Busca semântica em mensagens passadas (recall verbatim).
+    'Lembra quando falamos sobre X?' — retorna top-K mensagens
+    similares dos últimos N dias, com timestamp + canal."""
+    if not query or len(query.strip()) < 3:
+        return {"ok": False, "error": "query_too_short"}
+    pid = patient_id or persona_ctx.get("patient_id")
+    user_id = persona_ctx.get("user_id")
+    # Profissional clínico: pode buscar por paciente OU por user_id próprio
+    # Cuidador/família: SOMENTE por patient_id vinculado
+    persona = persona_ctx.get("persona") or "anonymous"
+    if persona in ("medico", "enfermeiro", "admin_tenant", "super_admin"):
+        scope_user_id = user_id if not pid else None
+        scope_patient_id = pid
+    else:
+        scope_patient_id = pid  # familiar/cuidador limita ao patient_id
+        scope_user_id = None
+    if not scope_patient_id and not scope_user_id:
+        return {"ok": False, "error": "no_scope_for_recall"}
+    try:
+        from src import embedding_service
+        rows = embedding_service.search_semantic(
+            query=query,
+            patient_id=scope_patient_id,
+            user_id=scope_user_id,
+            top_k=max(1, min(int(top_k), 15)),
+            days=max(1, min(int(days), 365)),
+        )
+    except Exception as exc:
+        logger.exception("recall_semantic_failed")
+        return {"ok": False, "error": str(exc)}
+    return {
+        "ok": True, "query": query, "count": len(rows), "matches": rows,
+    }
+
+
 def _tool_escalate_to_attendant(
     *,
     persona_ctx: dict,
@@ -943,6 +987,24 @@ TOOLS: dict[str, dict[str, Any]] = {
         "handler": _tool_get_my_subscription,
         "allowed_personas": ["paciente_b2c", "familia"],
     },
+    "recall_semantic": {
+        "description": "Busca verbatim em mensagens passadas via similaridade semântica. Use quando o usuário diz 'lembra quando falamos de X?', 'aquela vez que mencionei Y', ou quando você suspeita que tópico atual está conectado a histórico longe da janela atual de mensagens. Retorna top-K mensagens dos últimos 90 dias com similaridade (0-1), canal de origem (chat/voz/voip) e timestamp. Filtra automaticamente por escopo: profissional clínico vê histórico do user ou paciente; cuidador/família vê só paciente vinculado.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Pergunta/tópico a buscar (ex: 'queda recorrente', 'efeito da losartana')."},
+                "patient_id": {"type": "string", "description": "UUID do paciente (opcional se já no contexto)."},
+                "top_k": {"type": "integer", "description": "Quantas mensagens retornar (1-15, default 5)."},
+                "days": {"type": "integer", "description": "Janela em dias pra trás (1-365, default 90)."},
+            },
+            "required": ["query"],
+        },
+        "handler": _tool_recall_semantic,
+        "allowed_personas": [
+            "medico", "enfermeiro", "cuidador_pro", "familia",
+            "admin_tenant", "super_admin",
+        ],
+    },
     "escalate_to_attendant": {
         "description": "Aciona a equipe humana responsável (atendente Isabel se B2C, cuidador interno se B2B casa/clínica) discando o ramal vinculado ao paciente. Use quando detectar situação que precisa de avaliação humana IMEDIATA: queixa clínica significativa, padrão preocupante (várias quedas, dor persistente), pedido explícito do usuário, ou qualquer cenário fora da sua capacidade. Severity guia a urgência: 'critical' = emergência (ex: dor torácica), 'urgent' = preocupação real (sintoma novo), 'attention' = vale revisão (padrão). A escalação passa pelo Safety Guardrail — pode ser enfileirada pra revisão, executada direto, ou rejeitada conforme política do tenant.",
         "parameters": {
@@ -1045,6 +1107,7 @@ _TOOLS_CLINICAL_INFO = {
     "check_drug_interaction",
     "list_beers_avoid_in_condition",
     "check_medication_safety",
+    "recall_semantic",
 }
 
 

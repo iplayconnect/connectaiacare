@@ -98,11 +98,14 @@ class GrokCallSession:
         # cross-session + contexto do paciente.
         scenario_prompt = self.persona_ctx.get("scenario_system_prompt")
         if scenario_prompt:
-            from services.persistence import _load_memory_block
+            from services.persistence import _load_memory_block, _load_active_context_block
             instructions = scenario_prompt
             mem = _load_memory_block(self.persona_ctx.get("user_id"))
             if mem:
                 instructions += "\n\n" + mem
+            ac = _load_active_context_block(self.persona_ctx)
+            if ac:
+                instructions += "\n\n" + ac
             # Injeta contexto do paciente extra (vem do backend já carregado)
             extra = self.persona_ctx.get("extra_context") or {}
             patient = extra.get("patient")
@@ -338,6 +341,16 @@ class GrokCallSession:
         ):
             text = msg.get("transcript") or ""
             if text:
+                # Active context cross-channel
+                try:
+                    from services.persistence import append_active_context
+                    append_active_context(
+                        persona_ctx=self.persona_ctx,
+                        patient_id=self.persona_ctx.get("patient_id"),
+                        role="assistant", content=text, channel="voice_call",
+                    )
+                except Exception:
+                    pass
                 append_message_voice_call(
                     session_id=self.session_id,
                     tenant_id=self.tenant_id,
@@ -351,6 +364,16 @@ class GrokCallSession:
         if etype == "conversation.item.input_audio_transcription.completed":
             text = msg.get("transcript") or ""
             if text:
+                # Active context cross-channel
+                try:
+                    from services.persistence import append_active_context
+                    append_active_context(
+                        persona_ctx=self.persona_ctx,
+                        patient_id=self.persona_ctx.get("patient_id"),
+                        role="user", content=text, channel="voice_call",
+                    )
+                except Exception:
+                    pass
                 append_message_voice_call(
                     session_id=self.session_id,
                     tenant_id=self.tenant_id,
