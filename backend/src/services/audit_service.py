@@ -94,7 +94,12 @@ def audit_log(
         actor: override; default = g.user.sub (UUID do user)
     """
     try:
-        user_ctx = getattr(g, "user", None) or {}
+        # `g` é proxy do Flask — acessá-lo fora de app context lança
+        # RuntimeError. Workers/schedulers chamam audit_log sem context.
+        try:
+            user_ctx = getattr(g, "user", None) or {}
+        except RuntimeError:
+            user_ctx = {}
         actor_id = actor or user_ctx.get("sub") or "system"
         tenant = tenant_id or user_ctx.get("tenant_id") or "connectaiacare_demo"
 
