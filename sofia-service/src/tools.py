@@ -708,6 +708,49 @@ def _tool_list_beers_avoid_in_condition(
     }
 
 
+def _tool_escalate_to_attendant(
+    *,
+    persona_ctx: dict,
+    reason: str,
+    severity: str = "urgent",
+    summary: str = "",
+    patient_id: str | None = None,
+    **_: Any,
+) -> dict:
+    """Sofia detectou situação que requer ação humana imediata. Esta tool
+    SEMPRE passa pelo Safety Guardrail (severity decide queue vs execute).
+    Quando aprovada/auto-executada, dispara discagem pro ramal do paciente
+    (atendente Isabel pra B2C, cuidador interno pra B2B casa/clínica)."""
+    pid = patient_id or persona_ctx.get("patient_id")
+    if not pid:
+        return {"ok": False, "error": "no_patient_in_scope"}
+    if severity not in ("attention", "urgent", "critical"):
+        severity = "urgent"
+
+    # Guardrail já é chamado pelo execute_tool (essa tool está em
+    # _TOOLS_REQUIRING_REVIEW). Aqui só descrevemos a intenção — a
+    # execução efetiva (discar ramal) acontece quando humano aprova
+    # via /api/safety/queue/<id>/decide ou quando timeout=critical
+    # auto_executa.
+    #
+    # Esta tool é "informacional" do ponto de vista da Sofia: ela diz
+    # "vou escalar" e o sistema responde "ok, foi enfileirado/aprovado".
+
+    return {
+        "ok": True,
+        "patient_id": str(pid),
+        "severity": severity,
+        "reason": reason,
+        "summary": summary or reason,
+        "action_taken": "escalation_requested_via_guardrail",
+        "_message_for_sofia": (
+            "Avise o usuário que você acionou a equipe responsável "
+            "(ramal próprio do paciente) pra avaliar essa situação. "
+            "Mantenha-se na conversa enquanto a pessoa fala."
+        ),
+    }
+
+
 # ────────────────────────────── registry ──────────────────────────────
 
 TOOLS: dict[str, dict[str, Any]] = {
@@ -900,6 +943,28 @@ TOOLS: dict[str, dict[str, Any]] = {
         "handler": _tool_get_my_subscription,
         "allowed_personas": ["paciente_b2c", "familia"],
     },
+    "escalate_to_attendant": {
+        "description": "Aciona a equipe humana responsável (atendente Isabel se B2C, cuidador interno se B2B casa/clínica) discando o ramal vinculado ao paciente. Use quando detectar situação que precisa de avaliação humana IMEDIATA: queixa clínica significativa, padrão preocupante (várias quedas, dor persistente), pedido explícito do usuário, ou qualquer cenário fora da sua capacidade. Severity guia a urgência: 'critical' = emergência (ex: dor torácica), 'urgent' = preocupação real (sintoma novo), 'attention' = vale revisão (padrão). A escalação passa pelo Safety Guardrail — pode ser enfileirada pra revisão, executada direto, ou rejeitada conforme política do tenant.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "reason": {"type": "string", "description": "Motivo curto da escalação (1 frase)."},
+                "severity": {
+                    "type": "string",
+                    "enum": ["attention", "urgent", "critical"],
+                    "description": "Urgência percebida.",
+                },
+                "summary": {"type": "string", "description": "Detalhes pra equipe que vai atender — o que foi observado/relatado."},
+                "patient_id": {"type": "string", "description": "UUID (opcional se a persona já está vinculada)."},
+            },
+            "required": ["reason"],
+        },
+        "handler": _tool_escalate_to_attendant,
+        "allowed_personas": [
+            "medico", "enfermeiro", "cuidador_pro", "familia",
+            "paciente_b2c", "admin_tenant", "super_admin",
+        ],
+    },
 }
 
 
@@ -956,19 +1021,158 @@ def _to_jsonable(value):
         return None
 
 
+_CLINICAL_DISCLAIMER = (
+    "Esta é informação para apoiar a sua decisão — quem decide é sempre "
+    "você com o médico responsável. A Sofia não substitui consulta médica."
+)
+
+# Tools que executam AÇÃO clínica (afetam estado, comunicação externa) →
+# precisam passar pelo Safety Guardrail.
+# Tools só de leitura/info → recebem apenas disclaimer.
+_TOOLS_REQUIRING_REVIEW = {
+    "create_care_event",
+    "schedule_teleconsulta",
+    "send_check_in",
+    "escalate_to_attendant",
+}
+_TOOLS_CLINICAL_INFO = {
+    "get_patient_summary",
+    "get_patient_vitals",
+    "read_care_event_history",
+    "list_medication_schedules",
+    "query_clinical_guidelines",
+    "query_drug_rules",
+    "check_drug_interaction",
+    "list_beers_avoid_in_condition",
+    "check_medication_safety",
+}
+
+
+def _classification_to_severity(args: dict) -> str:
+    """Mapeia classification do create_care_event pra severity do guardrail."""
+    cls = (args.get("classification") or "routine").lower()
+    return {
+        "routine": "info",
+        "attention": "attention",
+        "urgent": "urgent",
+        "critical": "critical",
+    }.get(cls, "attention")
+
+
+def _call_safety_guardrail(
+    name: str, args: dict, persona_ctx: dict
+) -> dict:
+    """HTTP POST pro backend api /api/safety/route-action.
+    Retorna decision dict ou {"decision": "execute"} se guardrail offline
+    (fail-open temporário pra não quebrar Sofia em desenvolvimento)."""
+    import os
+    import httpx
+    backend = os.getenv("BACKEND_API_URL", "http://api:5055")
+    # Determina severity baseado em args (varia por tool)
+    if name == "create_care_event":
+        severity = _classification_to_severity(args)
+        action_type = "register_history"
+    elif name == "escalate_to_attendant":
+        severity = (args.get("severity") or "urgent").lower()
+        if severity not in ("attention", "urgent", "critical"):
+            severity = "urgent"
+        action_type = "invoke_attendant"
+    elif name == "schedule_teleconsulta":
+        severity = "attention"
+        action_type = "invoke_attendant"
+    else:  # send_check_in et al
+        severity = "info"
+        action_type = "register_history"
+
+    summary_parts = [name]
+    for k in ("reason", "summary"):
+        if args.get(k):
+            summary_parts.append(str(args[k])[:200])
+            break
+    if args.get("medication_name"):
+        summary_parts.append(f"med={args['medication_name']}")
+    summary = " · ".join(summary_parts)
+
+    payload = {
+        "tenant_id": persona_ctx.get("tenant_id") or "connectaiacare_demo",
+        "patient_id": args.get("patient_id") or persona_ctx.get("patient_id"),
+        "action_type": action_type,
+        "severity": severity,
+        "summary": summary,
+        "triggered_by_tool": name,
+        "triggered_by_persona": persona_ctx.get("persona"),
+        "details": {"args": _to_jsonable(args)},
+    }
+    try:
+        r = httpx.post(f"{backend}/api/safety/route-action", json=payload, timeout=8.0)
+        if r.status_code == 200:
+            return r.json()
+        logger.warning("guardrail_http_%d body=%s", r.status_code, r.text[:200])
+    except Exception as exc:
+        logger.warning("guardrail_unreachable: %s", exc)
+    # Fail-open: se guardrail offline, executa mesmo (com warning)
+    return {"decision": "execute", "reason": "guardrail_unreachable_failed_open"}
+
+
 def execute_tool(name: str, args: dict, persona_ctx: dict) -> dict:
     spec = TOOLS.get(name)
     if not spec:
         return {"ok": False, "error": f"tool_not_found:{name}"}
     if persona_ctx.get("persona") not in spec["allowed_personas"]:
         return {"ok": False, "error": "persona_not_allowed"}
+
+    # ─── Safety Guardrail (antes de executar tool de ação) ───
+    if name in _TOOLS_REQUIRING_REVIEW:
+        gr = _call_safety_guardrail(name, args or {}, persona_ctx)
+        decision = gr.get("decision")
+        if decision == "queue":
+            return {
+                "ok": True,
+                "queued_for_review": True,
+                "queue_id": gr.get("queue_id"),
+                "target_channel": gr.get("target_channel"),
+                "auto_execute_after": gr.get("auto_execute_after"),
+                "_message_for_sofia": (
+                    "Essa ação foi colocada na fila pra revisão de quem está "
+                    "acompanhando o paciente. Avise o usuário que sua equipe "
+                    "vai analisar e decidir o próximo passo."
+                ),
+                "_disclaimer": _CLINICAL_DISCLAIMER,
+            }
+        if decision == "reject":
+            return {
+                "ok": False,
+                "error": "guardrail_rejected",
+                "reason": gr.get("reason"),
+                "_message_for_sofia": (
+                    "Essa ação não pode ser feita pela Sofia neste momento. "
+                    "Avise o usuário pra falar com o médico responsável."
+                ),
+                "_disclaimer": _CLINICAL_DISCLAIMER,
+            }
+        if decision == "paused":
+            return {
+                "ok": False,
+                "error": "guardrail_circuit_open",
+                "_message_for_sofia": (
+                    "O sistema temporariamente pausou ações automáticas. "
+                    "Sua equipe foi notificada. Tente novamente em alguns minutos."
+                ),
+            }
+        # decision == "execute" → segue fluxo normal
+
     try:
         result = spec["handler"](persona_ctx=persona_ctx, **(args or {}))
     except Exception as exc:
         logger.exception("tool_exec_failed name=%s", name)
         return {"ok": False, "error": str(exc)}
-    # Garante que resultado seja JSON-clean pra todos os consumers
-    # (psycopg2 Json adapter na persistência, json.dumps pro Grok/Gemini).
-    return _to_jsonable(result) if isinstance(result, dict) else {
+
+    output = _to_jsonable(result) if isinstance(result, dict) else {
         "ok": True, "data": _to_jsonable(result)
     }
+
+    # ─── Disclaimer em tools clínicas (info ou ação) ───
+    if name in _TOOLS_CLINICAL_INFO or name in _TOOLS_REQUIRING_REVIEW:
+        output.setdefault("_disclaimer", _CLINICAL_DISCLAIMER)
+
+    return output
