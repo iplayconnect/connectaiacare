@@ -442,6 +442,98 @@ export interface TranscriptMessage {
   tool_name: string | null;
 }
 
+// ───────── Safety Guardrail types ─────────
+export type SafetyActionType =
+  | "informative"
+  | "register_history"
+  | "invoke_attendant"
+  | "emergency_realtime"
+  | "modify_prescription";
+
+export type SafetySeverity = "info" | "attention" | "urgent" | "critical";
+
+export type SafetyQueueStatus =
+  | "pending"
+  | "approved"
+  | "rejected"
+  | "auto_executed"
+  | "expired"
+  | "cancelled";
+
+export interface SafetyQueueItem {
+  id: string;
+  tenant_id: string;
+  action_type: SafetyActionType;
+  severity: SafetySeverity;
+  summary: string;
+  patient_id: string | null;
+  patient_name?: string | null;
+  sofia_session_id: string | null;
+  triggered_by_tool: string | null;
+  triggered_by_persona: string | null;
+  sofia_confidence: number | null;
+  details: Record<string, unknown> | null;
+  status: SafetyQueueStatus;
+  created_at: string;
+  auto_execute_after: string | null;
+  decided_at: string | null;
+  decided_by_user_id: string | null;
+  decision_notes: string | null;
+}
+
+export interface SafetyCircuitState {
+  status: "ok";
+  state: "closed" | "open" | "half_open";
+  tenant_id: string;
+  open_until?: string | null;
+  opened_at?: string | null;
+  open_reason?: string | null;
+  recent_action_count?: number;
+  recent_queued_count?: number;
+}
+
+// ───────── Patient Risk Scoring types ─────────
+export interface PatientRiskRow {
+  patient_id: string;
+  patient_name?: string;
+  score: number;
+  level: "low" | "moderate" | "high" | "critical";
+  complaints_7d: number;
+  adherence_pct: number | null;
+  urgent_events_7d: number;
+  trend: string | null;
+  breakdown: Record<string, unknown>;
+  computed_at: string;
+}
+
+// ───────── Scenario Versioning types ─────────
+export type ScenarioVersionStatus =
+  | "draft"
+  | "testing"
+  | "published"
+  | "archived";
+
+export interface ScenarioVersion {
+  id: string;
+  scenario_id: string;
+  version_number: number;
+  status: ScenarioVersionStatus;
+  label: string;
+  description: string | null;
+  system_prompt: string;
+  voice: string;
+  allowed_tools: string[];
+  post_call_actions: string[];
+  pre_call_context_sql: string | null;
+  max_duration_seconds: number;
+  golden_test_results: Record<string, unknown> | null;
+  notes: string | null;
+  created_at: string;
+  created_by_user_id: string | null;
+  published_at: string | null;
+  published_by_user_id: string | null;
+}
+
 export const api = {
   // Auth
   me: () => request<{ status: "ok"; user: AuthUser }>("/api/auth/me"),
@@ -954,6 +1046,136 @@ export const api = {
       method: "POST",
       body: JSON.stringify(payload || {}),
     }),
+
+  // ───────── Safety Guardrail Layer ─────────
+  safetyListQueue: (limit = 50) =>
+    request<{
+      status: "ok";
+      count: number;
+      items: SafetyQueueItem[];
+    }>(`/api/safety/queue?limit=${limit}`),
+
+  safetyDecideQueueItem: (
+    qid: string,
+    decision: "approved" | "rejected",
+    notes?: string,
+  ) =>
+    request<{ status: "ok"; ok: boolean }>(
+      `/api/safety/queue/${qid}/decide`,
+      {
+        method: "POST",
+        body: JSON.stringify({ decision, notes: notes || null }),
+      },
+    ),
+
+  safetyCircuitStatus: (tenantId?: string) =>
+    request<SafetyCircuitState>(
+      `/api/safety/circuit-breaker${tenantId ? `?tenant_id=${tenantId}` : ""}`,
+    ),
+
+  safetyCircuitReset: (tenantId?: string, reason?: string) =>
+    request<{ status: "ok"; tenant_id: string }>(
+      `/api/safety/circuit-breaker/reset`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          tenant_id: tenantId || null,
+          reason: reason || null,
+        }),
+      },
+    ),
+
+  safetyStats: () =>
+    request<{
+      status: "ok";
+      tenant_id: string;
+      stats: {
+        pending: number;
+        approved: number;
+        rejected: number;
+        auto_executed: number;
+        expired: number;
+        last_24h: number;
+        total: number;
+      };
+    }>(`/api/safety/stats`),
+
+  // ───────── Patient Risk Scoring ─────────
+  riskScoreGet: (patientId: string) =>
+    request<{
+      status: "ok";
+      score?: number;
+      level?: "low" | "moderate" | "high" | "critical";
+      patient_id?: string;
+      message?: string;
+      breakdown?: Record<string, unknown>;
+      complaints_7d?: number;
+      adherence_pct?: number | null;
+      urgent_events_7d?: number;
+      trend?: string | null;
+      computed_at?: string;
+    }>(`/api/safety/risk-score/${patientId}`),
+
+  riskScoreCompute: (patientId: string) =>
+    request<{
+      status: "ok";
+      patient_id: string;
+      score: number;
+      level: string;
+      breakdown: Record<string, unknown>;
+    }>(`/api/safety/risk-score/${patientId}/compute`, { method: "POST" }),
+
+  riskScoreHigh: (limit = 20) =>
+    request<{
+      status: "ok";
+      count: number;
+      items: PatientRiskRow[];
+    }>(`/api/safety/risk-score/high?limit=${limit}`),
+
+  riskScoreRecomputeAll: () =>
+    request<{
+      status: "ok";
+      processed: number;
+      by_level: { low: number; moderate: number; high: number; critical: number };
+    }>(`/api/safety/risk-score/recompute-all`, { method: "POST" }),
+
+  // ───────── Prompt versioning (cenários Sofia) ─────────
+  scenarioVersionsList: (scenarioId: string) =>
+    request<{
+      status: "ok";
+      count: number;
+      items: ScenarioVersion[];
+      current_version_id?: string | null;
+    }>(`/api/communications/scenarios/${scenarioId}/versions`),
+
+  scenarioVersionCreateDraft: (
+    scenarioId: string,
+    payload: {
+      label?: string;
+      description?: string | null;
+      system_prompt: string;
+      voice?: string;
+      allowed_tools?: string[];
+      post_call_actions?: string[];
+      pre_call_context_sql?: string | null;
+      max_duration_seconds?: number;
+      notes?: string | null;
+    },
+  ) =>
+    request<{ status: "ok"; version: ScenarioVersion }>(
+      `/api/communications/scenarios/${scenarioId}/versions`,
+      { method: "POST", body: JSON.stringify(payload) },
+    ),
+
+  scenarioVersionPromote: (
+    scenarioId: string,
+    versionId: string,
+    target: "testing" | "published" | "archived",
+  ) =>
+    request<{ status: "ok"; version: ScenarioVersion }>(
+      `/api/communications/scenarios/${scenarioId}/versions/${versionId}/promote`,
+      { method: "POST", body: JSON.stringify({ target }) },
+    ),
 };
 
 // ============================================================

@@ -151,6 +151,177 @@ def delete_scenario(sid: str):
     return jsonify({"status": "ok"})
 
 
+# ───────────────────────── SCENARIO VERSIONING ─────────────────────────
+
+@bp.get("/api/communications/scenarios/<sid>/versions")
+@require_role("super_admin", "admin_tenant")
+def list_scenario_versions(sid: str):
+    """Lista todas as versões de um cenário, ordenadas por version_number desc."""
+    db = get_postgres()
+    scenario = db.fetch_one(
+        "SELECT id, current_version_id FROM aia_health_call_scenarios WHERE id = %s",
+        (sid,),
+    )
+    if not scenario:
+        return jsonify({"status": "error", "reason": "scenario_not_found"}), 404
+
+    rows = db.fetch_all(
+        """SELECT id, scenario_id, version_number, status, label, description,
+                  system_prompt, voice, allowed_tools, post_call_actions,
+                  pre_call_context_sql, max_duration_seconds, golden_test_results,
+                  notes, created_at, created_by_user_id, published_at,
+                  published_by_user_id
+           FROM aia_health_call_scenarios_versions
+           WHERE scenario_id = %s
+           ORDER BY version_number DESC""",
+        (sid,),
+    )
+    return jsonify({
+        "status": "ok",
+        "count": len(rows),
+        "items": [_serialize(r) for r in rows],
+        "current_version_id": str(scenario["current_version_id"])
+            if scenario.get("current_version_id") else None,
+    })
+
+
+@bp.post("/api/communications/scenarios/<sid>/versions")
+@require_role("super_admin", "admin_tenant")
+def create_scenario_version(sid: str):
+    """Cria nova versão DRAFT. Se payload omitir campos, herda do scenario base."""
+    from flask import g
+    db = get_postgres()
+    scenario = db.fetch_one(
+        "SELECT * FROM aia_health_call_scenarios WHERE id = %s", (sid,),
+    )
+    if not scenario:
+        return jsonify({"status": "error", "reason": "scenario_not_found"}), 404
+
+    body = request.get_json(silent=True) or {}
+    if not body.get("system_prompt"):
+        return jsonify({
+            "status": "error", "reason": "system_prompt_required",
+        }), 400
+
+    next_v = db.fetch_one(
+        """SELECT COALESCE(MAX(version_number), 0) + 1 AS next_v
+           FROM aia_health_call_scenarios_versions
+           WHERE scenario_id = %s""", (sid,),
+    )
+    version_number = next_v["next_v"]
+
+    user_ctx = getattr(g, "user", None) or {}
+    user_id = user_ctx.get("sub")
+
+    row = db.fetch_one(
+        """INSERT INTO aia_health_call_scenarios_versions
+            (scenario_id, version_number, label, description, system_prompt,
+             voice, allowed_tools, post_call_actions, pre_call_context_sql,
+             max_duration_seconds, status, notes, created_by_user_id)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'draft', %s, %s)
+        RETURNING *""",
+        (
+            sid, version_number,
+            body.get("label") or scenario["label"],
+            body.get("description") if "description" in body else scenario.get("description"),
+            body["system_prompt"],
+            body.get("voice") or scenario.get("voice") or "ara",
+            body.get("allowed_tools") or scenario.get("allowed_tools") or [],
+            body.get("post_call_actions") or scenario.get("post_call_actions") or ["log_audit"],
+            body.get("pre_call_context_sql") if "pre_call_context_sql" in body
+                else scenario.get("pre_call_context_sql"),
+            int(body.get("max_duration_seconds") or scenario.get("max_duration_seconds") or 600),
+            body.get("notes"),
+            user_id,
+        ),
+    )
+    audit_log(action="rule.scenario.version.create", payload={
+        "scenario_id": sid, "version_id": str(row["id"]),
+        "version_number": version_number,
+    })
+    return jsonify({"status": "ok", "version": _serialize(row)}), 201
+
+
+@bp.post("/api/communications/scenarios/<sid>/versions/<vid>/promote")
+@require_role("super_admin", "admin_tenant")
+def promote_scenario_version(sid: str, vid: str):
+    """Promove versão entre estados: draft → testing → published → archived.
+
+    Quando promove para 'published':
+    - Arquiva versão atualmente published do mesmo scenario
+    - Atualiza scenario.current_version_id
+    - Copia campos da versão para o scenario base (mantém compatibilidade
+      com código de dial existente que lê direto do scenario)
+    """
+    from flask import g
+    db = get_postgres()
+    body = request.get_json(silent=True) or {}
+    target = body.get("target")
+
+    if target not in ("draft", "testing", "published", "archived"):
+        return jsonify({"status": "error", "reason": "invalid_target"}), 400
+
+    version = db.fetch_one(
+        """SELECT * FROM aia_health_call_scenarios_versions
+           WHERE id = %s AND scenario_id = %s""",
+        (vid, sid),
+    )
+    if not version:
+        return jsonify({"status": "error", "reason": "version_not_found"}), 404
+
+    user_ctx = getattr(g, "user", None) or {}
+    user_id = user_ctx.get("sub")
+
+    if target == "published":
+        # Arquiva published anterior
+        db.execute(
+            """UPDATE aia_health_call_scenarios_versions
+               SET status = 'archived'
+               WHERE scenario_id = %s AND status = 'published' AND id <> %s""",
+            (sid, vid),
+        )
+        # Promove esta
+        row = db.fetch_one(
+            """UPDATE aia_health_call_scenarios_versions
+               SET status = 'published', published_at = NOW(),
+                   published_by_user_id = %s
+               WHERE id = %s
+               RETURNING *""",
+            (user_id, vid),
+        )
+        # Aponta scenario.current_version_id + copia campos
+        db.execute(
+            """UPDATE aia_health_call_scenarios
+               SET current_version_id = %s,
+                   label = %s, description = %s, system_prompt = %s,
+                   voice = %s, allowed_tools = %s, post_call_actions = %s,
+                   pre_call_context_sql = %s, max_duration_seconds = %s,
+                   updated_at = NOW()
+               WHERE id = %s""",
+            (
+                vid, version["label"], version["description"],
+                version["system_prompt"], version["voice"],
+                version["allowed_tools"], version["post_call_actions"],
+                version["pre_call_context_sql"], version["max_duration_seconds"],
+                sid,
+            ),
+        )
+    else:
+        row = db.fetch_one(
+            """UPDATE aia_health_call_scenarios_versions
+               SET status = %s
+               WHERE id = %s
+               RETURNING *""",
+            (target, vid),
+        )
+
+    audit_log(action="rule.scenario.version.promote", payload={
+        "scenario_id": sid, "version_id": vid, "target": target,
+        "version_number": version["version_number"],
+    })
+    return jsonify({"status": "ok", "version": _serialize(row)})
+
+
 # ───────────────────────── DIAL (com scenario_id) ─────────────────────────
 
 @bp.post("/api/communications/dial")

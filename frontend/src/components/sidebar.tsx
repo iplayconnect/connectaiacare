@@ -17,6 +17,7 @@ import {
   KeyRound,
   Stethoscope,
   Phone,
+  GitBranch,
 } from "lucide-react";
 
 import { useAuth } from "@/context/auth-context";
@@ -78,6 +79,27 @@ const NAV_ITEMS: NavItem[] = [
     label: "Cenários Sofia",
     icon: Phone,
     roles: ["super_admin", "admin_tenant"],
+    group: "admin",
+  },
+  {
+    href: "/admin/cenarios-sofia/versoes",
+    label: "Versões de Prompts",
+    icon: GitBranch,
+    roles: ["super_admin", "admin_tenant"],
+    group: "admin",
+  },
+  {
+    href: "/admin/seguranca/fila-revisao",
+    label: "Fila de Revisão",
+    icon: ShieldAlert,
+    roles: ["super_admin", "admin_tenant", "medico", "enfermeiro", "cuidador_pro", "familia"],
+    group: "admin",
+  },
+  {
+    href: "/admin/seguranca/risk-score",
+    label: "Risk Score",
+    icon: Activity,
+    roles: ["super_admin", "admin_tenant", "medico", "enfermeiro"],
     group: "admin",
   },
   // /admin/auditoria — desabilitado até página ser criada
