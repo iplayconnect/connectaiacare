@@ -752,6 +752,61 @@ def _tool_recall_semantic(
     }
 
 
+def _tool_recall_semantic_cross_patient(
+    *,
+    persona_ctx: dict,
+    query: str,
+    top_k: int = 10,
+    days: int = 90,
+    **_: Any,
+) -> dict:
+    """Busca semântica CROSS-paciente — busca padrão clínico em todos
+    pacientes do tenant, anonimizado.
+
+    Caso: 'que outros pacientes tiveram esse mesmo padrão de queda?'
+
+    Restrita a profissionais (medico/enfermeiro/admin). Retorna matches
+    com:
+      - patient_id substituído por hash (anon-XXXX, salt único por query)
+      - PII redacted (telefone, email, CPF, data, nome do paciente)
+      - similarity, days_ago, channel, role
+
+    Sofia usa esses snippets pra raciocinar sobre padrões coletivos sem
+    expor identidade individual.
+    """
+    if not query or len(query.strip()) < 5:
+        return {"ok": False, "error": "query_too_short"}
+
+    persona = persona_ctx.get("persona") or "anonymous"
+    if persona not in ("medico", "enfermeiro", "admin_tenant", "super_admin"):
+        return {
+            "ok": False,
+            "error": "rbac_denied",
+            "_message_for_sofia": (
+                "Recall cross-paciente é restrito a profissional clínico. "
+                "Pra esse usuário, use recall_semantic com patient_id."
+            ),
+        }
+
+    tenant_id = persona_ctx.get("tenant_id") or "connectaiacare_demo"
+    try:
+        from src import embedding_service
+        result = embedding_service.search_cross_patient(
+            query=query,
+            tenant_id=tenant_id,
+            top_k=max(1, min(int(top_k), 20)),
+            days=max(1, min(int(days), 365)),
+        )
+    except Exception as exc:
+        logger.exception("recall_cross_patient_failed")
+        return {"ok": False, "error": str(exc)}
+
+    return {
+        **result,
+        "query": query,
+    }
+
+
 def _tool_escalate_to_attendant(
     *,
     persona_ctx: dict,
@@ -1003,6 +1058,22 @@ TOOLS: dict[str, dict[str, Any]] = {
         "allowed_personas": [
             "medico", "enfermeiro", "cuidador_pro", "familia",
             "admin_tenant", "super_admin",
+        ],
+    },
+    "recall_semantic_cross_patient": {
+        "description": "Busca semântica CROSS-paciente — encontra padrão clínico em todos os pacientes do tenant, ANONIMIZADO. Use quando profissional pergunta 'que outros pacientes tiveram esse mesmo padrão?', 'já vimos esse tipo de queixa antes?', 'tem case similar?'. Retorna top-K matches com patient_id substituído por hash não-reversível, PII redacted (nome, telefone, email, CPF, datas), similaridade, days_ago, canal. Restrita a profissionais clínicos (medico/enfermeiro/admin) — outras personas recebem rbac_denied. Use pra reflexão sobre padrões coletivos sem expor identidade individual.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Pergunta/padrão clínico a buscar (ex: 'queda noturna recorrente', 'piora cognitiva pós-internação')."},
+                "top_k": {"type": "integer", "description": "Quantos matches retornar (1-20, default 10)."},
+                "days": {"type": "integer", "description": "Janela em dias pra trás (1-365, default 90)."},
+            },
+            "required": ["query"],
+        },
+        "handler": _tool_recall_semantic_cross_patient,
+        "allowed_personas": [
+            "medico", "enfermeiro", "admin_tenant", "super_admin",
         ],
     },
     "escalate_to_attendant": {
