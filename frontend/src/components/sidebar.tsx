@@ -17,6 +17,7 @@ import {
   KeyRound,
   Stethoscope,
   Phone,
+  PhoneOutgoing,
   GitBranch,
 } from "lucide-react";
 
@@ -99,6 +100,13 @@ const NAV_ITEMS: NavItem[] = [
     href: "/admin/seguranca/risk-score",
     label: "Risk Score",
     icon: Activity,
+    roles: ["super_admin", "admin_tenant", "medico", "enfermeiro"],
+    group: "admin",
+  },
+  {
+    href: "/admin/proactive-caller",
+    label: "Proactive Caller",
+    icon: PhoneOutgoing,
     roles: ["super_admin", "admin_tenant", "medico", "enfermeiro"],
     group: "admin",
   },

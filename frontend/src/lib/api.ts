@@ -506,6 +506,47 @@ export interface PatientRiskRow {
   computed_at: string;
 }
 
+// ───────── Proactive Caller types ─────────
+export type ProactiveDecision =
+  | "will_call"
+  | "skip_disabled"
+  | "skip_dnd"
+  | "skip_outside_window"
+  | "skip_too_soon"
+  | "skip_low_score"
+  | "skip_no_phone"
+  | "skip_no_scenario"
+  | "skip_circuit_open"
+  | "failed_dispatch";
+
+export interface ProactiveDecisionRow {
+  id: string;
+  tenant_id: string;
+  patient_id: string;
+  patient_name: string | null;
+  patient_nickname: string | null;
+  evaluated_at: string;
+  decision: ProactiveDecision;
+  trigger_score: number;
+  breakdown: Record<string, unknown>;
+  call_id: string | null;
+  error: string | null;
+  notes: string | null;
+}
+
+export interface PatientCallSettings {
+  id: string;
+  full_name?: string;
+  sofia_proactive_calls_enabled: boolean;
+  preferred_call_window_start: string;
+  preferred_call_window_end: string;
+  min_hours_between_calls: number;
+  do_not_disturb_until: string | null;
+  proactive_call_phone: string | null;
+  proactive_scenario_code: string | null;
+  proactive_call_timezone: string;
+}
+
 // ───────── Scenario Versioning types ─────────
 export type ScenarioVersionStatus =
   | "draft"
@@ -1175,6 +1216,58 @@ export const api = {
     request<{ status: "ok"; version: ScenarioVersion }>(
       `/api/communications/scenarios/${scenarioId}/versions/${versionId}/promote`,
       { method: "POST", body: JSON.stringify({ target }) },
+    ),
+
+  // ───────── Proactive Caller ─────────
+  proactiveCallerListDecisions: (params?: {
+    patient_id?: string;
+    decision?: string;
+    limit?: number;
+  }) => {
+    const qs = new URLSearchParams();
+    if (params?.patient_id) qs.set("patient_id", params.patient_id);
+    if (params?.decision) qs.set("decision", params.decision);
+    if (params?.limit) qs.set("limit", String(params.limit));
+    const q = qs.toString();
+    return request<{
+      status: "ok";
+      count: number;
+      items: ProactiveDecisionRow[];
+    }>(`/api/proactive-caller/decisions${q ? `?${q}` : ""}`);
+  },
+
+  proactiveCallerStats: () =>
+    request<{
+      status: "ok";
+      tenant_id: string;
+      stats: {
+        total: number;
+        will_call: number;
+        failed: number;
+        skipped: number;
+        avg_score_called: number | null;
+        avg_score_skipped: number | null;
+      };
+    }>(`/api/proactive-caller/stats`),
+
+  proactiveCallerTriggerForPatient: (patientId: string, force = false) =>
+    request<{ status: "ok"; decision: string }>(
+      `/api/proactive-caller/trigger/${patientId}`,
+      { method: "POST", body: JSON.stringify({ force }) },
+    ),
+
+  proactiveCallerGetPatientSettings: (patientId: string) =>
+    request<{ status: "ok"; settings: PatientCallSettings }>(
+      `/api/proactive-caller/patient/${patientId}/settings`,
+    ),
+
+  proactiveCallerUpdatePatientSettings: (
+    patientId: string,
+    payload: Partial<Omit<PatientCallSettings, "id" | "full_name">>,
+  ) =>
+    request<{ status: "ok"; settings: PatientCallSettings }>(
+      `/api/proactive-caller/patient/${patientId}/settings`,
+      { method: "PATCH", body: JSON.stringify(payload) },
     ),
 };
 
