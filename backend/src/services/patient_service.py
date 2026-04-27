@@ -4,6 +4,7 @@ from __future__ import annotations
 import re
 import unicodedata
 from difflib import SequenceMatcher
+from uuid import UUID
 
 from src.services.postgres import get_postgres
 from src.utils.logger import get_logger
@@ -18,20 +19,38 @@ def _normalize(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+def _serialize_row(row: dict | None) -> dict | None:
+    """Converte tipos não-JSON-serializáveis (datetime, time, date, UUID) pra
+    string. Necessário porque migration 040 adicionou colunas TIME em
+    aia_health_patients (preferred_call_window_*) que Flask jsonify não sabe
+    serializar nativamente."""
+    if not row:
+        return row
+    out = dict(row)
+    for k, v in list(out.items()):
+        if hasattr(v, "isoformat"):  # datetime, date, time → ISO 8601 string
+            out[k] = v.isoformat()
+        elif isinstance(v, UUID):
+            out[k] = str(v)
+    return out
+
+
 class PatientService:
     def __init__(self):
         self.db = get_postgres()
 
     def get_by_id(self, patient_id: str) -> dict | None:
-        return self.db.fetch_one(
+        row = self.db.fetch_one(
             "SELECT * FROM aia_health_patients WHERE id = %s AND active = TRUE", (patient_id,)
         )
+        return _serialize_row(row)
 
     def list_all(self, tenant_id: str) -> list[dict]:
-        return self.db.fetch_all(
+        rows = self.db.fetch_all(
             "SELECT * FROM aia_health_patients WHERE tenant_id = %s AND active = TRUE ORDER BY full_name",
             (tenant_id,),
         )
+        return [_serialize_row(r) for r in (rows or [])]
 
     def search_by_name(self, tenant_id: str, query: str, limit: int = 5) -> list[dict]:
         """Busca paciente por nome com fuzzy matching.

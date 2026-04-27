@@ -481,11 +481,11 @@ def tick() -> dict:
     db = get_postgres()
     now_utc = datetime.now(timezone.utc)
 
-    # Lista tenants ativos
+    # Lista todos tenants configurados — tabela tenant_config não tem coluna
+    # active (todo tenant configurado é ativo por definição).
     tenants = db.fetch_all(
         """SELECT tenant_id, proactive_caller_settings, guardrail_settings
-           FROM aia_health_tenant_config
-           WHERE active = TRUE"""
+           FROM aia_health_tenant_config"""
     )
     summary = {
         "tenants_evaluated": 0,
