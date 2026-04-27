@@ -33,6 +33,23 @@ bp = Blueprint("communications", __name__)
 VOICE_CALL_SERVICE_URL = os.getenv(
     "VOICE_CALL_SERVICE_URL", "http://voice-call-service:5040"
 )
+LIVEKIT_AGENT_SERVICE_URL = os.getenv(
+    "LIVEKIT_AGENT_SERVICE_URL", "http://livekit-agent-service:5042"
+)
+# Switch entre os dois backends de voz. Default mantém voice-call-service
+# (Grok+PJSIP) pra não quebrar produção. Trocar pra "livekit" quando LiveKit
+# trunk + agent estiverem configurados em LIVEKIT_SETUP.md.
+VOICE_BACKEND = os.getenv("VOICE_BACKEND", "voice-call-service").lower()
+
+
+def _voice_backend_url() -> str:
+    return (
+        LIVEKIT_AGENT_SERVICE_URL
+        if VOICE_BACKEND == "livekit"
+        else VOICE_CALL_SERVICE_URL
+    )
+
+
 _client = httpx.Client(timeout=20.0)
 
 
@@ -409,17 +426,23 @@ def dial():
 
     try:
         resp = _client.post(
-            f"{VOICE_CALL_SERVICE_URL}/api/voice-call/dial",
+            f"{_voice_backend_url()}/api/voice-call/dial",
             json=payload, timeout=20.0,
         )
     except httpx.RequestError as exc:
-        logger.warning("voice_call_unreachable: %s", exc)
-        return jsonify({"status": "error", "reason": "voice_call_unreachable"}), 503
+        logger.warning(
+            "voice_call_unreachable backend=%s error=%s",
+            VOICE_BACKEND, exc,
+        )
+        return jsonify({
+            "status": "error", "reason": "voice_call_unreachable",
+            "backend": VOICE_BACKEND,
+        }), 503
 
     if resp.status_code >= 400:
         return jsonify({
             "status": "error", "reason": f"upstream_{resp.status_code}",
-            "detail": resp.text[:300],
+            "detail": resp.text[:300], "backend": VOICE_BACKEND,
         }), 502
 
     out = resp.json() or {}
@@ -428,8 +451,12 @@ def dial():
         "destination": destination,
         "patient_id": body.get("patient_id"),
         "call_id": out.get("call_id"),
+        "voice_backend": VOICE_BACKEND,
     })
-    return jsonify({**out, "scenario_code": scenario["code"]}), 200
+    return jsonify({
+        **out, "scenario_code": scenario["code"],
+        "voice_backend": VOICE_BACKEND,
+    }), 200
 
 
 @bp.post("/api/communications/hangup")
@@ -440,7 +467,7 @@ def hangup():
         return jsonify({"status": "error", "reason": "call_id_required"}), 400
     try:
         resp = _client.post(
-            f"{VOICE_CALL_SERVICE_URL}/api/voice-call/hangup",
+            f"{_voice_backend_url()}/api/voice-call/hangup",
             json={"call_id": body["call_id"]}, timeout=10.0,
         )
     except httpx.RequestError:
@@ -453,7 +480,7 @@ def hangup():
 def active_calls():
     try:
         resp = _client.get(
-            f"{VOICE_CALL_SERVICE_URL}/api/voice-call/calls", timeout=5.0,
+            f"{_voice_backend_url()}/api/voice-call/calls", timeout=5.0,
         )
         return jsonify(resp.json()), resp.status_code
     except httpx.RequestError:
