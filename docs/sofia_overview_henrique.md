@@ -98,7 +98,7 @@ Cada combinação dessas tem um **playbook editável** no banco — define o tom
 
 Esta é a **parte do produto onde sua expertise mais entra**. Vou detalhar.
 
-A Sofia tem um motor determinístico (não-LLM, código + regras) que valida toda prescrição em **12 dimensões** simultaneamente:
+A Sofia tem um motor determinístico (código + regras, não depende de IA generativa) que valida toda prescrição em **12 dimensões** simultaneamente:
 
 1. **Dose máxima diária** (ANVISA + FDA por princípio ativo)
 2. **Critérios de Beers 2023** (AVOID + Caution em geriatria)
@@ -162,7 +162,7 @@ Há um processo automático que **re-roda o motor toda semana** sobre todas as p
 A memória é o que torna a Sofia diferente de um chatbot. Hoje ela tem **4 camadas de memória**:
 
 ### a) Memória da conversa atual
-Últimas 30 mensagens da sessão. Padrão de qualquer LLM. Funciona dentro de cada conversa.
+Últimas 30 mensagens da sessão. Padrão de qualquer sistema conversacional baseado em IA. Funciona dentro de cada conversa.
 
 ### b) Memória cross-canal (45 minutos)
 Cuidador conversa via chat às 8h. Idoso liga via voz às 8h30. A Sofia da ligação **sabe** do que foi conversado no chat, porque um buffer compartilhado mantém os últimos turnos por 45 minutos. UX "uma Sofia só" — você troca de canal e ela continua a conversa.
@@ -173,7 +173,7 @@ Cada usuário (médico, cuidador, familiar, paciente) tem um perfil de memória 
 LGPD: opt-in via flag por usuário. Pacientes B2C precisam consentir explicitamente antes de a memória ser ativada.
 
 ### d) Recall semântico (qualquer mensagem do passado)
-Toda mensagem é **vetorizada** (768 dimensões via embedding semântico) e indexada. Quando médico pergunta "lembra que comentei sobre dor lombar do Sr Antônio em fevereiro?", a Sofia faz busca por similaridade e traz as mensagens exatas dos últimos 90 dias. Não é resumo — é **recall verbatim**, com timestamp e canal de origem.
+Toda mensagem é **vetorizada via embedding semântico** e indexada em banco vetorial dedicado. Quando médico pergunta "lembra que comentei sobre dor lombar do Sr Antônio em fevereiro?", a Sofia faz busca por similaridade e traz as mensagens exatas dos últimos 90 dias. Não é resumo — é **recall verbatim**, com timestamp e canal de origem.
 
 ### Memória coletiva anonimizada (cross-tenant)
 
@@ -254,8 +254,8 @@ A ligação telefônica é talvez o canal mais importante pra B2C, porque idoso 
 ### Fluxo de uma ligação outbound (Sofia liga)
 
 1. Sistema detecta "hora de check-in matinal pra Dona Helena, 8h30"
-2. Sofia abre conexão com motor de voz (xAI Grok Voice Realtime, modelo speech-to-speech)
-3. PJSIP nosso disca pro telefone da Helena (DDD 51, BRT)
+2. Sofia abre conexão com motor de voz (modelo speech-to-speech state-of-the-art em PT-BR)
+3. Infraestrutura VoIP nossa disca pro telefone da Helena (DDD 51, BRT)
 4. Helena atende → Sofia se apresenta com "Bom dia Dona Helena, é a Sofia da ConnectaIACare"
 5. Conversa natural por 3-5 minutos, com memória, com tools (consulta medicação, registra relato)
 6. Quando Helena interrompe Sofia ("não, espera, eu queria falar de outra coisa"), Sofia para na hora — interrupção em <500ms
@@ -274,7 +274,61 @@ Cada cenário tem **prompt completo** (~7-15 KB) com regras anti-pânico, anti-d
 
 ### O que mudou ontem (fase de polimento)
 
-A Sofia agora respeita **interrupção do usuário em tempo real**: se você começar a falar enquanto ela fala, ela para imediatamente, drena o áudio bufferizado e cancela a geração no servidor da Grok. É a diferença entre "robô que precisa terminar a frase" e "conversa natural".
+A Sofia agora respeita **interrupção do usuário em tempo real**: se você começar a falar enquanto ela fala, ela para imediatamente, drena o áudio bufferizado e cancela a geração no servidor de IA. É a diferença entre "robô que precisa terminar a frase" e "conversa natural".
+
+---
+
+## 6.B Módulo de teleconsulta integrado (em finalização)
+
+Esse é um módulo estratégico do produto e que merece atenção específica — porque é onde **a Sofia e o profissional de saúde se encontram em tempo real, no caso de uso que mais gera valor**: a teleconsulta.
+
+A maioria das jornadas de cuidado pós-alta esbarra no momento em que o paciente precisa, de fato, falar com um médico. As soluções disponíveis hoje no mercado brasileiro empurram o paciente pra **plataformas terceiras de telemedicina** (Doctoralia, Conexa, etc.) — o que cria três problemas: continuidade do prontuário se quebra, relação do paciente com o hospital de origem se dilui (consulta com "qualquer médico" da rede, não com a equipe que o conhece), e o hospital perde o ponto de contato.
+
+A ConnectaIACare está finalizando um **módulo de teleconsulta próprio**, integrado à Sofia e ao prontuário do parceiro (hospital, clínica, casa geriátrica), homologado pra uso em saúde digital sob CFM 2.314/2022.
+
+### Como funciona o fluxo
+
+1. **Origem do agendamento** — pode nascer de 3 caminhos:
+   - Sofia identifica situação clínica que precisa de avaliação médica e propõe ao paciente abrir teleconsulta com a equipe do parceiro
+   - Paciente solicita ativamente ("Sofia, queria conversar com um médico"). Sofia avalia urgência via motor clínico e propõe slot
+   - Médico do parceiro agenda proativamente via painel ao revisar fila de Risk Scoring
+
+2. **Acesso do paciente — zero fricção**. Recebe link único via WhatsApp, abre direto no navegador do celular. Sem instalar app, sem cadastro, sem senha. Sala já vinculada ao prontuário.
+
+3. **Médico do outro lado — contexto completo**. Tela dividida: vídeo do paciente em uma metade, prontuário completo na outra (incluindo: tudo que a Sofia conversou nos últimos 30 dias, último Risk Score, motor clínico ativo nas medicações, alertas pendentes na fila). Médico **chega quente na consulta**, não frio.
+
+4. **Transcrição e estruturação automática durante a consulta**. Áudio é transcrito em tempo real e a Sofia atua como secretária clínica em background: extrai queixas, sintomas, hipóteses diagnósticas mencionadas, condutas propostas. Médico fala naturalmente, e ao final tem **resumo estruturado pré-preenchido** pra revisar e aprovar.
+
+### A finalização — onde o módulo se diferencia
+
+A "finalização" tem **5 ações automáticas integradas** ao fechar a consulta. É aqui que tua expertise farmacológica entra com força:
+
+- **Prescrição digital com assinatura**. O médico revisa a prescrição que a Sofia montou a partir da conversa, ajusta, assina digitalmente. Receita vai pro paciente via WhatsApp como PDF + entrada estruturada no prontuário. Conformidade CFM/ANVISA.
+- **Atestado, declaração de comparecimento, encaminhamento** — emitidos no mesmo fluxo, assinados digitalmente.
+- **Plano terapêutico atualizado** no prontuário: conduta proposta, próxima reavaliação, sinais de alerta — vira programa de acompanhamento ativo da Sofia ("monitorar tosse com expectoração amarela nos próximos 3 dias, escalar se piorar").
+- **Atualização automática do motor clínico**. Se o médico prescreveu nova medicação ou ajustou dose, **o motor de 12 dimensões automaticamente roda a nova prescrição contra o histórico do paciente** — flag de interações novas, pedido de confirmação se houver Beers AVOID, etc. **Aqui é especialmente importante a tua leitura clínica**: como tornar esse loop de feedback (médico prescreve → motor avalia → Sofia continua o cuidado) o mais útil e o menos burocrático possível pro médico que está finalizando a consulta?
+- **Audit completo**: gravação da consulta (áudio + vídeo, retenção configurável), transcrição estruturada, dados extraídos, prescrição emitida — todas em audit chain criptográfica. Auditável pelo CFM ou auditoria interna a qualquer momento.
+
+### Após a consulta
+
+Sofia retoma o relacionamento com o paciente já com o plano novo. Liga no horário programado pra checar entendimento da conduta, adesão à medicação nova, se precisa de algo. **A continuidade não se quebra — ela se intensifica após a consulta**.
+
+### Por que isso importa pra estratégia do produto
+
+- Paciente fica dentro do ecossistema do parceiro do começo ao fim
+- Equipe clínica do hospital atende a teleconsulta — não é "qualquer médico" da rede
+- Receita gerada pela teleconsulta fica com o parceiro, não com plataforma terceira
+- Dados clínicos não vazam pra fora do ecossistema (compliance LGPD por design)
+- O que foi prescrito é monitorado pela Sofia automaticamente nos dias seguintes — fechando o ciclo de cuidado
+
+### Onde sua expertise entra (também aqui)
+
+1. **UX clínica de finalização**. Como o médico revisa a prescrição auto-montada pela Sofia? Que campos têm que estar visíveis? Quanto detalhamento? Como evitar "aprovação cega" de receita auto-gerada?
+2. **Integração com motor de 12 dimensões**. Quando o médico ajusta dose durante a consulta, qual é o feedback ideal do motor pro médico — alerta in-line, lista resumida no final, ou ambos? Como balancear "alerta útil" vs "fadiga de alerta na hora errada"?
+3. **Templates clínicos**. Pra acelerar a finalização, pretendemos ter templates por especialidade (cardiologia pós-IAM, pneumologia DPOC, ortopedia pós-cirurgia). Quais templates fazem mais sentido pro mercado brasileiro?
+4. **Limites do que a Sofia pode "preencher"**. A Sofia auto-extrai conduta, mas tem coisas que ela **nunca** deveria preencher sozinha (diagnóstico definitivo, prognóstico, decisão de internação). Quais são essas linhas? Vamos definir juntos.
+
+**Status técnico**: módulo em fase final de implementação. Disponível pro piloto com Grupo VITA (pós-alta hospitalar).
 
 ---
 
@@ -292,6 +346,7 @@ A Sofia agora respeita **interrupção do usuário em tempo real**: se você com
 - Biometria de voz (identificação do interlocutor)
 - OCR clínico (receita, embalagem, bula, exame, atestado, displays)
 - Visão multimodal pra lesão / ferida / edema (gera observação, não diagnóstico)
+- Módulo de teleconsulta integrado (em finalização, disponível pro piloto VITA)
 
 ### Curto prazo (próximas 2-3 semanas)
 
@@ -355,12 +410,12 @@ Quando crescermos, vamos enquadrar como SaMD (Software como Dispositivo Médico)
 
 ### Análises externas em curso
 
-Pedimos análise crítica do projeto pra 4 fontes (3 LLMs externos: Gemini 2.5 Pro, ChatGPT 5, Grok + minha análise interna). Convergiram em pontos importantes:
+Pedimos análise crítica do projeto pra 4 fontes (3 modelos de IA externos state-of-the-art + análise interna). Convergiram em pontos importantes:
 - Cross-channel state drift (resolvido — buffer 45min)
 - Risk scoring determinístico (resolvido — Fase 1 implementada)
 - Versionamento de prompts (schema pronto, UI pendente)
 - Não fazer voice cloning (assumido — voz da Sofia sempre transparente)
-- Adotar plataformas voice maduras (LiveKit/Vapi) em vez de manter PJSIP próprio (decisão híbrida tomada — LiveKit pro piloto, PJSIP fica pra escala)
+- Adotar plataformas de voz gerenciadas em vez de manter infraestrutura VoIP totalmente própria (decisão híbrida tomada — plataforma gerenciada pro piloto, infra própria fica pra escala)
 
 ---
 

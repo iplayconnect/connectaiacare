@@ -16,7 +16,7 @@ A diferença para outras soluções de telemonitoramento é que a Sofia não é 
 
 **Em uma frase**: enquanto o paciente está em casa, a Sofia mantém ele clinicamente conectado ao hospital — sem exigir equipe humana 24/7 do hospital.
 
-A proposta deste documento é fundamentar uma reunião com a direção clínica e CEO, na qual discutiremos um **piloto controlado de 60-90 dias com 30-50 pacientes pós-alta de alto risco**, com KPIs definidos em conjunto. O modelo comercial será desenhado em conjunto com o Grupo VITA conforme estrutura preferida (B2B SaaS por leito, B2B per-paciente acompanhado, ou híbrido).
+A proposta deste documento é fundamentar uma reunião com a direção clínica e CEO, na qual discutiremos uma **POC controlada de 60-90 dias com 30-50 pacientes pós-alta de alto risco**, com KPIs definidos em conjunto. A POC opera com **repasse integral e transparente dos custos operacionais ao Grupo VITA**, sem markup nem subsídio — garantindo alinhamento de interesses e visibilidade direta sobre o custo real por paciente acompanhado. O modelo comercial pós-POC (B2B SaaS por leito, per-paciente acompanhado, ou híbrido) é desenhado em conjunto após validação dos resultados.
 
 ---
 
@@ -68,7 +68,7 @@ Se conseguíssemos reduzir essa readmissão em apenas 3 pontos percentuais com v
 
 A Sofia é uma assistente conversacional baseada em **inteligência artificial supervisionada** que opera como camada de relacionamento com o paciente em casa. Ela tem três características que a diferenciam de soluções concorrentes:
 
-### 2.1 Ela tem inteligência clínica determinística — não apenas LLM
+### 2.1 Ela tem inteligência clínica determinística — não apenas IA generativa
 
 Diferente de chatbots que dependem 100% da "intuição" do modelo de linguagem, a Sofia integra um **motor clínico determinístico** que valida toda saída clínica em 12 dimensões antes de qualquer ação:
 
@@ -122,7 +122,7 @@ A Sofia mantém **quatro camadas de memória** que juntas dão continuidade real
 
 **Memória de longo prazo do usuário** — cada usuário (médico, cuidador, familiar, paciente) tem perfil persistente: resumo narrativo + fatos estruturados (preferências, contexto profissional, tópicos em curso, preocupações). Re-extraído automaticamente a cada 20 mensagens. Quando o mesmo usuário volta dias depois, a Sofia já vem contextualizada.
 
-**Recall semântico** — toda mensagem é vetorizada (embeddings 768 dimensões via Gemini Embedding) e indexada com algoritmo HNSW para busca por similaridade. Quando médico pergunta "lembra que comentei sobre dor lombar do Sr Antônio em fevereiro?", a Sofia faz busca semântica e traz as mensagens **exatas** dos últimos 90 dias. Não é resumo — é recall verbatim, com timestamp e canal de origem (chat ou ligação).
+**Recall semântico** — toda mensagem é vetorizada e indexada em banco vetorial dedicado para busca por similaridade. Quando médico pergunta "lembra que comentei sobre dor lombar do Sr Antônio em fevereiro?", a Sofia faz busca semântica e traz as mensagens **exatas** dos últimos 90 dias. Não é resumo — é recall verbatim, com timestamp e canal de origem (chat ou ligação).
 
 Para pós-alta hospitalar, isso significa: **a Sofia consegue identificar deterioração** ao comparar como o paciente fala hoje com como falava há 7 dias.
 
@@ -152,7 +152,7 @@ Há uma camada de software chamada **Safety Guardrail Layer** que intercepta tod
 
 Há também um **circuit breaker** automático: se mais de 5% das ações clínicas em 5 minutos caem na fila de revisão, a Sofia se auto-pausa por 30 minutos e notifica o admin. Protege contra "Sofia desregulada" que estaria escalando demais (provável bug de prompt ou de regra).
 
-Toda ação fica registrada em uma **audit chain criptográfica** (hash chain SHA-256) que detecta qualquer adulteração retroativa. **LGPD-compliant by design**.
+Toda ação fica registrada em uma **audit chain criptográfica** que detecta qualquer adulteração retroativa. **LGPD-compliant by design**.
 
 ### 2.4 Ela reconhece a voz de quem está conversando — biometria como camada clínica
 
@@ -209,9 +209,47 @@ A maior parte das soluções de telemonitoramento brasileiras falha em adoção 
 
 6. **Ligação via WhatsApp** (em estudo para o piloto). A Meta liberou em 2024 a possibilidade de **chamadas de voz outbound via WhatsApp Business API**. Para idoso brasileiro, isso é estratégico: chamada via WhatsApp **não consome créditos de ligação**, **toca o WhatsApp** que ele já reconhece, **mostra a foto e nome verificado da equipe VITA** no caller, e tem qualidade de voz superior à PSTN tradicional. Estamos avaliando a maturidade dessa API para incorporação no piloto — alternativa de fallback é sempre a ligação telefônica clássica.
 
-7. **Compliance LGPD via WhatsApp Business oficial**. Operamos via **WhatsApp Business API homologada com Meta**, dentro dos templates oficiais aprovados, com criptografia ponta-a-ponta nativa, dados em servidores brasileiros via integradores certificados (Twilio, Gupshup, ou similar — a definir conjuntamente). Templates de mensagens proativas pré-aprovados pela Meta para healthcare. Opt-in explícito do paciente registrado.
+7. **Compliance LGPD via WhatsApp Business oficial**. Operamos via **WhatsApp Business API homologada com a Meta**, dentro dos templates oficiais aprovados, com criptografia ponta-a-ponta nativa, dados em servidores brasileiros via integradores certificados homologados pela Meta (a definir conjuntamente). Templates de mensagens proativas pré-aprovados para healthcare. Opt-in explícito do paciente registrado.
 
 **Para o piloto VITA**, WhatsApp Business é canal primário recomendado — chat web e ligação telefônica permanecem disponíveis como fallback ou para perfis específicos (paciente sem WhatsApp, cuidador profissional do hospital, integração com equipamentos).
+
+### 2.6 Módulo de teleconsulta integrado — paciente não sai do ecossistema VITA-Sofia
+
+A maioria das jornadas de extensão de cuidado pós-alta esbarra no momento em que o paciente precisa, de fato, falar com um médico. As soluções disponíveis hoje no mercado brasileiro empurram o paciente para **plataformas terceiras de telemedicina** (Doctoralia, Conexa, etc.) — o que cria três problemas: a continuidade do prontuário se quebra (o que foi conversado na teleconsulta volta como PDF, sem estruturação), a relação do paciente com o hospital de origem se dilui (ele consulta com "qualquer médico" da plataforma, não com a equipe VITA que o conhece), e o hospital perde o ponto de contato — vira intermediário burocrático.
+
+A ConnectaIACare está finalizando um **módulo de teleconsulta próprio**, integrado à Sofia e ao prontuário do hospital, especificamente desenhado para extensão de cuidado pós-alta. O módulo é homologado para uso em saúde digital e segue os requisitos da Resolução CFM 2.314/2022 e correlatas.
+
+**Como funciona no fluxo VITA**:
+
+1. **Origem do agendamento**. A teleconsulta pode nascer de três caminhos:
+   - Sofia identifica situação clínica que precisa de avaliação médica (ex: Sr. José com dispneia aos esforços no D+4 pós-IAM) e propõe ao paciente "vou agendar uma teleconsulta com a equipe do VITA pra hoje à tarde, ok?" — paciente confirma, Sofia abre slot na agenda do médico VITA de plantão da extensão.
+   - Paciente solicita ativamente via WhatsApp ou chat: "Sofia, queria conversar com um médico". Sofia avalia urgência (com motor clínico) e propõe slot.
+   - Médico VITA agenda proativamente via painel ao revisar fila de Risk Scoring (ex: paciente em alto risco que merece avaliação preventiva).
+
+2. **Acesso pelo paciente — zero fricção**. O paciente recebe link único via WhatsApp ("Sr. José, sua consulta com Dr. Silva é em 15 minutos. Toque aqui pra entrar"). O link abre direto no navegador do celular — **sem instalar app, sem cadastro, sem senha**. A sala já está pré-configurada com o nome dele, vincula automaticamente ao prontuário, registra início.
+
+3. **Médico VITA do outro lado — contexto completo**. O médico entra pela URL específica da equipe VITA, com tela dividida: vídeo do paciente em uma metade, **prontuário VITA completo** na outra (incluindo: tudo que a Sofia conversou nos últimos 30 dias com o paciente, último Risk Score, motor clínico ativo nas medicações dele, alertas pendentes na fila de revisão). O médico não chega "frio" na consulta — chega com **contexto de continuidade de cuidado** que nenhuma plataforma terceira de telemedicina entrega.
+
+4. **Transcrição e estruturação automática durante a consulta**. O áudio é transcrito em tempo real e a Sofia atua como secretária clínica em background: extrai queixas, sintomas, hipóteses diagnósticas mencionadas, condutas propostas pelo médico. O médico não precisa parar pra digitar — fala naturalmente, e ao final da consulta tem **resumo estruturado pré-preenchido** pra revisar e aprovar.
+
+5. **Finalização da consulta — o ponto crítico**. É aqui que o módulo se diferencia. A "finalização" tem 5 ações automáticas, todas integradas:
+   - **Prescrição digital com assinatura** (quando aplicável). O médico revisa a prescrição que a Sofia montou a partir da conversa, ajusta, assina digitalmente. A receita vai pro paciente via WhatsApp como PDF + entrada estruturada no prontuário VITA. Conformidade com CFM e ANVISA.
+   - **Atestado, declaração de comparecimento, encaminhamento** (quando aplicável) — emitidos no mesmo fluxo, assinados digitalmente, entregues por WhatsApp.
+   - **Plano terapêutico atualizado** no prontuário VITA: conduta proposta, próxima reavaliação, sinais de alerta para o paciente observar — vira programa de acompanhamento ativo da Sofia (ex: "monitorar tosse com expectoração amarela nos próximos 3 dias, escalar se piorar").
+   - **Atualização do motor clínico**: se o médico prescreveu nova medicação ou ajustou dose, o motor de 12 dimensões automaticamente roda a nova prescrição contra o histórico do paciente — flagueando interações novas, pedindo confirmação se houver Beers AVOID, etc. Sofia continua a partir dali com a prescrição atualizada.
+   - **Audit completo**: gravação da consulta (áudio + vídeo, com retenção configurável conforme política do Grupo VITA), transcrição estruturada, dados extraídos, prescrição emitida, todas assinadas em audit chain criptográfica. **Auditável a qualquer momento, inclusive por auditoria do CFM**.
+
+6. **Após a consulta**. Sofia retoma o relacionamento com o paciente já com o plano novo. Liga no horário programado pra checar se ele entendeu a conduta, se está tomando a medicação nova certo, se precisa de algo. **A continuidade não se quebra — ela se intensifica após a consulta**.
+
+**Vantagens estratégicas para o Grupo VITA**:
+
+- **Paciente fica dentro do ecossistema VITA do começo ao fim** — desde a alta até a próxima consulta presencial, sem passar por terceiros
+- **Equipe clínica do hospital atende a teleconsulta** — não é "qualquer médico" da rede, é médico do VITA que tem familiaridade com o protocolo de pós-alta da casa
+- **Receita gerada pela teleconsulta fica com o Grupo VITA**, não com plataforma terceira (modelo de captura de valor inteiramente diferente da telemedicina marketplace)
+- **Dados clínicos não vazam** para fora do ecossistema VITA-Sofia (compliance LGPD por design)
+- **Continuidade de cuidado real**: o que foi prescrito na teleconsulta é monitorado pela Sofia automaticamente nos dias seguintes, fechando o ciclo
+
+**Status técnico**: módulo em fase final de implementação — **disponível para o piloto VITA**. As integrações específicas com o prontuário escolhido (MV/Tasy/Soul) e os fluxos exatos de assinatura digital (qual certificadora, qual UX para o médico VITA) são desenhados conjuntamente como parte do escopo da POC.
 
 ---
 
@@ -316,17 +354,17 @@ A cada interação relevante (queixa registrada, escalação clínica, alerta ge
 
 Equipe clínica VITA vê tudo no prontuário do paciente como um item de timeline pós-alta. **Não precisa abrir outro sistema**.
 
-### 4.3 Alertas e teleconsulta (HL7 Messaging + integração agendamento)
+### 4.3 Alertas e teleconsulta integrada (HL7 Messaging + módulo próprio)
 
 Quando Sofia identifica situação que requer ação clínica humana, ela:
 1. Escala via API para o sistema de agenda do Grupo VITA
-2. Cria solicitação de teleconsulta com o sumário clínico
+2. Cria solicitação de teleconsulta no **módulo próprio integrado** (descrito na seção 2.6) com sumário clínico anexado, sem empurrar o paciente para plataforma terceira
 3. Notifica equipe via canal acordado (email, push, WhatsApp Business, integração com Slack/Teams se houver)
 4. Mantém paciente engajado enquanto a equipe não responde (Sofia: "vou avisar a equipe do VITA, eles vão te dar retorno em breve")
 
 ### 4.4 Onde mora a Sofia
 
-A plataforma roda em **arquitetura cloud-native** (Docker, PostgreSQL com pgvector, Redis), pode ser hospedada:
+A plataforma roda em **arquitetura cloud-native moderna**, pode ser hospedada:
 - **Cloud da ConnectaIACare** (modelo SaaS típico, dados em servidores brasileiros conformes LGPD)
 - **Cloud privada do Grupo VITA** (se houver requisito de soberania de dados)
 - **On-premise** no datacenter do Grupo VITA (se houver requisito operacional)
@@ -341,7 +379,7 @@ Cada uma dessas opções tem trade-offs de complexidade e custo, podemos discuti
 
 ConnectaIACare opera com **privacy by design**:
 
-- **Auditoria criptográfica imutável**: toda ação sensível (acesso, edição, escalação) é registrada em uma chain de hash SHA-256. Qualquer adulteração retroativa é detectável computacionalmente.
+- **Auditoria criptográfica imutável**: toda ação sensível (acesso, edição, escalação) é registrada em audit chain criptográfica. Qualquer adulteração retroativa é detectável computacionalmente.
 - **Minimização de dados**: armazenamos apenas o necessário para o serviço. Dados crus de mensagem não saem da tabela original.
 - **Consentimento explícito**: TCLE específico para processamento de dados de saúde (Art. 11), com opt-in e opt-out a qualquer momento.
 - **Responsabilidade compartilhada**: ConnectaIACare é controladora dos dados de operação; Grupo VITA é controlador dos dados clínicos do paciente. Acordos de processamento (DPA) são parte do contrato.
@@ -378,15 +416,15 @@ Mais de 20 anos de experiência em arquitetura de plataformas SaaS escaláveis. 
 Formado em Biomedicina, formando em Farmácia em 2026. Responsável pela validação clínica do motor de cruzamentos, expansão da cobertura farmacológica (meta de 80+ princípios ativos cobrindo 95% da prescrição geriátrica brasileira), revisão de cenários de ligação, e enquadramento regulatório (CFM + ANVISA).
 
 ### Camada de IA
-A Sofia opera sobre **xAI Grok Voice Realtime** (modelo speech-to-speech state-of-the-art para latência <500ms) para voz, e **Google Gemini Flash** para reasoning e extração de memória. Embeddings semânticos via Gemini Embedding (768 dimensões com Matryoshka truncation). Dose validator e regras clínicas são código nativo Python — não dependem de LLM.
+A Sofia combina três famílias de modelos de IA generativa state-of-the-art (voz speech-to-speech para conversação telefônica natural, modelo de raciocínio para extração de memória e estruturação clínica de relatos, modelo de visão multimodal para OCR e análise de imagem). **Toda regra clínica e validação farmacológica é código nativo determinístico — não depende de IA generativa.** A IA generativa é a interface conversacional; o motor clínico é determinístico, auditável e versionado. Os fornecedores específicos de modelos são selecionados por critério técnico e podem ser substituídos sem impacto na lógica clínica.
 
 ### Infraestrutura
 Plataforma rodando em produção desde início de 2026, com:
 - Audit chain criptográfico LGPD-compliant
 - Memória cross-session por paciente
-- Recall semântico via pgvector (HNSW index)
+- Recall semântico via banco de dados vetorial dedicado
 - Safety Guardrail Layer com circuit breaker automático
-- 4 schedulers em background (revalidação semanal, memória coletiva, queue executor, embedding worker)
+- Workers em background (revalidação semanal, memória coletiva, fila de execução, indexação semântica)
 - Versionamento de prompts dos cenários de ligação (draft → published)
 
 ---
@@ -398,20 +436,21 @@ Para evitar promessas vazias, listamos abaixo o que está rodando em ambiente de
 | Capacidade | Status | Validado em |
 |---|---|---|
 | **Chat texto** (web + mobile) com 16 ferramentas clínicas | Em produção | Sim, com pilotos internos |
-| **Voz no browser** com Grok Realtime | Em produção | Sim, latência média 500-800ms |
-| **Ligação telefônica** outbound (PJSIP + LiveKit) | Em produção | Sim, com 5 cenários ativos |
+| **Voz no browser** com modelo speech-to-speech | Em produção | Sim, latência conversacional natural |
+| **Ligação telefônica** outbound | Em produção | Sim, com 5 cenários ativos |
 | **Motor clínico 12 dimensões** | Em produção | Sim, 48 princípios ativos |
 | **Memória 4 camadas** | Em produção | Sim, cross-canal validado |
 | **Safety Guardrail Layer** | Em produção | Sim, com circuit breaker funcional |
 | **Risk Scoring por paciente** | Em produção | Sim, 45 pacientes scored automaticamente |
 | **Memória coletiva anonimizada cross-tenant** | Em produção | Sim, pipeline diário |
-| **Audit chain LGPD criptográfico** | Em produção | Sim, hash SHA-256 inviolável |
+| **Audit chain LGPD criptográfico** | Em produção | Sim, audit chain criptograficamente inviolável |
 | **5 cenários de ligação editáveis sem release** | Em produção | Sim, admin edita em DRAFT, publica |
 | **Biometria de voz — identificação do interlocutor** | Em produção | Sim, voiceprint por usuário registrado |
-| **WhatsApp Business — chat texto + áudio + mídia** | Em homologação | Validação final do template Meta para piloto VITA |
-| **Entrada de relatos por áudio do WhatsApp** | Em produção | STT + estruturação clínica do conteúdo |
-| **OCR clínico** (receita, embalagem, bula, exame, atestado) | Em produção | Visão multimodal nativa (Gemini Vision) |
+| **WhatsApp Business — chat texto + áudio + mídia** | Em homologação | Validação final dos templates Meta para piloto VITA |
+| **Entrada de relatos por áudio do WhatsApp** | Em produção | Transcrição + estruturação clínica do conteúdo |
+| **OCR clínico** (receita, embalagem, bula, exame, atestado) | Em produção | Visão multimodal nativa |
 | **Análise visual de lesão / ferida / edema** | Em produção | Geração de observação clínica, não diagnóstico |
+| **Módulo de teleconsulta integrado** | Em finalização | Disponível para o piloto VITA |
 
 **Próximos 60 dias**:
 - Integração FHIR R4 com prontuário eleito pelo Grupo VITA
@@ -445,10 +484,18 @@ Para validar a fit entre a Sofia e o Grupo VITA antes de comprometer com licenci
 - Falsos positivos (Sofia escalou e era irrelevante)
 - Falsos negativos críticos (paciente teve evento e Sofia não captou)
 
-**Modelo comercial do piloto**: a discutir com o Grupo VITA. Estamos abertos a:
-- Piloto sem custo, com SLA de qualidade definido
-- Piloto com custo simbólico de implantação
-- Outros formatos que façam sentido para a operação do Grupo VITA
+**Modelo comercial do piloto (POC)**:
+A POC opera com **transparência total e repasse integral dos custos operacionais para o Grupo VITA**, sem markup nessa etapa. Isso garante alinhamento de interesses (não há subsídio escondido nem expectativa de captura no contrato pós-POC) e dá ao Grupo VITA visibilidade direta sobre o custo real por paciente acompanhado.
+
+Os custos repassados se enquadram em três categorias:
+
+1. **Implantação técnica** (uma vez): integração FHIR com o prontuário VITA, customização de cenários para o perfil de paciente escolhido, treinamento da equipe clínica VITA, configuração de templates Meta no WhatsApp Business, ativação do módulo de teleconsulta integrado.
+
+2. **Operação durante a POC** (mensal, por paciente acompanhado): infraestrutura cloud, IA conversacional (voz, texto, visão), banco de dados, telefonia, WhatsApp Business, módulo de teleconsulta, suporte técnico, plantão clínico de retaguarda 24/7 caso o Grupo VITA opte pelo modelo híbrido de escalação.
+
+3. **Conformidade** (uma vez): adequação contratual (acordo de operador LGPD, DPA), revisão jurídica conjunta, ajustes de TCLE específicos para a operação VITA.
+
+Os valores específicos de cada categoria serão apresentados em proposta detalhada após a definição conjunta do escopo (perfil de paciente, volume estimado, integração com qual sistema, modelo de escalação humana). **A POC não inclui licença comercial nem fee de plataforma** — esses entram apenas na fase pós-POC se o Grupo VITA optar por contrato de continuidade.
 
 **Após o piloto**: ConnectaIACare e Grupo VITA decidem juntos sobre:
 - Expansão para todos os pacientes pós-alta de alto risco
@@ -462,8 +509,8 @@ Para validar a fit entre a Sofia e o Grupo VITA antes de comprometer com licenci
 
 Existem várias soluções de telemonitoramento no mercado brasileiro. Listamos abaixo as principais e o diferencial da Sofia:
 
-### Soluções de telemedicina pura (Doctoralia, Conexa, Memed)
-Conectam paciente ao médico humano por consulta. Não cobrem o relacionamento contínuo entre consultas. **A Sofia não substitui essas soluções — complementa**.
+### Soluções de telemedicina marketplace (Doctoralia, Conexa, etc.)
+Conectam paciente a uma rede de médicos terceiros por consulta avulsa. Não cobrem o relacionamento contínuo entre consultas, e **levam o paciente para fora do ecossistema do hospital** — quebrando continuidade de prontuário, diluindo a relação com a equipe VITA, e transferindo a receita da consulta para a plataforma terceira. **A ConnectaIACare oferece módulo de teleconsulta próprio integrado ao prontuário VITA**: o paciente consulta com a equipe clínica do hospital, dentro do ecossistema, com toda a continuidade de cuidado preservada.
 
 ### Soluções de monitoramento via wearables (Fitbit Health, Apple HealthKit clínico)
 Capturam sinais vitais e atividade. Não conversam com o paciente, não captam queixas, não acompanham adesão. **A Sofia integra com esses dados quando disponíveis, mas adiciona a camada conversacional**.
@@ -476,9 +523,10 @@ Validadas em estudos de não-inferioridade vs enfermagem em larga escala. Excele
 
 ### Diferenciais exclusivos da Sofia
 1. **Motor clínico determinístico em português brasileiro** com cobertura calibrada para prescrição geriátrica do SUS e da saúde suplementar brasileira
-2. **Multi-canal nativo** (chat + voz + ligação) com memória compartilhada
-3. **Posicionamento regulatório claro** (suporte, não decisão; CFM + ANVISA roadmap definido)
-4. **Preço operacional competitivo** (Grok Voice Realtime + LiveKit cloud + infra própria)
+2. **Multi-canal nativo** (WhatsApp + chat + voz + ligação + teleconsulta) com memória compartilhada
+3. **Módulo de teleconsulta próprio** integrado direto ao prontuário do hospital — paciente não sai do ecossistema VITA-Sofia
+4. **Posicionamento regulatório claro** (suporte, não decisão; CFM + ANVISA roadmap definido)
+5. **Arquitetura modular de IA** que permite trocar fornecedores de modelo sem afetar lógica clínica determinística
 
 ---
 
@@ -535,7 +583,7 @@ R: Esse é o maior risco que reconhecemos publicamente. Nossa estratégia para m
 ### Sobre qualidade da voz
 
 **P: A voz da Sofia é confiável? Idoso vai entender?**
-R: Recomendamos demonstração ao vivo na reunião. A Sofia opera com xAI Grok Voice Realtime, modelo speech-to-speech state-of-the-art (latência 500-800ms, voz natural em português brasileiro). Em testes com pacientes idosos do piloto interno, a compreensão foi alta. Detalhes técnicos da arquitetura disponíveis sob NDA.
+R: Recomendamos demonstração ao vivo na reunião. A Sofia opera com modelo de voz speech-to-speech state-of-the-art em português brasileiro, com latência conversacional natural e capacidade de interrupção em tempo real (a Sofia para de falar imediatamente quando o paciente começa a falar). Em testes com pacientes idosos do piloto interno, a compreensão foi alta. Detalhes técnicos da arquitetura disponíveis sob NDA.
 
 ### Sobre escalonamento humano
 
@@ -569,7 +617,7 @@ R: Biomarcadores vocais (jitter, shimmer, prosódia, fluência) estão em **fase
 R: Porque app próprio para idoso pós-alta tem taxa de abandono > 60% nos primeiros 14 dias (literatura comum em telemonitoramento). WhatsApp tem 0% de fricção de adoção: o paciente já usa, a família já está lá, não precisa instalar nada. Em produção, vemos ~3-5× mais adesão a check-ins via WhatsApp comparado a app dedicado. Ainda assim, oferecemos chat web/app para perfis que preferem.
 
 **P: WhatsApp Business é seguro para dados clínicos? E LGPD?**
-R: Operamos via **WhatsApp Business Cloud API homologada Meta**, com criptografia ponta-a-ponta nativa, integradores certificados (Twilio/Gupshup) com servidores brasileiros, e templates de mensagem proativa pré-aprovados pela Meta para healthcare. Opt-in explícito registrado no TCLE. Conformidade LGPD validada por advogado especializado.
+R: Operamos via **WhatsApp Business Cloud API homologada Meta**, com criptografia ponta-a-ponta nativa, integradores certificados homologados pela Meta com servidores brasileiros, e templates de mensagem proativa pré-aprovados pela Meta para healthcare. Opt-in explícito registrado no TCLE. Conformidade LGPD validada por advogado especializado.
 
 **P: Que tipo de dado vai trafegar pelo WhatsApp? Vocês mandam diagnóstico?**
 R: Não. Pelo WhatsApp trafegam: lembretes de medicação (sem revelar diagnóstico), perguntas de check-in ("como passou a noite?"), respostas do paciente (texto ou áudio), confirmações de adesão. **Diagnóstico, prescrição e laudo nunca trafegam pelo WhatsApp** — esses ficam restritos ao prontuário VITA. A Sofia é treinada explicitamente para esse limite.
@@ -577,7 +625,7 @@ R: Não. Pelo WhatsApp trafegam: lembretes de medicação (sem revelar diagnóst
 ### Sobre OCR e visão multimodal
 
 **P: A Sofia consegue mesmo ler receita / bula / exame fotografado?**
-R: Sim. Operamos com modelo de visão multimodal (Google Gemini Vision) com taxa de extração estruturada validada para documentos clínicos brasileiros: receita médica (princípio ativo, dose, posologia, prescritor), embalagem de medicamento (nome comercial → princípio ativo, lote, validade), bula (seções relevantes para a dúvida do paciente), exame laboratorial (extração tabular com nome do parâmetro, valor, unidade, faixa de referência), atestado, encaminhamento. Quando a leitura tem baixa confiança, a Sofia explicita ("não consegui ler com clareza essa parte, pode tirar outra foto?") em vez de adivinhar.
+R: Sim. Operamos com modelo de visão multimodal state-of-the-art com taxa de extração estruturada validada para documentos clínicos brasileiros: receita médica (princípio ativo, dose, posologia, prescritor), embalagem de medicamento (nome comercial → princípio ativo, lote, validade), bula (seções relevantes para a dúvida do paciente), exame laboratorial (extração tabular com nome do parâmetro, valor, unidade, faixa de referência), atestado, encaminhamento. Quando a leitura tem baixa confiança, a Sofia explicita ("não consegui ler com clareza essa parte, pode tirar outra foto?") em vez de adivinhar.
 
 **P: O que vocês fazem com discrepância entre receita fotografada pelo paciente e prescrição registrada no prontuário?**
 R: Esse é um dos casos de uso mais valiosos do OCR. Se o Sr. José sai do hospital VITA com prescrição de carvedilol 12,5 mg 12/12h, mas na foto da receita lida pelo paciente aparece "metoprolol 50 mg 12/12h" (porque a farmácia entregou errado, ou porque havia receita anterior misturada), a Sofia detecta divergência **antes da primeira dose** e escala para a equipe clínica VITA. Erro de medicação capturado preventivamente.
