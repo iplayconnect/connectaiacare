@@ -533,6 +533,57 @@ export interface PatientBaseline {
   last_computed_at: string;
 }
 
+// ───────── Drug Cascades types ─────────
+export type CascadeSeverity = "contraindicated" | "major" | "moderate" | "minor";
+
+export interface DrugCascade {
+  id: string;
+  name: string;
+  severity: CascadeSeverity;
+  match_pattern: "a_and_c" | "a_b_and_c";
+  drug_a_principles: string[];
+  drug_a_classes: string[];
+  drug_b_principles: string[];
+  drug_b_classes: string[];
+  drug_c_principles: string[];
+  drug_c_classes: string[];
+  adverse_effect: string;
+  cascade_explanation: string;
+  recommendation: string;
+  alternative: string | null;
+  exclusion_conditions: Record<string, unknown> | null;
+  source: string;
+  source_ref: string | null;
+  confidence: number;
+  active: boolean;
+}
+
+export interface CascadeMatchedDrug {
+  schedule_id: string;
+  medication_name: string;
+  principle: string;
+  class: string | null;
+}
+
+export interface CascadeDetectionResult {
+  cascade_id: string;
+  name: string;
+  severity: CascadeSeverity;
+  match_pattern: "a_and_c" | "a_b_and_c";
+  adverse_effect: string;
+  explanation: string;
+  recommendation: string;
+  alternative: string | null;
+  matched_drugs: {
+    a: CascadeMatchedDrug[];
+    b: CascadeMatchedDrug[] | null;
+    c: CascadeMatchedDrug[];
+  };
+  source: string;
+  source_ref: string | null;
+  confidence: number;
+}
+
 // ───────── Proactive Caller types ─────────
 export type ProactiveDecision =
   | "will_call"
@@ -1277,6 +1328,21 @@ export const api = {
       `/api/communications/scenarios/${scenarioId}/versions/${versionId}/promote`,
       { method: "POST", body: JSON.stringify({ target }) },
     ),
+
+  // ───────── Drug Cascades (motor dim 13) ─────────
+  cascadesList: () =>
+    request<{ status: "ok"; count: number; items: DrugCascade[] }>(
+      `/api/clinical-rules/cascades`,
+    ),
+
+  cascadesDetectForPatient: (patientId: string) =>
+    request<{
+      status: "ok";
+      ok: boolean;
+      patient_id: string;
+      meds_count: number;
+      cascades_detected: CascadeDetectionResult[];
+    }>(`/api/patients/${patientId}/cascades`),
 
   // ───────── Proactive Caller ─────────
   proactiveCallerListDecisions: (params?: {
