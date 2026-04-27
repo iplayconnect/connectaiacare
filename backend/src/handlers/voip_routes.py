@@ -1,18 +1,19 @@
-"""Handler VoIP — proxy pro container voip-service (compartilhado com ConnectaIA).
+"""Handler VoIP — endpoints `/api/voip/*` usados por painel de alertas
+e prontuário ("Ligar família").
 
-O voip-service roda em container separado (network infra_proxy) com Asterisk +
-Deepgram STT + ElevenLabs TTS. Expõe API HTTP em :5010:
+HISTÓRICO: este módulo originalmente proxiava pro container `voip-service:5010`
+(Asterisk + Deepgram + ElevenLabs) que existe na ConnectaIA original. Na
+ConnectaIACare esse container NÃO está deployado — só temos `voice-call-service`
+(Sofia + Grok Voice Realtime + PJSIP).
 
-    POST /call        — inicia chamada (destination, client_id, mode, tenant_id)
-    POST /hangup      — encerra chamada (call_id)
-    GET  /status      — chamadas ativas
-    GET  /call-status/<call_id>
-    GET  /health
+CORREÇÃO 2026-04-27: redireciona `/api/voip/call` pra usar voice-call-service.
+Tradução automática:
+    voip-service.{destination, client_id, mode, metadata}
+        → voice-call-service.{destination, scenario_code, patient_id,
+                              full_name, extra_context}
 
-Este módulo expõe 2 endpoints no backend ConnectaIACare que proxyam pro VoIP
-com tenant padrão 'connectaiacare_demo' + autenticação de frontend preservada.
-
-Usado pelo painel de alertas (/alertas) e por "Ligar família" no prontuário.
+Fallback de scenario_code: env VOIP_LEGACY_DEFAULT_SCENARIO (default
+'familiar_aviso_evento' — usado pelo painel de alertas).
 """
 from __future__ import annotations
 
@@ -39,7 +40,30 @@ VOIP_API_PREFIX = os.getenv("VOIP_API_PREFIX", "/api/v1/voip")
 VOIP_TENANT_ID = os.getenv("VOIP_TENANT_ID", "connectaiacare_demo")
 VOIP_TIMEOUT_S = 15.0
 
+# Backend de voz REAL nesta instância (voip-service legado não existe)
+VOICE_CALL_SERVICE_URL = os.getenv(
+    "VOICE_CALL_SERVICE_URL", "http://voice-call-service:5040"
+)
+VOIP_LEGACY_DEFAULT_SCENARIO = os.getenv(
+    "VOIP_LEGACY_DEFAULT_SCENARIO", "familiar_aviso_evento"
+)
+
 _client = httpx.Client(timeout=VOIP_TIMEOUT_S)
+
+
+def _resolve_patient_full_name(patient_id: str | None) -> str:
+    """Busca full_name do paciente pra usar como saudação. Falha → 'amigo(a)'."""
+    if not patient_id:
+        return "amigo(a)"
+    try:
+        from src.services.postgres import get_postgres
+        row = get_postgres().fetch_one(
+            "SELECT full_name FROM aia_health_patients WHERE id = %s",
+            (patient_id,),
+        )
+        return (row or {}).get("full_name") or "amigo(a)"
+    except Exception:
+        return "amigo(a)"
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -81,21 +105,72 @@ def make_call():
         "caller_name": body.get("caller_name", "Equipe ConnectaIACare"),
     }
 
-    payload = {
+    # ── Roteamento pra voice-call-service (Sofia + Grok) ──
+    # voip-service legado não existe na ConnectaIACare. Traduz payload
+    # legado pro formato do voice-call-service e usa scenario default.
+    db = None
+    scenario = None
+    try:
+        from src.services.postgres import get_postgres
+        db = get_postgres()
+        scenario = db.fetch_one(
+            """SELECT id, code, label, system_prompt, voice, allowed_tools,
+                      post_call_actions, max_duration_seconds
+               FROM aia_health_call_scenarios
+               WHERE code = %s AND active = TRUE LIMIT 1""",
+            (VOIP_LEGACY_DEFAULT_SCENARIO,),
+        )
+    except Exception as exc:
+        logger.error("voip_scenario_lookup_failed", error=str(exc))
+
+    if not scenario:
+        return jsonify({
+            "status": "error",
+            "message": (
+                f"Cenário default '{VOIP_LEGACY_DEFAULT_SCENARIO}' não "
+                "configurado. Configure cenários em /admin/cenarios-sofia "
+                "ou ajuste env VOIP_LEGACY_DEFAULT_SCENARIO."
+            ),
+            "reason": "no_scenario",
+        }), 503
+
+    full_name = body.get("caller_name") or _resolve_patient_full_name(
+        body.get("patient_id")
+    )
+
+    voicecall_payload = {
         "destination": destination,
-        "client_id": client_id,
-        "mode": mode,
+        "scenario_id": str(scenario["id"]),
+        "scenario_code": scenario["code"],
+        "scenario_system_prompt": scenario.get("system_prompt"),
+        "scenario_voice": scenario.get("voice") or "ara",
+        "scenario_allowed_tools": scenario.get("allowed_tools") or [],
+        "patient_id": body.get("patient_id"),
         "tenant_id": VOIP_TENANT_ID,
-        "metadata": {k: v for k, v in metadata.items() if v is not None},
+        "full_name": full_name,
+        "extra_context": {
+            "scenario_label": scenario.get("label"),
+            "alert_id": metadata.get("alert_id"),
+            "care_event_id": metadata.get("care_event_id"),
+            "alert_summary": metadata.get("alert_summary"),
+            "trigger": "voip_legacy_alerts",
+        },
     }
 
     try:
-        resp = _client.post(f"{VOIP_SERVICE_URL}{VOIP_API_PREFIX}/call", json=payload)
+        resp = _client.post(
+            f"{VOICE_CALL_SERVICE_URL}/api/voice-call/dial",
+            json=voicecall_payload,
+            timeout=VOIP_TIMEOUT_S,
+        )
     except httpx.RequestError as exc:
-        logger.error("voip_call_network_error", error=str(exc), destination=destination[-4:])
+        logger.error(
+            "voip_call_network_error",
+            error=str(exc), destination=destination[-4:],
+        )
         return jsonify({
             "status": "error",
-            "message": "VoIP indisponível no momento. Tente novamente em alguns segundos.",
+            "message": "Sofia VoIP indisponível no momento.",
             "reason": "network",
         }), 502
 
@@ -103,13 +178,12 @@ def make_call():
         body_text = resp.text[:200] if resp.text else ""
         logger.warning(
             "voip_call_rejected",
-            status=resp.status_code,
-            body=body_text,
+            status=resp.status_code, body=body_text,
             destination=destination[-4:],
         )
         return jsonify({
             "status": "error",
-            "message": f"VoIP rejeitou a chamada (HTTP {resp.status_code})",
+            "message": f"Sofia rejeitou a chamada (HTTP {resp.status_code})",
             "reason": "rejected",
             "detail": body_text,
         }), 502
@@ -118,14 +192,16 @@ def make_call():
     logger.info(
         "voip_call_initiated",
         call_id=voip_data.get("call_id"),
-        destination=destination[-4:],  # log só últimos 4 dígitos
+        destination=destination[-4:],
         mode=mode,
         alert_id=metadata.get("alert_id"),
+        scenario=scenario["code"],
     )
     return jsonify({
         "status": "ok",
         "call_id": voip_data.get("call_id"),
-        "call_status": voip_data.get("call_status", "initiated"),
+        "call_status": "initiated",
+        "scenario_code": scenario["code"],
         "metadata": voip_data,
     }), 200
 
@@ -136,26 +212,29 @@ def make_call():
 
 @bp.get("/voip/call/<call_id>/status")
 def call_status(call_id: str):
-    """Consulta status de uma chamada em andamento."""
+    """Consulta status de uma chamada em andamento (via voice-call-service)."""
     try:
-        resp = _client.get(f"{VOIP_SERVICE_URL}{VOIP_API_PREFIX}/call-status/{call_id}")
+        resp = _client.get(
+            f"{VOICE_CALL_SERVICE_URL}/api/voice-call/calls", timeout=5.0,
+        )
     except httpx.RequestError as exc:
         logger.debug("voip_status_network_error", error=str(exc))
-        return jsonify({"status": "error", "message": "VoIP indisponível"}), 502
+        return jsonify({"status": "error", "message": "Sofia VoIP indisponível"}), 502
 
-    if resp.status_code == 404:
-        return jsonify({"status": "not_found"}), 404
     if resp.status_code >= 400:
         return jsonify({
             "status": "error",
-            "message": f"VoIP retornou {resp.status_code}",
+            "message": f"Sofia retornou {resp.status_code}",
         }), 502
 
-    data = resp.json()
+    data = resp.json() or {}
+    active_calls = data.get("calls") or []
+    is_active = call_id in active_calls
     return jsonify({
         "status": "ok",
         "call_id": call_id,
-        **data,
+        "call_status": "active" if is_active else "ended",
+        "active": is_active,
     }), 200
 
 
@@ -165,15 +244,18 @@ def call_status(call_id: str):
 
 @bp.post("/voip/call/<call_id>/hangup")
 def hangup_call(call_id: str):
-    """Encerra chamada em andamento."""
+    """Encerra chamada em andamento (via voice-call-service)."""
     try:
-        resp = _client.post(f"{VOIP_SERVICE_URL}{VOIP_API_PREFIX}/hangup", json={"call_id": call_id})
+        resp = _client.post(
+            f"{VOICE_CALL_SERVICE_URL}/api/voice-call/hangup",
+            json={"call_id": call_id}, timeout=10.0,
+        )
     except httpx.RequestError as exc:
         logger.debug("voip_hangup_network_error", error=str(exc))
-        return jsonify({"status": "error", "message": "VoIP indisponível"}), 502
+        return jsonify({"status": "error", "message": "Sofia VoIP indisponível"}), 502
 
     if resp.status_code >= 400:
-        return jsonify({"status": "error", "message": f"VoIP retornou {resp.status_code}"}), 502
+        return jsonify({"status": "error", "message": f"Sofia retornou {resp.status_code}"}), 502
 
     return jsonify({"status": "ok", "call_id": call_id, "call_status": "ended"}), 200
 
@@ -184,21 +266,22 @@ def hangup_call(call_id: str):
 
 @bp.get("/voip/status")
 def voip_health():
-    """Checa se voip-service está online + metadata pro frontend."""
+    """Checa se voice-call-service (Sofia) está online + metadata."""
     try:
-        resp = _client.get(f"{VOIP_SERVICE_URL}/health", timeout=3.0)
+        resp = _client.get(f"{VOICE_CALL_SERVICE_URL}/health", timeout=3.0)
     except httpx.RequestError:
         return jsonify({"available": False, "reason": "unreachable"}), 200
 
     if resp.status_code != 200:
         return jsonify({"available": False, "reason": f"http_{resp.status_code}"}), 200
 
-    data = resp.json()
+    data = resp.json() or {}
     return jsonify({
         "available": True,
-        "sip_registered": data.get("sip_registered", False),
+        "sip_registered": data.get("sip_registered", True),
         "active_calls": data.get("active_calls", 0),
         "tenant_id": VOIP_TENANT_ID,
+        "backend": "voice-call-service",
     }), 200
 
 
