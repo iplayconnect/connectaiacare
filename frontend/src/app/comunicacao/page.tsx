@@ -88,8 +88,16 @@ function NewCallPanel() {
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
   const [fullName, setFullName] = useState("");
   const [dialing, setDialing] = useState(false);
-  const [result, setResult] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Ligação em curso após dial — null se nenhuma
+  const [activeCall, setActiveCall] = useState<{
+    callId: string;
+    startedAt: number;
+    scenarioLabel: string;
+    destination: string;
+    fullName: string;
+  } | null>(null);
 
   useEffect(() => {
     Promise.all([
@@ -130,22 +138,42 @@ function NewCallPanel() {
       setError("Cenário e destino são obrigatórios");
       return;
     }
+    if (activeCall) {
+      setError("Já há uma ligação em curso — encerre antes de iniciar outra.");
+      return;
+    }
     setDialing(true);
     setError(null);
-    setResult(null);
     try {
+      const cleanDest = destination.trim().replace(/\D/g, "");
       const r = await api.communicationsDial({
         scenario_id: scenarioId,
-        destination: destination.trim().replace(/\D/g, ""),
+        destination: cleanDest,
         patient_id: selectedPatient?.id || undefined,
         full_name: fullName.trim() || undefined,
       });
-      setResult(`Ligação iniciada · call_id: ${r.call_id}`);
+      setActiveCall({
+        callId: r.call_id,
+        startedAt: Date.now(),
+        scenarioLabel: selected?.label || "—",
+        destination: cleanDest,
+        fullName: fullName.trim() || "—",
+      });
     } catch (e: any) {
       setError(e?.message || "Falha ao iniciar ligação");
     } finally {
       setDialing(false);
     }
+  }
+
+  async function handleHangup() {
+    if (!activeCall) return;
+    try {
+      await api.communicationsHangup(activeCall.callId);
+    } catch {
+      // ignora — back já vai marcar como ended via active-calls list
+    }
+    setActiveCall(null);
   }
 
   if (loading) {
@@ -222,7 +250,7 @@ function NewCallPanel() {
 
         <button
           onClick={handleDial}
-          disabled={dialing || !destination.trim() || !scenarioId}
+          disabled={dialing || !destination.trim() || !scenarioId || !!activeCall}
           className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-accent-cyan text-slate-900 font-medium hover:bg-accent-cyan/90 disabled:opacity-50"
         >
           {dialing ? (
@@ -230,14 +258,21 @@ function NewCallPanel() {
           ) : (
             <PhoneCall className="h-4 w-4" />
           )}
-          {dialing ? "Discando…" : "Iniciar ligação"}
+          {dialing
+            ? "Discando…"
+            : activeCall
+              ? "Em curso (veja painel)"
+              : "Iniciar ligação"}
         </button>
 
-        {result && (
-          <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-sm text-emerald-300">
-            {result}
-          </div>
+        {activeCall && (
+          <ActiveCallPanel
+            call={activeCall}
+            onEnded={() => setActiveCall(null)}
+            onHangup={handleHangup}
+          />
         )}
+
         {error && (
           <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-sm text-red-300">
             {error}
@@ -646,4 +681,166 @@ function SelectedPatientCard({
       </button>
     </div>
   );
+}
+
+
+// ════════════════════════════════════════════════════════════════
+// ActiveCallPanel — feedback visual durante chamada em curso.
+// Polling /api/communications/active-calls a cada 3s pra detectar fim.
+// Mostra timer, destino, cenário, hangup button.
+// ════════════════════════════════════════════════════════════════
+function ActiveCallPanel({
+  call,
+  onEnded,
+  onHangup,
+}: {
+  call: {
+    callId: string;
+    startedAt: number;
+    scenarioLabel: string;
+    destination: string;
+    fullName: string;
+  };
+  onEnded: () => void;
+  onHangup: () => void;
+}) {
+  const [elapsed, setElapsed] = useState(0);
+  const [state, setState] = useState<"ringing" | "connected" | "ended">(
+    "ringing",
+  );
+
+  // Tick do timer
+  useEffect(() => {
+    const t = setInterval(() => {
+      setElapsed(Math.floor((Date.now() - call.startedAt) / 1000));
+    }, 1000);
+    return () => clearInterval(t);
+  }, [call.startedAt]);
+
+  // Polling pra detectar fim da chamada
+  useEffect(() => {
+    let stopped = false;
+    const poll = async () => {
+      try {
+        const r = await api.communicationsActiveCalls();
+        if (stopped) return;
+        const isActive = (r.calls || []).includes(call.callId);
+        if (isActive) {
+          // Mais de ~5s = considera "connected" (heuristic — sem evento real)
+          const sinceStart = (Date.now() - call.startedAt) / 1000;
+          if (sinceStart > 5) setState("connected");
+        } else {
+          // Não está mais na lista ativa = encerrada
+          setState("ended");
+          // Limpa o painel após 3s pra dar tempo de ler
+          setTimeout(() => {
+            if (!stopped) onEnded();
+          }, 3000);
+        }
+      } catch {
+        // ignora — provavelmente sessão expirou
+      }
+    };
+    // Primeiro poll após 4s (tempo do INVITE chegar no destino)
+    const initial = setTimeout(poll, 4000);
+    const interval = setInterval(poll, 3000);
+    return () => {
+      stopped = true;
+      clearTimeout(initial);
+      clearInterval(interval);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [call.callId, call.startedAt]);
+
+  const stateColor = {
+    ringing: "border-amber-500/40 bg-amber-500/[0.05]",
+    connected: "border-emerald-500/40 bg-emerald-500/[0.05]",
+    ended: "border-white/10 bg-white/[0.02]",
+  }[state];
+
+  const stateLabel = {
+    ringing: "Discando / chamando",
+    connected: "Em conversa",
+    ended: "Encerrada",
+  }[state];
+
+  const stateBadge = {
+    ringing: "bg-amber-500/20 text-amber-300 border-amber-500/40",
+    connected: "bg-emerald-500/20 text-emerald-300 border-emerald-500/40",
+    ended: "bg-white/5 text-muted-foreground border-white/10",
+  }[state];
+
+  return (
+    <div
+      className={`p-4 rounded-xl border transition ${stateColor}`}
+    >
+      <div className="flex items-start justify-between gap-3 mb-3">
+        <div className="flex items-center gap-2">
+          {state === "ringing" && (
+            <PhoneCall className="h-5 w-5 text-amber-400 animate-pulse" />
+          )}
+          {state === "connected" && (
+            <PhoneCall className="h-5 w-5 text-emerald-400" />
+          )}
+          {state === "ended" && (
+            <PhoneOff className="h-5 w-5 text-muted-foreground" />
+          )}
+          <span
+            className={`px-2 py-0.5 text-[11px] uppercase font-semibold rounded border ${stateBadge}`}
+          >
+            {stateLabel}
+          </span>
+          <span className="font-mono text-sm tabular-nums">
+            {formatElapsed(elapsed)}
+          </span>
+        </div>
+        {state !== "ended" && (
+          <button
+            onClick={onHangup}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md bg-red-500/15 hover:bg-red-500/25 border border-red-500/30 text-red-200"
+          >
+            <PhoneOff className="h-3.5 w-3.5" />
+            Encerrar
+          </button>
+        )}
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+        <div>
+          <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
+            Destino
+          </div>
+          <div className="font-mono text-sm">{call.destination}</div>
+        </div>
+        <div>
+          <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
+            Atende
+          </div>
+          <div className="text-sm">{call.fullName}</div>
+        </div>
+        <div>
+          <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
+            Cenário
+          </div>
+          <div className="text-sm truncate">{call.scenarioLabel}</div>
+        </div>
+      </div>
+
+      <div className="mt-3 pt-3 border-t border-white/5 text-[11px] text-muted-foreground font-mono">
+        call_id: {call.callId}
+      </div>
+
+      {state === "ringing" && (
+        <div className="mt-2 text-[11px] text-muted-foreground">
+          Aguardando atendimento — primeiro polling em ~4s.
+        </div>
+      )}
+    </div>
+  );
+}
+
+function formatElapsed(sec: number): string {
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return `${m}:${s.toString().padStart(2, "0")}`;
 }

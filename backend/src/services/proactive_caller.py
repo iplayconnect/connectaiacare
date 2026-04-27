@@ -190,15 +190,17 @@ def _gather_signals(patient_id: str) -> dict:
     }
 
     # Risk score atual
+    # Tabela aia_health_patient_risk_score (migration 039) tem colunas
+    # `score` e `risk_level` (não `level` — erro de assumption inicial).
     row = db.fetch_one(
-        """SELECT score, level
+        """SELECT score, risk_level
            FROM aia_health_patient_risk_score
            WHERE patient_id = %s""",
         (patient_id,),
     )
     if row:
         out["risk_score"] = row.get("score")
-        out["risk_level"] = row.get("level")
+        out["risk_level"] = row.get("risk_level")
 
     # Doses não tomadas (24h)
     row = db.fetch_one(
