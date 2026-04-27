@@ -40,15 +40,37 @@ Existem players globais que validaram a tese: **Hippocratic AI** (EUA) faz check
 
 ## 2. Como a Sofia atua
 
-A Sofia é **uma só** com vários canais. O paciente não precisa "explicar de novo" quando troca de chat para ligação — ela mantém continuidade.
+A Sofia é **uma só** com vários canais. O paciente não precisa "explicar de novo" quando troca de canal — ela mantém continuidade.
 
-### Os 3 canais
+### Os 4 canais
 
-**Chat texto** (web/celular) — usado quando há tempo pra escrever, anexar foto de receita, conversa lenta. Cuidador documenta um relato. Médico consulta dose máxima de uma medicação. Família abre o app e pergunta "como minha mãe está?".
+**WhatsApp** (canal primário pra B2C). 90%+ dos brasileiros adultos usam WhatsApp diariamente. Pra idoso 65+, frequentemente é o **único** app digital usado. A Sofia opera via WhatsApp Business API homologada com a Meta, recebe e envia: texto, áudio (paciente que não digita bem, manda áudio de 30s — Sofia transcreve, estrutura clinicamente, registra no prontuário), foto (receita, embalagem de remédio, bula, lesão de pele, display de glicosímetro/oxímetro), botões interativos (lembrete de medicação com [Sim, tomei] [Ainda não]). Em estudo: **chamada de voz outbound via WhatsApp** (Meta liberou em 2024) — toca o WhatsApp que o paciente reconhece, mostra foto verificada da equipe, qualidade superior à PSTN.
+
+**Chat texto web/app** — usado quando há tempo pra escrever, anexar arquivo, conversa lenta. Profissional cadastra paciente, médico consulta dose máxima, família acessa painel completo do paciente. Persona profissional preferida.
 
 **Voz no browser** — botão flutuante no painel. Hands-free pra cuidador com mãos ocupadas, ou pra paciente que tem dificuldade pra digitar. Mesma latência baixa de uma ligação.
 
-**Ligação telefônica** — Sofia liga (ou atende, em fase futura) com voz natural. Crítico pra idoso que **não usa** smartphone ou app. Funciona como uma ligação humana qualquer — ela cumprimenta pelo nome, conversa, escuta.
+**Ligação telefônica direta** — Sofia liga (ou atende, em fase futura) com voz natural. Fallback pra paciente sem WhatsApp e crítico em situações de urgência (chamar família via número fixo). Funciona como uma ligação humana qualquer — ela cumprimenta pelo nome, conversa, escuta.
+
+### Entrada multimodal de relatos (importante pro teu papel clínico)
+
+A entrada via WhatsApp não é "chat tradicional". Pra geriatria brasileira, a forma mais natural de relato é **áudio + foto**:
+
+- **Áudio**: paciente fala 30s "Sofia, hoje minha mãe acordou confusa, não soube onde tava, e ela tá bebendo pouca água". Sofia transcreve, **estrutura clinicamente** (sintomas: confusão mental aguda, baixa ingesta hídrica), confronta com motor (idosa + medicações + baixa ingesta hídrica → suspeita de delirium hipoativo por desidratação), classifica severidade, registra no prontuário e pode escalar. **Tudo a partir de um áudio de WhatsApp.**
+
+- **OCR de receita médica**: paciente fotografa receita ao chegar em casa. Sofia extrai medicamentos/doses/posologias e **confronta com prescrição registrada**. Se farmácia entregou errado, ou paciente está olhando receita anterior misturada, Sofia escala antes da primeira dose. **Esse é um detector de erro de medicação no momento certo.**
+
+- **OCR de bula**: paciente em dúvida sobre efeito colateral, manda foto da bula. Sofia lê, identifica seção relevante, explica em linguagem simples. Não substitui orientação farmacêutica, **estende o alcance dela**.
+
+- **OCR de embalagem**: idoso esqueceu nome do remédio, manda foto da caixa. Sofia identifica princípio ativo, dose, lote, validade. Confronta com o que deveria estar tomando.
+
+- **OCR de exame laboratorial**: paciente recebeu hemograma, fotografa. Sofia extrai estruturado (Hb, leucócitos, creatinina, etc.), arquiva no prontuário, e roda alertas (creatinina subiu? Sofia avisa pra equipe rever ajuste renal das medicações via motor).
+
+- **Visão multimodal de lesão / ferida / edema**: paciente fotografa. Sofia identifica sinais visuais sugestivos (vermelhidão, exsudato, deiscência), **gera observação clínica** pro prontuário — não diagnostica.
+
+- **Foto do display de aparelho** (glicosímetro, oxímetro, aparelho de pressão): Sofia extrai valor, registra com flag "auto-relato via foto" pra diferenciar de equipamento integrado, roda alertas se valor está fora de faixa do paciente.
+
+**Aqui sua expertise é central**: validar quais entradas multimodais são clinicamente confiáveis, calibrar limites onde a Sofia deve recusar interpretar (foto desfocada, papel rasgado, dados ambíguos), e definir quais classes de imagem disparam escalação automática vs apenas registro.
 
 ### As personas
 
@@ -195,6 +217,22 @@ Há um **circuit breaker** que pausa automaticamente o tenant se mais de 5% das 
 
 Toda saída clínica da Sofia é **acompanhada de disclaimer natural** ("isso é informação pra te apoiar — confirme sempre com seu médico"). Ela é instruída a variar a forma pra não soar robótico.
 
+### Biometria de voz — quem é quem na ligação
+
+Em healthcare, **saber com certeza quem está do outro lado da linha não é detalhe — é segurança clínica**. Quando a Sofia liga pra Sr. José pós-IAM e quem atende é a esposa, neta ou cuidadora informal, o conteúdo da conversa muda completamente: confidencialidade LGPD, validade do dado clínico relatado, roteamento da escalação.
+
+Cada usuário cadastrado (paciente, familiar, cuidador, médico, enfermagem) tem um **voiceprint** (representação matemática vetorial da voz, não áudio cru) registrado a partir das primeiras interações. Em ligações subsequentes, a Sofia confirma identidade nos primeiros segundos:
+
+- **Atende a esposa do Sr. José em vez dele**: persona muda automaticamente de "paciente" pra "familiar". Linguagem clínica permitida (esposa pode receber explicação farmacológica), mas o registro vai pro prontuário marcando "informação relatada por terceiro, não confirmada com paciente diretamente". Filha não consegue fingir adesão do pai.
+
+- **Atende alguém não cadastrado** (visita ocasional, vizinho, faxineira): Sofia trata como interlocutor desconhecido. Cumprimenta sem revelar diagnóstico, pergunta quem está, registra contato no prontuário, e ajusta continuidade. **Protege contra vazamento de dados sensíveis pra pessoa errada que atendeu o telefone.**
+
+- **Cobertura LGPD**: voiceprint é dado biométrico sensível (Art. 11), tem TCLE específico, é armazenado como vetor matemático em servidor brasileiro, com expiração configurável e direito de exclusão.
+
+**Biomarcadores vocais** (fase de estudo, não em produção): literatura recente (Mayo Clinic, MIT Voice Foundation 2023-2025) mostra que parâmetros vocais quantitativos (jitter, shimmer, ritmo, prosódia, fluência) detectam sinais precoces de desidratação aguda em idoso, descompensação cardíaca, depressão, declínio cognitivo. A Sofia já grava todas as ligações pra gerar transcrição via STT — tem a base técnica pra extrair esses parâmetros. Quando ativados, geram **observação clínica**, não diagnóstico, e vão pro prontuário pra equipe avaliar.
+
+**Aqui sua expertise é central**: definir quais sinais vocais merecem ser monitorados, calibrar limiares por paciente (cada idoso tem baseline próprio), e formalizar o que é "observação clínica" vs o que é "alerta acionável" — cuidando do balanço entre captação precoce de descompensação e geração de fadiga de alerta na equipe.
+
 ### Risk Scoring por paciente (em produção)
 
 Cada paciente tem um score 0-100 calculado a partir de 3 sinais determinísticos:
@@ -243,13 +281,17 @@ A Sofia agora respeita **interrupção do usuário em tempo real**: se você com
 ## 7. Roadmap — o que vem a seguir
 
 ### Já está em produção (pra você testar)
-- Chat texto + voz browser + ligação telefônica funcionando
+- WhatsApp como canal de entrada (texto, áudio, foto/OCR, botões interativos)
+- Chat texto web/app + voz browser + ligação telefônica funcionando
 - Motor clínico 48 princípios ativos × 12 dimensões
 - Memória 4 camadas
 - Safety Guardrail Layer
 - Risk Scoring inicial (3 sinais)
 - 5 cenários de ligação editáveis
 - Memória coletiva anonimizada cross-tenant
+- Biometria de voz (identificação do interlocutor)
+- OCR clínico (receita, embalagem, bula, exame, atestado, displays)
+- Visão multimodal pra lesão / ferida / edema (gera observação, não diagnóstico)
 
 ### Curto prazo (próximas 2-3 semanas)
 
@@ -283,7 +325,7 @@ A Sofia agora respeita **interrupção do usuário em tempo real**: se você com
 
 ### Longo prazo (6-12 meses)
 
-**Multi-channel sync com WhatsApp Business** — 4º canal compartilhando memória/tools.
+**WhatsApp Calling outbound nativo** — Sofia chama via WhatsApp (não PSTN), tocando o WhatsApp do paciente com foto verificada da equipe, qualidade superior à ligação tradicional, sem custo de minuto telefônico. Em estudo de maturidade da Meta Business API.
 
 **Plano "Cuidado Sem Limites" B2C massivo** — idosos que moram sozinhos, contratam direto via WhatsApp, sem clínica intermediária. Esse é o cenário Dona Helena.
 

@@ -8,7 +8,7 @@
 
 ## Sumário Executivo
 
-A **ConnectaIACare** opera uma plataforma de **assistência inteligente conversacional** para pacientes em casa, integrável a qualquer prontuário hospitalar (MV, Tasy, Soul MV, Philips Tasy). O núcleo da plataforma é a **Sofia**, uma IA assistente que conversa com paciente, familiar e equipe clínica via **chat texto, voz no aplicativo e ligação telefônica** — mantendo continuidade de relacionamento com baixíssimo custo marginal.
+A **ConnectaIACare** opera uma plataforma de **assistência inteligente conversacional** para pacientes em casa, integrável a qualquer prontuário hospitalar (MV, Tasy, Soul MV, Philips Tasy). O núcleo da plataforma é a **Sofia**, uma IA assistente que conversa com paciente, familiar e equipe clínica via **WhatsApp (texto, áudio e ligação), chat web/app e ligação telefônica direta** — mantendo continuidade de relacionamento com baixíssimo custo marginal. **WhatsApp é canal de primeira classe**: ~90% dos brasileiros usam diariamente, é onde paciente idoso, cuidador e familiar já estão — sem precisar instalar app novo, sem fricção de adoção.
 
 Para o **Grupo VITA**, propomos uma solução de **extensão de cuidado pós-alta** que aborda diretamente o gargalo dos hospitais brasileiros: **15-20% de readmissão em 30 dias**, dos quais aproximadamente um terço evitáveis com vigilância adequada (reações adversas a medicamentos, falta de adesão, identificação tardia de descompensação).
 
@@ -153,6 +153,65 @@ Há uma camada de software chamada **Safety Guardrail Layer** que intercepta tod
 Há também um **circuit breaker** automático: se mais de 5% das ações clínicas em 5 minutos caem na fila de revisão, a Sofia se auto-pausa por 30 minutos e notifica o admin. Protege contra "Sofia desregulada" que estaria escalando demais (provável bug de prompt ou de regra).
 
 Toda ação fica registrada em uma **audit chain criptográfica** (hash chain SHA-256) que detecta qualquer adulteração retroativa. **LGPD-compliant by design**.
+
+### 2.4 Ela reconhece a voz de quem está conversando — biometria como camada clínica
+
+Em healthcare, **saber com certeza quem está do outro lado da linha não é detalhe — é segurança clínica**. Quando a Sofia liga para acompanhar Sr. José pós-IAM e quem atende é a esposa, neta ou cuidadora informal, o conteúdo da conversa muda completamente: questões de privacidade (LGPD), validade da informação reportada (a esposa não sabe se o paciente realmente tomou a medicação fora da vista dela), e roteamento da escalação clínica (família precisa ser notificada, profissional pode receber dados clínicos crus, paciente precisa de cuidado de comunicação).
+
+A Sofia integra **biometria de voz** como camada de segurança e personalização clínica:
+
+**Identificação automática do interlocutor**. Cada usuário cadastrado na plataforma (paciente, familiar, cuidador profissional, médico, enfermagem) tem um **voiceprint** registrado a partir das primeiras interações. Em ligações subsequentes, a Sofia confirma a identidade automaticamente nos primeiros segundos. Se o telefone do Sr. José atende mas a voz é da filha, a Sofia reconhece e ajusta:
+
+- **Persona muda**: passa de "paciente" para "familiar" → linguagem clínica permitida (filha pode receber explicações farmacológicas), mas registro vai pro prontuário marcando "informação relatada por terceiro, não confirmada com paciente"
+- **Tom muda**: deixa de ser conversacional/calmo e passa a ser direto/informativo
+- **Compliance LGPD**: dados clínicos do paciente só são detalhados se o familiar tem permissão registrada como vínculo (filha responsável legal/responsável de cuidado declarado)
+
+**Detecção de pessoa não cadastrada**. Se atende quem a Sofia não reconhece, ela trata como "interlocutor desconhecido": cumprimenta sem revelar dados clínicos, pergunta quem está falando, registra o contato no prontuário, e adapta a continuidade da conversa. Protege contra vazamento de dados sensíveis para visita ocasional, faxineira, vizinho que atendeu.
+
+**Sinais clínicos da voz** (vocal biomarkers — fase 2 do roadmap, em estudo). A literatura recente (publicações Mayo Clinic, MIT Voice Foundation 2023-2025) mostra que análise quantitativa de parâmetros vocais (jitter, shimmer, ritmo, pausas, intensidade) detecta sinais precoces de:
+- Desidratação aguda em idoso (alteração de timbre + ressecamento de fala)
+- Insuficiência cardíaca descompensada (dispneia mascarada na conversa)
+- Quadros depressivos (lentificação, diminuição de prosódia)
+- Declínio cognitivo longitudinal (alteração de fluência, repetição, perda de coerência)
+
+A Sofia, por já gravar todas as ligações para gerar transcrição via Speech-to-Text, tem a base técnica para extrair esses parâmetros. **Integração com prontuário**: quando jitter/shimmer da voz do Sr. José sai do baseline pessoal dele em mais de 2 desvios-padrão, a Sofia gera observação para o prontuário VITA — equipe clínica decide se esse sinal vale investigação. Não é diagnóstico, é **sinal precoce mensurável**.
+
+**Para o piloto VITA**, biometria de identificação está em produção; biomarcadores vocais estão em fase de estudo e podem ser ativados como módulo opcional após validação clínica conjunta.
+
+### 2.5 WhatsApp como canal primário — o paciente já está lá
+
+A maior parte das soluções de telemonitoramento brasileiras falha em adoção porque exigem que o paciente baixe um aplicativo dedicado, se cadastre, lembre da senha. **No paciente idoso, fricção de instalação é morte do produto**. A Sofia parte de uma premissa pragmática: **vamos ao paciente onde ele já está**. E onde ele já está é o WhatsApp.
+
+**Por que WhatsApp para healthcare**:
+- ~93% dos brasileiros adultos usam WhatsApp diariamente (Datafolha 2024)
+- Para idoso 65+, é frequentemente o **único** app digital usado
+- Família já está no WhatsApp do paciente (filhos, netos, irmãos)
+- Cuidadores profissionais (CNPJ ou CLT) usam WhatsApp como canal padrão
+- Suporta nativamente: texto, áudio (perfeito pra idoso que não digita bem), foto (receita, embalagem do remédio, lesão), vídeo (técnica inalatória, consulta visual), localização (em emergência), contato compartilhado, e — em fase Beta da Meta — **chamadas de voz e vídeo via API Business**
+
+**Como a Sofia opera no WhatsApp do paciente VITA**:
+
+1. **Onboarding sem app**. Paciente recebe alta hospitalar, hospital cadastra contato. Sofia envia primeira mensagem de WhatsApp do número oficial (verificado, badge verde): "Olá Sr. José, sou a Sofia da equipe pós-alta do Hospital VITA. Acabei de ver que o senhor saiu ontem. Posso te acompanhar nesses próximos dias?". Paciente responde "sim", está dentro. **Zero instalação. Zero senha. Zero treinamento**.
+
+2. **Entrada de relatos por áudio (a forma mais natural pra idoso brasileiro)**. Sr. José não consegue digitar bem — ninguém na faixa 70+ digita bem. Mas todo mundo sabe gravar áudio do WhatsApp. Ele aperta o microfone, fala 30 segundos: "Sofia, hoje eu acordei meio mole, a perna tá um pouco inchada e eu acho que esqueci de tomar o remédio do coração ontem à noite". Sofia transcreve via Speech-to-Text, **estrutura o conteúdo clinicamente** (sintoma "edema de MMII", queixa "fadiga matinal", evento "não-adesão a beta-bloqueador na noite anterior"), confronta com motor clínico (perfil pós-IAM + fadiga + edema = sinal de descompensação cardíaca), classifica severidade, e dispara para o prontuário VITA. Tudo a partir de **um áudio de WhatsApp**. Resposta da Sofia: por áudio também (síntese de voz natural, mesma voz da Sofia das ligações, personalidade consistente entre canais).
+
+3. **OCR e visão multimodal — leitura clínica de imagens**. WhatsApp recebe foto, e a Sofia tem capacidade nativa de **leitura inteligente de documentos clínicos**:
+   - **Receita médica**: paciente tira foto da receita que recebeu na alta. Sofia extrai medicamentos, doses, posologias, duração — confronta com prescrição registrada no prontuário VITA. Se houver discrepância (paciente pegou receita errada na farmácia, posologia confusa, princípio ativo diferente), Sofia escala para equipe clínica antes de o paciente tomar. **Esse é um detector de erro de medicação no momento certo: antes da primeira dose**.
+   - **Embalagem do remédio**: idoso esqueceu o nome, manda foto da caixa. Sofia identifica princípio ativo, dose, lote, validade. Confronta com o que deveria estar tomando.
+   - **Bula**: paciente está em dúvida sobre efeito colateral, manda foto da bula. Sofia lê, identifica a seção relevante, explica em linguagem simples ("isso aqui significa que o remédio pode dar tontura nos primeiros dias, é normal").
+   - **Lesão de pele, ferida cirúrgica, edema**: paciente tira foto. Sofia analisa visualmente sinais de infecção (vermelhidão, exsudato, calor visível, deiscência), compara com foto do dia anterior se houver série, gera observação clínica para o prontuário VITA. **Sem diagnosticar** — gera dado estruturado para a equipe clínica avaliar.
+   - **Glicemia capilar / pressão / SpO2 no display**: paciente fotografa o glicosímetro/oxímetro/aparelho de pressão. Sofia extrai o valor, registra no prontuário, e confronta com faixa de normalidade do paciente (que está no histórico). Adesão à monitorização de sinais vitais sem precisar de wearable, sem precisar paciente digitar número.
+   - **Atestado, exame laboratorial, encaminhamento**: paciente recebeu exame, fotografa. Sofia extrai os dados estruturados (Hb, leucócitos, creatinina, etc.), arquiva no prontuário VITA via FHIR, e roda alertas clínicos automáticos (creatinina subiu? Sofia avisa pra equipe rever ajuste renal de medicações).
+
+4. **Lembretes proativos com botões interativos**. Sofia manda "Sr. José, está na hora do enalapril. Já tomou?" com botões interativos [Sim, tomei] [Ainda não] [Não vou tomar agora]. Resposta vai direto pro prontuário VITA via FHIR. Em 3 toques, paciente registra adesão. Sem digitar.
+
+5. **Família integrada via grupo**. Familiar autorizado pode estar em grupo familiar do paciente — recebe atualizações de saúde periódicas (com consentimento explícito), pode perguntar à Sofia "como minha mãe tá esta semana?" e receber resumo. Sofia distingue mensagens do grupo (compartilhadas) de mensagens privadas (paciente-Sofia confidenciais).
+
+6. **Ligação via WhatsApp** (em estudo para o piloto). A Meta liberou em 2024 a possibilidade de **chamadas de voz outbound via WhatsApp Business API**. Para idoso brasileiro, isso é estratégico: chamada via WhatsApp **não consome créditos de ligação**, **toca o WhatsApp** que ele já reconhece, **mostra a foto e nome verificado da equipe VITA** no caller, e tem qualidade de voz superior à PSTN tradicional. Estamos avaliando a maturidade dessa API para incorporação no piloto — alternativa de fallback é sempre a ligação telefônica clássica.
+
+7. **Compliance LGPD via WhatsApp Business oficial**. Operamos via **WhatsApp Business API homologada com Meta**, dentro dos templates oficiais aprovados, com criptografia ponta-a-ponta nativa, dados em servidores brasileiros via integradores certificados (Twilio, Gupshup, ou similar — a definir conjuntamente). Templates de mensagens proativas pré-aprovados pela Meta para healthcare. Opt-in explícito do paciente registrado.
+
+**Para o piloto VITA**, WhatsApp Business é canal primário recomendado — chat web e ligação telefônica permanecem disponíveis como fallback ou para perfis específicos (paciente sem WhatsApp, cuidador profissional do hospital, integração com equipamentos).
 
 ---
 
@@ -348,13 +407,20 @@ Para evitar promessas vazias, listamos abaixo o que está rodando em ambiente de
 | **Memória coletiva anonimizada cross-tenant** | Em produção | Sim, pipeline diário |
 | **Audit chain LGPD criptográfico** | Em produção | Sim, hash SHA-256 inviolável |
 | **5 cenários de ligação editáveis sem release** | Em produção | Sim, admin edita em DRAFT, publica |
+| **Biometria de voz — identificação do interlocutor** | Em produção | Sim, voiceprint por usuário registrado |
+| **WhatsApp Business — chat texto + áudio + mídia** | Em homologação | Validação final do template Meta para piloto VITA |
+| **Entrada de relatos por áudio do WhatsApp** | Em produção | STT + estruturação clínica do conteúdo |
+| **OCR clínico** (receita, embalagem, bula, exame, atestado) | Em produção | Visão multimodal nativa (Gemini Vision) |
+| **Análise visual de lesão / ferida / edema** | Em produção | Geração de observação clínica, não diagnóstico |
 
 **Próximos 60 dias**:
 - Integração FHIR R4 com prontuário eleito pelo Grupo VITA
+- WhatsApp Calling outbound via Meta Business API (em avaliação)
 - Cron worker proativo (Sofia decide proativamente quando ligar)
 - UI admin para fila de revisão clínica
 - Inbound calls (Sofia atende, com roteador de cenário por caller_id)
 - Frontend de Risk Scoring com breakdown explicativo
+- Biomarcadores vocais (jitter/shimmer/prosódia) — fase de estudo conjunta com VITA
 
 ---
 
@@ -485,6 +551,42 @@ A escolha depende da capacidade operacional preferida pelo Grupo VITA.
 
 **P: Vocês conseguem integrar com nosso sistema atual?**
 R: Sim, via HL7 FHIR R4 (padrão internacional). A integração é desenhada conjuntamente, e o tempo típico de implantação é 4-8 semanas para o primeiro fluxo (recebimento de paciente pós-alta). Outros fluxos podem ser priorizados conforme valor para o Grupo VITA.
+
+### Sobre biometria de voz
+
+**P: Como funciona a confirmação de identidade do paciente em uma ligação?**
+R: Cada usuário cadastrado tem um voiceprint registrado nas primeiras interações. Em ligações subsequentes, a Sofia confirma identidade nos primeiros segundos. Se atende a esposa em vez do paciente, a Sofia reconhece, ajusta a persona (familiar vs paciente), e marca explicitamente no prontuário "informação relatada por terceiro". Protege confidencialidade clínica e qualidade do dado registrado.
+
+**P: Vocês têm consentimento específico para biometria de voz (LGPD Art. 11 dado biométrico sensível)?**
+R: Sim — o TCLE inclui consentimento explícito para coleta e processamento de voiceprint. Voiceprint é armazenado como vetor matemático (não áudio cru) em servidor brasileiro, com expiração configurável e direito de exclusão a qualquer momento. Tratamos como dado sensível de saúde sob a base legal do Art. 11 da LGPD.
+
+**P: Vocês fazem biomarcadores vocais para detecção de declínio? Isso não é diagnóstico?**
+R: Biomarcadores vocais (jitter, shimmer, prosódia, fluência) estão em **fase de estudo**, não em produção. Quando ativados, geram **observação clínica** (não diagnóstico) que vai para o prontuário VITA — equipe clínica decide se o sinal merece investigação. Mesma filosofia da Sofia: inteligência sem autoridade. Roadmap de validação clínica conjunta com Grupo VITA seria parte do piloto avançado.
+
+### Sobre WhatsApp como canal primário
+
+**P: Por que WhatsApp e não um app próprio do hospital?**
+R: Porque app próprio para idoso pós-alta tem taxa de abandono > 60% nos primeiros 14 dias (literatura comum em telemonitoramento). WhatsApp tem 0% de fricção de adoção: o paciente já usa, a família já está lá, não precisa instalar nada. Em produção, vemos ~3-5× mais adesão a check-ins via WhatsApp comparado a app dedicado. Ainda assim, oferecemos chat web/app para perfis que preferem.
+
+**P: WhatsApp Business é seguro para dados clínicos? E LGPD?**
+R: Operamos via **WhatsApp Business Cloud API homologada Meta**, com criptografia ponta-a-ponta nativa, integradores certificados (Twilio/Gupshup) com servidores brasileiros, e templates de mensagem proativa pré-aprovados pela Meta para healthcare. Opt-in explícito registrado no TCLE. Conformidade LGPD validada por advogado especializado.
+
+**P: Que tipo de dado vai trafegar pelo WhatsApp? Vocês mandam diagnóstico?**
+R: Não. Pelo WhatsApp trafegam: lembretes de medicação (sem revelar diagnóstico), perguntas de check-in ("como passou a noite?"), respostas do paciente (texto ou áudio), confirmações de adesão. **Diagnóstico, prescrição e laudo nunca trafegam pelo WhatsApp** — esses ficam restritos ao prontuário VITA. A Sofia é treinada explicitamente para esse limite.
+
+### Sobre OCR e visão multimodal
+
+**P: A Sofia consegue mesmo ler receita / bula / exame fotografado?**
+R: Sim. Operamos com modelo de visão multimodal (Google Gemini Vision) com taxa de extração estruturada validada para documentos clínicos brasileiros: receita médica (princípio ativo, dose, posologia, prescritor), embalagem de medicamento (nome comercial → princípio ativo, lote, validade), bula (seções relevantes para a dúvida do paciente), exame laboratorial (extração tabular com nome do parâmetro, valor, unidade, faixa de referência), atestado, encaminhamento. Quando a leitura tem baixa confiança, a Sofia explicita ("não consegui ler com clareza essa parte, pode tirar outra foto?") em vez de adivinhar.
+
+**P: O que vocês fazem com discrepância entre receita fotografada pelo paciente e prescrição registrada no prontuário?**
+R: Esse é um dos casos de uso mais valiosos do OCR. Se o Sr. José sai do hospital VITA com prescrição de carvedilol 12,5 mg 12/12h, mas na foto da receita lida pelo paciente aparece "metoprolol 50 mg 12/12h" (porque a farmácia entregou errado, ou porque havia receita anterior misturada), a Sofia detecta divergência **antes da primeira dose** e escala para a equipe clínica VITA. Erro de medicação capturado preventivamente.
+
+**P: A Sofia analisa fotos de feridas e lesões? Isso não é diagnóstico de imagem?**
+R: A Sofia identifica **sinais visuais sugestivos** (vermelhidão, exsudato, edema localizado, deiscência de sutura) e gera **observação clínica** para o prontuário VITA — equipe clínica decide se é infecção, se merece avaliação presencial, ou se pode ser acompanhada à distância. Análise visual é tratada como **dado estruturado para apoio clínico**, não como diagnóstico de imagem (não substitui dermatologia, não substitui visita do enfermeiro). Para piloto VITA, podemos calibrar conjuntamente quais tipos de imagem fazem sentido aceitar e quais devem disparar visita presencial automática.
+
+**P: E aferição de pressão, glicemia, oximetria via foto do display? Vocês confiam nesse dado?**
+R: Confiamos como dado complementar, não substituto de equipamentos integrados. Para paciente que não tem wearable nem aparelho integrado via Bluetooth, fotografar o display do glicosímetro/oxímetro/aparelho de pressão é o único caminho realista. A Sofia extrai o valor, registra no prontuário com flag "auto-relato via foto" para diferenciar do dado vindo de equipamento certificado, e roda alertas se valor está fora de faixa. Para perfis de paciente que precisam de monitorização certificada (ex: pós-IAM grave), recomendamos integração com aparelho Bluetooth dedicado.
 
 ---
 
