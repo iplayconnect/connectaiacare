@@ -18,6 +18,7 @@ from src.handlers.disease_routes import bp as disease_bp
 from src.handlers.medication_routes import bp as medication_bp
 from src.handlers.onboarding_web_routes import bp as onboarding_web_bp
 from src.handlers.patient_portal_routes import bp as patient_portal_bp
+from src.handlers.proactive_caller_routes import bp as proactive_caller_bp
 from src.handlers.profiles_routes import bp as profiles_bp
 from src.handlers.routes import bp as api_bp
 from src.handlers.sofia_routes import bp as sofia_bp
@@ -78,6 +79,7 @@ def create_app() -> Flask:
     app.register_blueprint(alerts_bp, url_prefix="/api")
     app.register_blueprint(communications_bp)
     app.register_blueprint(safety_bp)
+    app.register_blueprint(proactive_caller_bp)
 
     # JWT middleware: protege /api/* exceto rotas públicas (auth, webhook,
     # portal do paciente com PIN, onboarding B2C).
@@ -193,6 +195,17 @@ def create_app() -> Flask:
             logger.info("proactive_scheduler_thread_started")
         except Exception as exc:
             logger.error("proactive_scheduler_failed_to_start", error=str(exc))
+
+    # Proactive Caller — Sofia decide DINAMICAMENTE quando ligar baseado em
+    # risk_score + adesão + eventos abertos + janela horária do paciente.
+    # Diferente do proactive_scheduler (cron WhatsApp): aqui é por SCORE clínico.
+    if os.getenv("ENABLE_PROACTIVE_CALLER", "true").lower() == "true":
+        try:
+            from src.services.proactive_caller import get_proactive_caller
+            get_proactive_caller().start()
+            logger.info("proactive_caller_thread_started")
+        except Exception as exc:
+            logger.error("proactive_caller_failed_to_start", error=str(exc))
 
     logger.info("app_created", env=settings.env, debug=settings.debug)
     return app

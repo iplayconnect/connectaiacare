@@ -169,6 +169,62 @@ services:
       traefik.http.routers.connectaiacare-voice-call-api.tls.certresolver: "letsencrypt"
       traefik.http.services.connectaiacare-voice-call-api.loadbalancer.server.port: "5040"
 
+  livekit-agent-service:
+    # Backend alternativo de voz: LiveKit Agents Cloud + SIP trunk Flux.
+    # Coexiste com voice-call-service. Backend roteia via VOICE_BACKEND env.
+    # Flag inicial OFF (profile gated) — sobe explicitamente com:
+    #   docker compose --profile livekit up -d livekit-agent-service
+    profiles:
+      - livekit
+    build:
+      context: ./livekit-agent-service
+      dockerfile: Dockerfile
+    container_name: connectaiacare-livekit-agent
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/connectaiacare
+      LOG_LEVEL: INFO
+      # LiveKit Cloud
+      LIVEKIT_URL: ${LIVEKIT_URL:-}
+      LIVEKIT_WS_URL: ${LIVEKIT_WS_URL:-}
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-}
+      LIVEKIT_OUTBOUND_TRUNK_ID: ${LIVEKIT_OUTBOUND_TRUNK_ID:-}
+      LIVEKIT_AGENT_NAME: ${LIVEKIT_AGENT_NAME:-sofia-voice}
+      # Pipeline plugins
+      DEEPGRAM_API_KEY: ${DEEPGRAM_API_KEY:-}
+      DEEPGRAM_LANGUAGE: ${DEEPGRAM_LANGUAGE:-pt-BR}
+      DEEPGRAM_MODEL: ${DEEPGRAM_MODEL:-nova-2-general}
+      ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY:-}
+      ELEVENLABS_MODEL: ${ELEVENLABS_MODEL:-eleven_multilingual_v2}
+      TTS_PROVIDER: ${TTS_PROVIDER:-elevenlabs}
+      TTS_VOICE_ID: ${TTS_VOICE_ID:-}
+      # LLM (Grok via OpenAI-compatible API)
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://api.x.ai/v1}
+      LLM_MODEL: ${LLM_MODEL:-grok-2-1212}
+      LLM_API_KEY_ENV: XAI_API_KEY
+      XAI_API_KEY: ${XAI_API_KEY:-}
+      # Internal services
+      SOFIA_SERVICE_URL: http://sofia-service:5030
+      BACKEND_API_URL: http://api:5055
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - connectaiacare_internal
+      - infra_proxy
+    # Não expõe SIP — LiveKit Cloud é quem fala com Flux. Só expõe HTTP /dial
+    # via Traefik pra backend interno chamar.
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: "infra_proxy"
+      traefik.http.routers.connectaiacare-livekit-agent.rule: "Host(`livekit-agent.connectaia.com.br`)"
+      traefik.http.routers.connectaiacare-livekit-agent.entrypoints: "websecure"
+      traefik.http.routers.connectaiacare-livekit-agent.tls.certresolver: "letsencrypt"
+      traefik.http.services.connectaiacare-livekit-agent.loadbalancer.server.port: "5042"
+
   frontend:
     build:
       context: ./frontend

@@ -190,6 +190,50 @@ def recompute_all_risk():
     return jsonify({"status": "ok", **result})
 
 
+# ──────────── Baseline individual (Fase 2) ────────────
+
+@bp.get("/api/safety/risk-score/<patient_id>/baseline")
+@require_role("super_admin", "admin_tenant", "medico", "enfermeiro")
+def get_patient_baseline(patient_id: str):
+    """Retorna o baseline individual do paciente (median + MAD por sinal,
+    histórico semanal, flag has_sufficient_data)."""
+    from src.services import risk_baseline
+    base = risk_baseline.get_baseline(patient_id)
+    if not base:
+        return jsonify({
+            "status": "ok", "has_baseline": False,
+            "message": "not_computed_yet",
+        })
+    return jsonify({"status": "ok", "has_baseline": True, "baseline": base})
+
+
+@bp.post("/api/safety/risk-score/<patient_id>/baseline/compute")
+@require_role("super_admin", "admin_tenant", "medico", "enfermeiro")
+def compute_patient_baseline(patient_id: str):
+    """Recomputa baseline desse paciente. Janela default 60d.
+
+    Body opcional: { "period_days": 60 }
+    """
+    body = request.get_json(silent=True) or {}
+    from src.services import risk_baseline
+    result = risk_baseline.compute_baseline(
+        patient_id,
+        period_days=int(body.get("period_days") or risk_baseline.DEFAULT_PERIOD_DAYS),
+    )
+    return jsonify({"status": "ok", **result})
+
+
+@bp.post("/api/safety/risk-score/baseline/recompute-all")
+@require_role("super_admin")
+def recompute_all_baselines():
+    """Recomputa baseline de todos os pacientes ativos do tenant."""
+    user_ctx = getattr(g, "user", None) or {}
+    tenant_id = user_ctx.get("tenant_id") or "connectaiacare_demo"
+    from src.services import risk_baseline
+    result = risk_baseline.compute_baseline_for_all_active(tenant_id)
+    return jsonify({"status": "ok", **result})
+
+
 @bp.get("/api/safety/stats")
 @require_role("super_admin", "admin_tenant")
 def stats():

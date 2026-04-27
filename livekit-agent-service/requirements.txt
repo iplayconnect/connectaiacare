@@ -1,0 +1,19 @@
+# LiveKit Agents — pinned versions estáveis
+livekit-agents==0.12.18
+livekit-plugins-deepgram==0.6.20
+livekit-plugins-openai==0.10.18
+livekit-plugins-elevenlabs==0.7.13
+livekit-plugins-silero==0.7.5
+livekit-api==0.8.2
+
+# HTTP shim + persistência compartilhada (mesmo padrão voice-call-service)
+flask==3.0.3
+psycopg2-binary==2.9.9
+httpx==0.27.2
+requests==2.32.3
+python-dotenv==1.0.1
+structlog==24.4.0
+numpy>=1.26.0
+
+# supervisord pra rodar worker + flask juntos
+supervisor==4.2.5
