@@ -471,6 +471,24 @@ def _build_tools_for_call(
                 "required": ["patient_id", "requested_for"],
             },
         },
+        {
+            "type": "function",
+            "name": "escalate_to_attendant",
+            "description": "Aciona equipe humana responsável (atendente Isabel se B2C, cuidador interno se B2B) discando o ramal vinculado ao paciente. Use quando: queixa clínica significativa, padrão preocupante (várias quedas, dor persistente), pedido explícito do usuário, situação fora da sua capacidade. Severity: 'critical' = emergência (dor torácica), 'urgent' = preocupação real, 'attention' = vale revisão. Passa por Safety Guardrail.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "reason": {"type": "string"},
+                    "severity": {
+                        "type": "string",
+                        "enum": ["attention", "urgent", "critical"],
+                    },
+                    "summary": {"type": "string"},
+                    "patient_id": {"type": "string"},
+                },
+                "required": ["reason"],
+            },
+        },
     ]
 
     # Tools clínicas avançadas (motor de cruzamentos) — só pra profissionais

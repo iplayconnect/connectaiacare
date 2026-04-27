@@ -249,22 +249,126 @@ _REMOTE_TOOLS = {
     "list_beers_avoid_in_condition",
     "check_medication_safety",
     "query_clinical_guidelines",
+    "escalate_to_attendant",  # Sofia liga ramal humano via sofia tool
 }
+
+# Locais que precisam passar pelo Safety Guardrail antes de executar
+_LOCAL_TOOLS_REQUIRING_REVIEW = {
+    "create_care_event",
+    "schedule_teleconsulta",
+}
+
+# Locais que recebem disclaimer mesmo sem guardrail
+_LOCAL_TOOLS_CLINICAL_INFO = {
+    "get_patient_summary",
+    "get_patient_vitals",
+    "list_medication_schedules",
+}
+
+_CLINICAL_DISCLAIMER = (
+    "Esta é informação para apoiar a sua decisão — quem decide é sempre "
+    "você com o médico responsável. A Sofia não substitui consulta médica."
+)
+
+
+def _classification_to_severity(args: dict) -> str:
+    cls = (args.get("classification") or "routine").lower()
+    return {
+        "routine": "info", "attention": "attention",
+        "urgent": "urgent", "critical": "critical",
+    }.get(cls, "attention")
+
+
+def _call_safety_guardrail_voice(
+    name: str, args: dict, persona_ctx: dict
+) -> dict:
+    """Chama safety_guardrail no backend api antes de executar tool de ação."""
+    try:
+        import httpx
+        backend = Config.BACKEND_API_URL
+        if name == "create_care_event":
+            severity = _classification_to_severity(args)
+            action_type = "register_history"
+        elif name == "schedule_teleconsulta":
+            severity = "attention"
+            action_type = "invoke_attendant"
+        else:
+            severity = "attention"
+            action_type = "register_history"
+        payload = {
+            "tenant_id": persona_ctx.get("tenant_id") or "connectaiacare_demo",
+            "patient_id": args.get("patient_id") or persona_ctx.get("patient_id"),
+            "action_type": action_type,
+            "severity": severity,
+            "summary": f"{name} · {(args.get('summary') or args.get('reason') or '')[:200]}",
+            "triggered_by_tool": name,
+            "triggered_by_persona": persona_ctx.get("persona"),
+            "details": {"args": args},
+        }
+        r = httpx.post(f"{backend}/api/safety/route-action", json=payload, timeout=8.0)
+        if r.status_code == 200:
+            return r.json()
+        logger.warning("guardrail_voice_http_%d", r.status_code)
+    except Exception as exc:
+        logger.warning("guardrail_voice_unreachable: %s", exc)
+    # Fail-open
+    return {"decision": "execute", "reason": "guardrail_unreachable_failed_open"}
 
 
 def execute_voice_tool(name: str, args: dict, persona_ctx: dict) -> dict:
-    """Roteia tool: handler local ou HTTP pro sofia-service."""
+    """Roteia tool: handler local ou HTTP pro sofia-service. Aplica
+    guardrail em ações locais que persistem mudança."""
     if name in _LOCAL_TOOLS:
+        # Guardrail check pra tools de ação
+        if name in _LOCAL_TOOLS_REQUIRING_REVIEW:
+            gr = _call_safety_guardrail_voice(name, args or {}, persona_ctx)
+            decision = gr.get("decision")
+            if decision == "queue":
+                return {
+                    "ok": True, "queued_for_review": True,
+                    "queue_id": gr.get("queue_id"),
+                    "_message_for_sofia": (
+                        "Essa ação foi colocada na fila pra revisão de quem "
+                        "está acompanhando. Avise o usuário que sua equipe "
+                        "vai analisar e decidir."
+                    ),
+                    "_disclaimer": _CLINICAL_DISCLAIMER,
+                }
+            if decision == "reject":
+                return {
+                    "ok": False, "error": "guardrail_rejected",
+                    "reason": gr.get("reason"),
+                    "_message_for_sofia": (
+                        "Essa ação não pode ser feita pela Sofia agora. "
+                        "Avise o usuário pra falar com o médico."
+                    ),
+                    "_disclaimer": _CLINICAL_DISCLAIMER,
+                }
+            if decision == "paused":
+                return {
+                    "ok": False, "error": "guardrail_circuit_open",
+                    "_message_for_sofia": (
+                        "Sistema temporariamente pausou ações automáticas."
+                    ),
+                }
         handler = globals().get(_LOCAL_TOOLS[name])
         if not handler:
             return {"ok": False, "error": "handler_missing"}
         try:
-            return handler(persona_ctx=persona_ctx, **args)
+            output = handler(persona_ctx=persona_ctx, **args)
         except Exception as exc:
             logger.exception("voice_tool_local_failed name=%s", name)
             return {"ok": False, "error": str(exc)}
+        # Disclaimer em tools clínicas
+        if isinstance(output, dict) and (
+            name in _LOCAL_TOOLS_REQUIRING_REVIEW
+            or name in _LOCAL_TOOLS_CLINICAL_INFO
+        ):
+            output.setdefault("_disclaimer", _CLINICAL_DISCLAIMER)
+        return output
 
     if name in _REMOTE_TOOLS:
+        # Sofia-service.execute_tool já aplica guardrail + disclaimer
         return _execute_remote_tool(name, args, persona_ctx)
 
     return {"ok": False, "error": f"tool_not_available_in_voice:{name}"}
