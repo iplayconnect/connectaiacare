@@ -22,7 +22,8 @@ from src import persistence
 
 logger = logging.getLogger(__name__)
 
-EMBED_MODEL = os.getenv("SOFIA_EMBED_MODEL") or "text-embedding-004"
+EMBED_MODEL = os.getenv("SOFIA_EMBED_MODEL") or "gemini-embedding-001"
+EMBED_DIMS = 768  # Matryoshka truncation; vector(768) na tabela
 BATCH_SIZE = int(os.getenv("SOFIA_EMBED_BATCH", "20"))
 TICK_INTERVAL_SEC = int(os.getenv("SOFIA_EMBED_TICK_SEC", "60"))
 LOCK_KEY = 8731029471
@@ -41,19 +42,37 @@ def embed_text(text: str) -> list[float] | None:
     if not text or len(text.strip()) < 3:
         return None
     try:
+        from google.genai import types
         client = _get_genai_client()
-        # google-genai 0.6+ tem embed_content
-        result = client.models.embed_content(
-            model=EMBED_MODEL,
-            contents=text[:8000],  # limit input
-        )
-        # SDK retorna .embeddings[0].values (lista[float])
+        # google-genai 1.73+ aceita config com output_dimensionality
+        # (Matryoshka truncation pra dimensão menor — melhor pra pgvector)
+        try:
+            cfg = types.EmbedContentConfig(output_dimensionality=EMBED_DIMS)
+            result = client.models.embed_content(
+                model=EMBED_MODEL,
+                contents=text[:8000],
+                config=cfg,
+            )
+        except TypeError:
+            # Fallback se SDK não aceita config — pega 3072 e trunca
+            result = client.models.embed_content(
+                model=EMBED_MODEL, contents=text[:8000],
+            )
         embeddings = getattr(result, "embeddings", None) or []
         if embeddings:
             values = getattr(embeddings[0], "values", None)
             if values:
-                return list(values)
-        # Fallback formats
+                vec = list(values)
+                # Trunca caso venha 3072 (matryoshka manual)
+                if len(vec) > EMBED_DIMS:
+                    vec = vec[:EMBED_DIMS]
+                # Re-normaliza após truncation pra preservar cosine
+                if len(vec) == EMBED_DIMS:
+                    import math
+                    norm = math.sqrt(sum(v*v for v in vec))
+                    if norm > 0:
+                        vec = [v/norm for v in vec]
+                return vec
         emb = getattr(result, "embedding", None)
         if emb:
             return list(emb)
