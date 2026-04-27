@@ -444,3 +444,30 @@ def validate_prescription():
         }), 500
 
     return jsonify({"status": "ok", "validation": result})
+
+
+# ════════════════════════════════════════════════════════════════
+# CASCADAS DE PRESCRIÇÃO (dimensão 13 do motor)
+# ════════════════════════════════════════════════════════════════
+
+@bp.get("/api/clinical-rules/cascades")
+@require_role("super_admin", "admin_tenant", "medico", "enfermeiro")
+def list_cascades_endpoint():
+    """Lista todas cascatas configuradas (admin viewer)."""
+    from src.services import cascade_detector
+    items = cascade_detector.list_cascades()
+    return jsonify({"status": "ok", "count": len(items), "items": items})
+
+
+@bp.get("/api/patients/<patient_id>/cascades")
+@require_role("super_admin", "admin_tenant", "medico", "enfermeiro",
+              "cuidador_pro", "familia")
+def detect_cascades_endpoint(patient_id: str):
+    """Roda detector pra um paciente — retorna cascatas que bateram nas
+    medicações ativas dele, com detalhe de quais drogas matched em cada
+    bracket (A/B/C). Exclusões por condição clínica são suprimidas."""
+    from src.services import cascade_detector
+    result = cascade_detector.detect_cascades(patient_id)
+    if not result.get("ok"):
+        return jsonify({"status": "error", "reason": result.get("error")}), 404
+    return jsonify({"status": "ok", **result})
