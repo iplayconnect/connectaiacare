@@ -7,19 +7,183 @@
 
 A **Sofia** é a IA assistente da ConnectaIACare, posicionada como **camada
 única de relacionamento** com 4 personas (paciente, familiar, cuidador,
-profissional clínico) através de **3 canais técnicos**: chat texto, voz
-no browser e ligação telefônica. Compartilha entre os canais:
-**memória persistente do usuário** (cross-session), **base de conhecimento
-RAG** com lições aprendidas anonimizadas (cross-tenant), **motor de
-cruzamentos clínicos** (dose validator com 12 dimensões / ~48 princípios
-ativos cobertos) e **playbooks editáveis por admin** sem release de código.
+profissional clínico) através de **3 canais técnicos** (chat texto, voz no
+browser e ligação telefônica) cobrindo **3 propósitos** (suporte ao
+cuidado, relacionamento contínuo e conversão comercial). Compartilha entre
+os canais: **memória persistente do usuário** (cross-session), **base de
+conhecimento RAG** com lições aprendidas anonimizadas (cross-tenant),
+**motor de cruzamentos clínicos** (dose validator com 12 dimensões / ~48
+princípios ativos cobertos) e **playbooks editáveis por admin** sem
+release de código.
 
-Estado atual: **chat e voz browser em produção estáveis**. **Voz telefônica
-funciona end-to-end** mas trunk SIP do operador (Flux) atualmente
-bloqueando outbound. Inbound não implementado ainda. Frontend admin pra
-configurar tudo já no ar.
+**Visão de longo prazo**: Sofia entrega ciclo completo de cuidado
+(comercial → onboarding → monitoramento → suporte clínico → emergência)
+**sem intervenção humana obrigatória**. Humano entra como camada premium
+do plano OU como última instância em casos críticos. Inspiração de
+mercado: Tesla converte ~20% via LLM voz, corporações chinesas operam
+ciclo full multicanal com IA. Posicionamento BR: NÃO competir com
+EHR enterprise (MV, TOTVS) — atuar **na ponta**, no relacionamento
+direto com o usuário final (paciente, família, cuidador).
 
-## 1. Visão arquitetural
+Estado atual: **chat e voz browser em produção estáveis**. **Voz
+telefônica funciona end-to-end** mas trunk SIP do operador (Flux)
+atualmente bloqueando outbound. Inbound não implementado ainda. Frontend
+admin pra configurar tudo já no ar.
+
+## 1. Visão estratégica e missão
+
+### 1.1 Missão
+**Tornar o relacionamento de cuidado totalmente conduzível por IA**,
+removendo a dependência de intervenção humana operacional sempre que
+possível, e mantendo o humano como camada de **escalação clínica** ou
+**diferencial de plano premium**.
+
+A premissa: cuidado de qualidade pra idosos e pacientes crônicos no Brasil
+hoje é caro porque cada interação requer enfermeira/cuidadora/atendente.
+Em escala B2C massiva (idoso B2C que mora sozinho, família distante,
+clínica popular), esse modelo NÃO fecha conta. Sofia muda essa
+matemática — o custo marginal de mais 1 paciente acompanhado tende a zero
+porque a Sofia faz check-in, captura sintoma, valida medicação e escala
+quando precisa, **24/7 sem fadiga**.
+
+### 1.2 Por que 3 canais integrados (Chat, Voz, VoIP)
+
+Cada canal serve melhor um momento da jornada. Mas a SOFIA é **uma só**:
+mesma persona, mesma memória, mesmas tools, só muda a interface. O usuário
+não precisa "explicar de novo" quando troca de canal.
+
+| Canal | Quando o usuário escolhe | Proposta de valor única |
+|-------|---------------------------|-------------------------|
+| **Chat texto** (web/mobile) | Curiosidade lenta; consulta clínica do médico; cuidador documenta um relato | Documenta tudo, permite anexar imagens (foto de receita), reflexão |
+| **Voz browser** (FAB de voz) | Cuidador com mãos ocupadas; paciente que tem dificuldade pra digitar; consulta rápida | Hands-free, latência baixa, mantém presença mesmo enquanto cuida |
+| **Ligação telefônica** (VoIP outbound + futuro inbound) | Idoso que NÃO usa app/web; familiar distante recebendo aviso; check-in proativo de plano B2C | Atinge quem não tem smartphone; sensação de "alguém ligou pra mim"; canal universal |
+
+**Por que integrados (e não 3 produtos)**:
+- Idoso B2C usa só telefone (canal único). Sofia liga, ele atende, fala
+  com Sofia. Tudo passa pela mesma camada.
+- Família às vezes recebe ligação da Sofia avisando evento; depois entra
+  no app pra ver detalhes via chat. **Sofia continua a conversa** —
+  história única.
+- Cuidador profissional recebe ligação pós-relato pra atualizar status,
+  depois confirma medicação via chat texto. Sofia memoriza a evolução
+  cross-canal.
+- Comercial: lead recebe ligação Sofia da campanha, fecha pelo WhatsApp
+  texto, vira paciente onboardado tudo na mesma sessão emocional.
+
+### 1.3 Os 3 propósitos × 3 canais
+
+Matriz de uso. Cada célula é um cenário real que a Sofia já cobre ou
+tem playbook editável:
+
+| Propósito \ Canal | Chat texto | Voz browser | Ligação telefônica |
+|--------------|------|------|------|
+| **Suporte (clínico)** | Médico consulta dose máxima de dabigatrana, Sofia roda dose_validator e responde | Enfermeira em plantão pergunta interação enquanto preenche prontuário, Sofia responde por voz | Cuidador profissional liga pra tirar dúvida sobre paciente fora do horário comercial (Fase 2 inbound) |
+| **Relacionamento** | Familiar acessa app, Sofia mostra resumo do paciente e tira dúvida | Paciente B2C usa FAB de voz pra check-in informal "Sofia, hoje tá tudo bem?" | Sofia liga 8h30 todo dia pro paciente B2C que mora sozinho, valida medicação, capta sintoma novo |
+| **Comercial** | Visitante do site abre chat, Sofia qualifica + agenda demo | Demo ao vivo no site com Sofia explicando proposta por voz | Sofia liga pro lead que se cadastrou na landing, qualifica + agenda humano se quente |
+
+Para cada cenário existe (ou existirá) um **cenário (playbook) editável**
+em `aia_health_call_scenarios` com tom, regras, tools permitidas e ações
+pós-interação. Admin edita sem release de código.
+
+### 1.4 Onde queremos chegar — cenário aspiracional
+
+> **Plano "Cuidado Sem Limites" (B2C, idoso que mora sozinho)**:
+>
+> Dona Helena, 82 anos, mora sozinha em Porto Alegre. Filha em Lisboa,
+> sem cuidador presencial. Compra o plano via WhatsApp — Sofia faz toda
+> a venda sem humano. Onboarding via ligação: Sofia coleta condições,
+> medicações, contato familiar. Cadastra tudo.
+>
+> A partir do dia 1:
+> - 8h30: Sofia liga pra Helena. Boa tarde, como passou a noite?
+>   Tomou losartana? Sentiu alguma coisa? Helena conversa 3 minutos.
+> - 14h: Sofia liga lembrete de hidratação no calor.
+> - 20h: Sofia liga lembrete de janta + medicação noturna.
+>
+> Quarta de manhã Helena fala "tô com tontura". Sofia roda
+> `check_medication_safety`, vê interação com novo medicamento, registra
+> care_event=urgent, liga pra filha em Lisboa explicando "sua mãe
+> reportou tontura, podem estar relacionada a XYZ que ela começou ontem,
+> orientei a parar de tomar e procurar atendimento". Filha agradece
+> aliviada, Sofia agenda teleconsulta.
+>
+> Sexta noite Helena sente dor no peito. Sofia liga emergência 192,
+> mantém Helena na linha consolando, liga pra filha em paralelo. Tudo
+> registrado.
+>
+> Custo operacional ConnectaIACare por mês de cuidado dessa Helena:
+> insignificante. Custo de mercado equivalente (cuidador 24/7): R$5k+.
+> Plano custaria 3-10% disso e gera margem.
+
+Esse é o cenário-norte. Cada feature que construímos hoje (memória
+persistente, motor de cruzamentos, ligação outbound com playbooks)
+existe pra **viabilizar ESTA história em escala**.
+
+### 1.5 Posicionamento de mercado
+
+**NÃO somos**:
+- EHR enterprise (MV, TOTVS, Tasy) — eles são a infra hospitalar,
+  sistemas de prontuário pra grandes operadoras
+- Telemedicina pura (Doctoralia, Conexa) — eles conectam paciente
+  ao médico humano por consulta
+- Healthtech B2B SaaS administrativa (Memed, iClinic) — eles
+  digitalizam workflow do médico
+
+**Somos**:
+- Camada de **relacionamento contínuo** com o paciente/cuidador
+- Atuamos **na ponta** (último centímetro) — onde o cuidado vira
+  conversa diária
+- Modelo **B2B2C** (clínica + paciente final) e **B2C** (idoso direto
+  sem clínica intermediária)
+- Diferencial: **deterministic clinical engine** + **conversational
+  AI nativa** + **multi-canal unificado** rodando em escala
+
+**Coexistimos (não substituímos)**:
+- Hospital usa MV pro prontuário, ConnectaIACare pra acompanhar pós-alta
+- Operadora de saúde usa sistema próprio pra gestão, ConnectaIACare pra
+  monitoramento contínuo do beneficiário crônico
+- Família contrata cuidador presencial 8h, ConnectaIACare cobre as
+  outras 16h
+
+### 1.6 Referências externas que validam a tese
+
+**Tesla** opera vendas em alguns mercados com IA por voz que converte
+~20% (vs 5-10% de SDR humano). LLM faz qualificação, captação de
+preferências, agendamento. Custo por lead processado cai 90%+.
+
+**Corporações chinesas** (Alibaba, JD.com, ICBC) já operam atendimento,
+suporte e cobrança full multicanal LLM (texto + voz + ligação). Volume
+de centenas de milhões de interações/mês com taxa de satisfação igual
+ou superior a humano em first-line.
+
+**Hippocratic AI** (US) faz check-ins clínicos pós-alta hospitalar via
+voz. Validado em estudos com 200k+ pacientes — não-inferioridade vs
+enfermeira humana em 90% dos protocolos.
+
+**Sensi.ai** (US) monitora idosos via sensores + IA conversacional, sem
+visita presencial. Avaliação 2024 mostrou redução de 40% em hospitalização.
+
+Brasil ainda não tem player nativo nesse espaço com **arquitetura de
+ponta integrada** (chat + voz + ligação + motor clínico + memória). Aí
+está nossa janela.
+
+### 1.7 Métricas-norte (KPIs a perseguir)
+
+| Dimensão | Métrica | Alvo 12m | Alvo 36m |
+|----------|---------|----------|----------|
+| **Adoção** | Pacientes ativos com ≥3 interações/semana | 1.000 | 50.000 |
+| **Conversão comercial** | Lead → paciente onboardado | 15% | 25% |
+| **Satisfação** | NPS familiar | >50 | >70 |
+| **Eficiência** | % das interações sem escalação humana | 70% | 92% |
+| **Segurança** | False negatives críticos (Sofia não escalou e devia) | <0.1% | <0.01% |
+| **Cobertura clínica** | Princípios ativos no motor | 80 | 300+ |
+| **Receita** | ARR | R$1M | R$30M |
+
+Esses números só são atingíveis com Sofia como **operadora primária do
+relacionamento**. Não é "Sofia ajuda humano" — é "Sofia opera, humano
+supervisiona escalações".
+
+## 2. Visão arquitetural
 
 ### 1.1 Containers (Docker Compose, VPS Hostinger)
 
@@ -74,7 +238,7 @@ plataformas que usam `bbmd_*`):
 - `aia_health_call_scenarios` — playbooks editáveis (system_prompt, allowed_tools[], voice, post_call_actions[])
 - `aia_health_scheduled_calls` — agendamento outbound (RRULE pra recorrência) — schema pronto, scheduler ainda não implementado
 
-## 2. Sofia Chat (texto)
+## 3. Sofia Chat (texto)
 
 ### 2.1 Arquitetura
 - 5 sub-agents Python (`base_agent` + `caregiver`, `family`, `platform`, `patient`, `clinical`)
@@ -111,7 +275,7 @@ A cada turn, `base_agent.run()` chama `memory_service.maybe_update_async()`. Thr
 
 LGPD: opt-in via `aia_health_users.sofia_memory_enabled` (default TRUE pra profissionais, planejado FALSE pra paciente_b2c quando esse fluxo for migrado).
 
-## 3. Sofia Voz (browser)
+## 4. Sofia Voz (browser)
 
 ### 3.1 Arquitetura
 - `voice_app.py` (FastAPI ASGI, porta 5032) — bridge WebSocket browser ↔ provider
@@ -137,7 +301,7 @@ Mesmas 16 tools do chat, filtradas por persona. Schemas convertidos pra formato 
 - Tool calls com input/output JSONB
 - Audit chain por sessão
 
-## 4. Sofia VoIP (telefone)
+## 5. Sofia VoIP (telefone)
 
 ### 4.1 Arquitetura
 
@@ -203,7 +367,7 @@ Tracking via `_sofia_speaking` flag (true em delta, false em done) — evita fal
 ### 4.7 Memory write-back
 Ao `close()` da sessão SIP, voice-call-service chama `POST /sofia/memory/update` no sofia-service que força re-summarize. Próxima conversa carrega memória atualizada.
 
-## 5. Memória coletiva cross-tenant (anonimizada)
+## 6. Memória coletiva cross-tenant (anonimizada)
 
 Pipeline batch diário (`collective_insights_scheduler`):
 
@@ -218,7 +382,7 @@ Pipeline batch diário (`collective_insights_scheduler`):
 
 LGPD: mensagens crus NUNCA saem da tabela original; staging só guarda texto JÁ anonimizado; mínimo de freq=3 evita re-identificação por combinação rara (privacidade diferencial básica).
 
-## 6. Motor de cruzamentos clínicos (Drug Cross-Reference Engine)
+## 7. Motor de cruzamentos clínicos (Drug Cross-Reference Engine)
 
 ### 6.1 12 dimensões validadas
 1. Dose máxima diária (ANVISA / FDA)
@@ -246,7 +410,7 @@ Anti-hipertensivos (8), antidiabéticos (5), antiplaquetários (2), anticoagulan
 ### 6.4 Revalidação automática
 `dose_revalidation_scheduler` re-roda validador sobre TODAS prescrições ativas a cada 7 dias. Cobre o caso de regras novas adicionadas pelo admin tornarem prescrições antigas inseguras. Dedupe de alertas por (paciente, schedule, issue_codes_key) últimos 7 dias.
 
-## 7. Knowledge base (RAG)
+## 8. Knowledge base (RAG)
 
 ### 7.1 Estado atual
 - `aia_health_knowledge_chunks` com 19 chunks seedados manualmente:
@@ -257,7 +421,7 @@ Anti-hipertensivos (8), antidiabéticos (5), antiplaquetários (2), anticoagulan
 ### 7.2 Retrieval
 Hoje **token-aware ILIKE** (multi-palavra OR em title/content/summary/keywords[], ordenado por priority). pgvector está habilitado e schema tem campo `embedding vector(768)` mas extração de embeddings ainda não implementada — próxima fase.
 
-## 8. Frontend (Next.js 14 + React 18)
+## 9. Frontend (Next.js 14 + React 18)
 
 ### 8.1 Páginas relevantes pra Sofia
 - `/sofia` — Chat texto principal
@@ -277,7 +441,7 @@ Hoje **token-aware ILIKE** (multi-palavra OR em title/content/summary/keywords[]
 - 8 roles + permissions overridáveis por user (precedência: user.permissions > profile.permissions > role default)
 - Multi-tenant via tenant_id em todas as queries
 
-## 9. Scheduler infra (background workers)
+## 10. Scheduler infra (background workers)
 
 | Worker | Tick | Função |
 |--------|------|--------|
@@ -288,7 +452,7 @@ Hoje **token-aware ILIKE** (multi-palavra OR em title/content/summary/keywords[]
 
 Todos com `pg_try_advisory_lock` próprio pra single-writer entre workers Gunicorn.
 
-## 10. Custos (estimativa por turn)
+## 11. Custos (estimativa por turn)
 
 | Operação | Provider | Custo aprox. |
 |----------|----------|--------------|
@@ -299,7 +463,7 @@ Todos com `pg_try_advisory_lock` próprio pra single-writer entre workers Gunico
 | Collective insights (200 msgs/dia) | Gemini Flash medium | ~$0.005/dia |
 | Dose validation | DB only | $0 (deterministic) |
 
-## 11. Roadmap / pendências conhecidas
+## 12. Roadmap / pendências conhecidas
 
 ### 11.1 Curto prazo (próximas 2 sessões)
 - [ ] Cron `outbound_call_scheduler` lê `aia_health_scheduled_calls` (RRULE) e dispara na hora
@@ -321,7 +485,7 @@ Todos com `pg_try_advisory_lock` próprio pra single-writer entre workers Gunico
 - [ ] **Intel comercial integrada à Sofia** (lead score baseado em signal externo)
 - [ ] **Federated learning** entre tenants (insights coletivos hoje são cross-tenant — proximamente per-tenant com diferential privacy mais formal)
 
-## 12. Visão autoral: prompt, contexto de execução, memória temporária e eterna
+## 13. Visão autoral: prompt, contexto de execução, memória temporária e eterna
 > Análise crítica do que está hoje e onde estão os pontos cegos arquiteturais.
 > Escrita por Claude (Opus 4.7) co-construindo com o time. Útil pra o analista
 > externo entender DECISÕES e TRADE-OFFS, não só o estado atual.
@@ -459,7 +623,7 @@ Mas a fundação está sólida. O motor de cruzamentos clínicos especialmente �
 
 ---
 
-## 13. Limitações honestas (pra discutir com analista externo)
+## 14. Limitações honestas (pra discutir com analista externo)
 
 1. **Latência VoIP**: 500-800ms é boa pra Realtime, mas pra interação clínica (paciente idoso) ainda parece "robótico". Idealmente <300ms.
 
@@ -481,7 +645,7 @@ Mas a fundação está sólida. O motor de cruzamentos clínicos especialmente �
 
 10. **Cross-tenant sharing**: insights coletivos hoje compartilham entre todos os tenants. Pra clientes corporativos enterprise pode ser deal-breaker. Plano: opt-out per-tenant + namespace.
 
-## 14. Stack de IA usado
+## 15. Stack de IA usado
 
 | Camada | Provider/Model | Onde |
 |--------|----------------|------|
@@ -493,7 +657,7 @@ Mas a fundação está sólida. O motor de cruzamentos clínicos especialmente �
 | TTS (fallback chat) | Gemini 2.5 Flash native-audio | tts_client.py |
 | Embeddings (planejado, ainda não ativo) | text-embedding-3-small ou Gemini equivalente | knowledge_chunks |
 
-## 15. Arquivos-chave para deep-dive
+## 16. Arquivos-chave para deep-dive
 
 ```
 backend/
@@ -545,7 +709,7 @@ frontend/
         └── sofia-call-button.tsx                   # Modal contextual (Portal)
 ```
 
-## 16. Perguntas que gostaria que o analista responda
+## 17. Perguntas que gostaria que o analista responda
 
 1. **Arquitetura geral**: faz sentido manter 3 containers separados (api, sofia-service, voice-call-service) ou consolidar? Trade-off: isolamento de falhas vs complexidade ops.
 
