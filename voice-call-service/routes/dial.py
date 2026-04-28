@@ -74,6 +74,16 @@ def dial():
 
     def _run_loop():
         asyncio.set_event_loop(loop)
+        # CRÍTICO: registra esta thread no pjlib antes de processar
+        # qualquer evento. Sem isso, callbacks que tocam pjlib (drain
+        # quando VAD detecta interrupção, hangup quando Grok fecha)
+        # disparam assertion fatal e o container morre.
+        # Bug observado em produção 27/04 e 28/04: chamada cai logo
+        # após o usuário começar a falar pela 1ª vez.
+        try:
+            sip.register_current_thread("grok-asyncio-loop")
+        except Exception as exc:
+            logger.warning("loop_thread_register_failed: %s", exc)
         loop.run_forever()
 
     loop_thread = threading.Thread(target=_run_loop, daemon=True)

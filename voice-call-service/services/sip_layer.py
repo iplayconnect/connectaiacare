@@ -168,6 +168,25 @@ class SipLayer:
         logger.info("sip_dialing call_id=%s dest=%s", call_id, dest_uri)
         return call_id
 
+    def register_current_thread(self, label: str = "external") -> None:
+        """Registra a thread atual no pjlib (idempotente).
+
+        OBRIGATÓRIO ser chamado ANTES de qualquer função pjlib em threads
+        que não foram criadas pelo PJSIP. Sem isso, pj_thread_this()
+        dispara assertion → SIGABRT no container inteiro.
+
+        Caso típico: asyncio loop_thread que processa WS do Grok e
+        chama drain_outbound_audio quando VAD detecta voz do usuário.
+        """
+        if not self._initialized or not self._endpoint:
+            return
+        try:
+            self._endpoint.libRegisterThread(
+                f"{label}-{threading.get_ident()}"
+            )
+        except Exception:
+            pass  # já registrada — idempotente
+
     def push_audio_8k(self, call_id: str, pcm16_8k: bytes) -> None:
         """Camada externa (audio_bridge depois de downsample) chama isso
         pra que o áudio da Sofia chegue no telefone do paciente."""
