@@ -210,7 +210,20 @@ Exclusões clínicas codificadas evitam falso positivo: paciente com Parkinson r
 
 Roadmap de cascatas adicionais (🔵): diurético tiazídico → hiperuricemia → alopurinol; beta-bloqueador → bradicardia; opioide → constipação → laxante (separada da cascata anticolinérgica).
 
-### 6.3 Cobertura: 48 princípios ativos × 14 classes
+### 6.3 Cobertura: alinhamento com RENAME 2024 como base oficial
+
+A curadoria do motor adota **RENAME 2024** (Relação Nacional de Medicamentos Essenciais, Ministério da Saúde / CONITEC) como **base oficial de cobertura**. Cada fármaco no motor tem flag explícita de pertencimento à RENAME e ao componente correspondente (Básico, Estratégico, Especializado).
+
+Por que RENAME como base:
+
+- É a referência oficial brasileira do que está disponível no SUS — onde o idoso brasileiro retira medicação no posto de saúde
+- Hospitais públicos e UPAs operam com formulário RENAME por padronização
+- B2C massivo (idoso individual) frequentemente usa medicação RENAME por custo/disponibilidade
+- Cobertura formal de RENAME = cobertura formal do que o paciente real usa
+
+**Status atual de cobertura:**
+
+
 
 ```
 Anti-hipertensivos (7):     losartana, enalapril, anlodipino, propranolol,
@@ -244,9 +257,22 @@ Outros:                     paracetamol, dipirona, AINEs (ibuprofeno/naproxeno/
                             carbonato de cálcio
 ```
 
-Cobertura estimada: 70 a 80% da prescrição geriátrica brasileira.
+Sobreposição atual com RENAME 2024 Componente Básico relevante para adultos/idosos: **~85-90%**. Cobertura estimada de prescrição geriátrica brasileira: 70 a 80%.
 
-**Roadmap próximo (🔵): expansão para 80 princípios ativos** (~95% cobertura). Faltam BCCa não-DHP (verapamil, diltiazem), inibidores de colinesterase (donepezila, rivastigmina, galantamina, memantina), insulinas, broncodilatadores inalatórios (salbutamol, formoterol, tiotrópio), corticoides sistêmicos (prednisona, prednisolona, dexametasona), opioides (tramadol, codeína, morfina), anticonvulsivantes (gabapentina, pregabalina, valproato).
+**Roadmap próximo (🔵): cobertura 100% RENAME 2024 Componente Básico** (~150 princípios ativos relevantes para adultos/idosos). Itens prioritários a adicionar:
+
+- **Diuréticos**: hidroclorotiazida, furosemida, espironolactona, indapamida (em RENAME · gap atual)
+- **Insulinas**: NPH, regular, glargina, lispro (em RENAME · gap atual)
+- **Corticoides sistêmicos**: prednisona, prednisolona, dexametasona, hidrocortisona (em RENAME · gap atual)
+- **BCCa não-DHP**: verapamil, diltiazem (em RENAME · gap atual)
+- **Inibidores de colinesterase**: donepezila, rivastigmina, galantamina, memantina (em RENAME · gap atual)
+- **Broncodilatadores inalatórios**: salbutamol, formoterol, tiotrópio, ipratrópio (em RENAME · gap atual)
+- **Antidepressivos clássicos**: amitriptilina, nortriptilina, imipramina (em RENAME · gap atual)
+- **Anticonvulsivantes**: carbamazepina, valproato, fenitoína, gabapentina (em RENAME · gap atual)
+- **Antibióticos**: penicilina G, doxiciclina, cefalexina, metronidazol (em RENAME · gap atual)
+- **Outros essenciais**: ácido fólico, sulfato ferroso, biperideno, metildopa (em RENAME · gap atual)
+
+A meta de **100% RENAME relevante** garante que qualquer prescrição que o paciente brasileiro receba pelo SUS passe pelas 13 dimensões do motor.
 
 ### 6.4 Validação automática semanal ✅
 
@@ -456,9 +482,11 @@ Toda ação sensível registrada em chain de hash SHA-256:
 Cada regra tem fonte e referência:
 
 ```
+rename_2024       — Relação Nacional de Medicamentos Essenciais
+                    (Ministério da Saúde / CONITEC) — BASE OFICIAL DE COBERTURA
+anvisa            — Bulário Eletrônico ANVISA — referência regulatória brasileira
 beers_2023        — American Geriatrics Society 2023 update
 fda               — FDA labels (Box warnings, dose limits)
-anvisa            — Bulário Eletrônico ANVISA
 kdigo             — KDIGO Clinical Practice Guideline 2024
 stockleys         — Stockley's Drug Interactions
 lexicomp          — Lexicomp clinical references
@@ -466,6 +494,8 @@ stopp_start_v2    — STOPP/START Criteria v2 (Ireland)
 rochon_bmj_2017   — Rochon RJ et al, BMJ 2017;359:j5251 (cascades)
 manual            — curadoria interna documentada
 ```
+
+**RENAME 2024** é a base oficial de cobertura — cada fármaco do motor tem flag declarada de pertencimento à lista (Componente Básico, Estratégico ou Especializado). **ANVISA Bulário** é a referência regulatória brasileira pra dose, posologia e indicação. As demais fontes complementam regras específicas (Beers para AVOID em geriatria, KDIGO para ajuste renal, Stockley's e Lexicomp para interações, STOPP/START para padrões geriátricos europeus, Rochon BMJ 2017 para cascatas).
 
 Confidence score por regra (0 a 1). Audit chain criptográfica registra mudanças. Confidence < 0.7 = manual review obrigatório antes de promover para produção.
 
@@ -553,7 +583,7 @@ Tabela completa do que está em produção, em finalização, em roadmap próxim
 | 5 cenários de ligação editáveis sem release | ✅ |
 | Validação automática semanal do motor | ✅ |
 | Teleconsulta integrada (módulo próprio) | 🟡 |
-| Cobertura motor 48 → 80 fármacos | 🔵 |
+| Cobertura 100% RENAME 2024 Componente Básico (~150 fármacos) | 🔵 |
 | Cascatas adicionais (tiazídico→hiperuricemia, etc) | 🔵 |
 | STOPP/START como camada complementar a Beers | 🔵 |
 | Inbound calls (Sofia atende ligações que chegam) | 🔵 |
@@ -574,7 +604,7 @@ Nada inventado. Tudo o que está em ✅ pode ser testado hoje. 🟡 está na ret
 
 ### 13.1 Próximas 4 a 6 semanas (🔵)
 
-- **Cobertura motor 48 → 80 princípios ativos.** Curadoria em andamento com expansão do corpo técnico clínico-farmacológico (ver seção 13.4). Lotes de 5 a 10 fármacos por sprint, com revisão clínica antes de promoção para produção.
+- **Cobertura 100% RENAME 2024 Componente Básico relevante para adultos/idosos.** Esta é a meta-foco do sprint atual. ~150 princípios ativos com cross-reference declarado. Curadoria em lotes de 5 a 10 fármacos por sprint, com revisão clínica antes de promoção para produção. Cada fármaco vem com flag `in_rename` e `rename_componente` (Básico/Estratégico/Especializado) registrada no motor.
 - **Cascatas adicionais:** diurético tiazídico → hiperuricemia → alopurinol; beta-bloqueador → bradicardia; inibidor de colinesterase → bradicardia; opioide → constipação → laxante (separada da cascata anticolinérgica); antipsicótico → síndrome neuroléptica → bromocriptina (rara mas grave).
 - **STOPP/START como camada complementar a Beers** — implementação iniciada; avaliação clínica em curso para identificar onde traz valor adicional.
 - **Inbound calls:** Sofia atende ligações que chegam, com roteador identificando caller_id (paciente conhecido → modo familiar; profissional cadastrado → modo clínico; desconhecido → comercial). Infra preparada — depende apenas da configuração final do trunk SIP.

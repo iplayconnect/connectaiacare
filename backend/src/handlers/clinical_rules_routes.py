@@ -471,3 +471,131 @@ def detect_cascades_endpoint(patient_id: str):
     if not result.get("ok"):
         return jsonify({"status": "error", "reason": result.get("error")}), 404
     return jsonify({"status": "ok", **result})
+
+
+# ════════════════════════════════════════════════════════════════
+# RENAME 2024 — base oficial de cobertura do motor
+# ════════════════════════════════════════════════════════════════
+
+@bp.get("/api/clinical-rules/rename/coverage")
+@require_role("super_admin", "admin_tenant", "medico", "enfermeiro")
+def rename_coverage_summary():
+    """Resumo de cobertura RENAME 2024 por componente + relevância geriátrica.
+
+    Retorna percentual de fármacos do RENAME que já estão cobertos pelo
+    motor (12 dimensões), pendentes ou em andamento.
+    """
+    from src.services.postgres import get_postgres
+    rows = get_postgres().fetch_all(
+        """SELECT componente, geriatric_relevance, total, covered,
+                  in_progress, pending, pct_covered
+           FROM aia_health_rename_coverage_summary"""
+    )
+    return jsonify({
+        "status": "ok",
+        "edicao": "2024",
+        "summary": [dict(r) for r in (rows or [])],
+    })
+
+
+@bp.get("/api/clinical-rules/rename/gaps")
+@require_role("super_admin", "admin_tenant", "medico", "enfermeiro")
+def rename_gaps():
+    """Lista fármacos RENAME que ainda não estão cobertos pelo motor.
+
+    Query params:
+        relevance: high | medium | low (filtra por relevância geriátrica)
+        componente: basico | estrategico | especializado
+        limit: default 100
+
+    Útil pra Henrique/farmacêutico priorizar o que codificar próximo.
+    """
+    relevance = request.args.get("relevance")
+    componente = request.args.get("componente")
+    limit = min(int(request.args.get("limit", 100)), 500)
+
+    where = ["motor_coverage IN ('pending', 'in_progress')"]
+    params: list = []
+    if relevance:
+        where.append("geriatric_relevance = %s")
+        params.append(relevance)
+    if componente:
+        where.append("componente = %s")
+        params.append(componente)
+    params.append(limit)
+
+    from src.services.postgres import get_postgres
+    rows = get_postgres().fetch_all(
+        f"""SELECT principle_active, componente, grupo_terapeutico,
+                   populacao_alvo, indicacao_sus, geriatric_relevance,
+                   motor_coverage, notes
+            FROM aia_health_rename_drugs
+            WHERE {' AND '.join(where)}
+            ORDER BY
+                CASE geriatric_relevance
+                    WHEN 'high' THEN 1
+                    WHEN 'medium' THEN 2
+                    WHEN 'low' THEN 3
+                    WHEN 'excluded' THEN 4
+                END,
+                principle_active
+            LIMIT %s""",
+        tuple(params),
+    )
+    out = []
+    for r in rows or []:
+        d = dict(r)
+        # Convert array to list pra JSON
+        if d.get("populacao_alvo"):
+            d["populacao_alvo"] = list(d["populacao_alvo"])
+        out.append(d)
+    return jsonify({
+        "status": "ok",
+        "count": len(out),
+        "edicao": "2024",
+        "gaps": out,
+    })
+
+
+@bp.post("/api/clinical-rules/rename/<principle>/mark-covered")
+@require_role("super_admin", "admin_tenant")
+def mark_rename_drug_covered(principle: str):
+    """Marca um fármaco RENAME como coberto pelo motor (após codificação
+    das 12 dimensões). Chamado quando admin/farmacêutico promove o fármaco
+    pra produção.
+    """
+    from src.services.postgres import get_postgres
+    from src.services.audit_service import audit_log
+    from flask import g
+
+    body = request.get_json(silent=True) or {}
+    user_ctx = getattr(g, "user", None) or {}
+
+    row = get_postgres().fetch_one(
+        """UPDATE aia_health_rename_drugs
+           SET motor_coverage = 'covered',
+               last_reviewed_at = NOW(),
+               last_reviewed_by = %s,
+               notes_curador = COALESCE(%s, notes_curador)
+           WHERE principle_active = %s AND edicao = '2024'
+           RETURNING principle_active, componente, motor_coverage""",
+        (user_ctx.get("sub"), body.get("notes"), principle),
+    )
+    if not row:
+        return jsonify({"status": "error", "reason": "principle_not_found_in_rename"}), 404
+
+    # Marca também na drug_dose_limits se existir
+    get_postgres().execute(
+        """UPDATE aia_health_drug_dose_limits
+           SET in_rename = TRUE,
+               rename_componente = %s,
+               rename_edicao = '2024'
+           WHERE principle_active = %s""",
+        (row["componente"], principle),
+    )
+
+    audit_log(action="clinical_rules.rename.coverage_updated", payload={
+        "principle": principle, "actor": user_ctx.get("sub"),
+        "from": "pending_or_in_progress", "to": "covered",
+    })
+    return jsonify({"status": "ok", "principle": principle, "covered": True})
