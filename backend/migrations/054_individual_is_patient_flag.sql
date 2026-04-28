@@ -21,17 +21,37 @@
 BEGIN;
 
 -- ════════════════════════════════════════════════════════════════════
--- 1. Remove 'individual' de tenant_type
+-- 1. Remove 'individual' de tenant_type — modo defensivo
 -- ════════════════════════════════════════════════════════════════════
--- Antes do drop, converte qualquer tenant 'individual' (não deve haver
--- nenhum em produção ainda — migration 052 acabou de subir).
+-- Drop constraint primeiro (sem nome rígido — descobre dinamicamente).
+-- Depois normaliza valores fora do conjunto pra 'B2C' (default seguro).
+-- Por último adiciona a nova constraint com o conjunto reduzido.
 
+DO $$
+DECLARE
+    v_constraint_name TEXT;
+BEGIN
+    -- Descobre nome real da CHECK constraint (Postgres pode auto-nomear
+    -- diferente do esperado dependendo da ordem de definição).
+    SELECT conname INTO v_constraint_name
+    FROM pg_constraint
+    WHERE conrelid = 'aia_health_tenant_config'::regclass
+      AND contype = 'c'
+      AND pg_get_constraintdef(oid) LIKE '%tenant_type%';
+
+    IF v_constraint_name IS NOT NULL THEN
+        EXECUTE format(
+            'ALTER TABLE aia_health_tenant_config DROP CONSTRAINT %I',
+            v_constraint_name
+        );
+    END IF;
+END $$;
+
+-- Agora sem constraint, normaliza qualquer valor fora do conjunto novo
 UPDATE aia_health_tenant_config
    SET tenant_type = 'B2C'
- WHERE tenant_type = 'individual';
-
-ALTER TABLE aia_health_tenant_config
-    DROP CONSTRAINT IF EXISTS aia_health_tenant_config_tenant_type_check;
+ WHERE tenant_type IS NULL
+    OR tenant_type NOT IN ('ILPI', 'clinica', 'hospital', 'B2C');
 
 ALTER TABLE aia_health_tenant_config
     ADD CONSTRAINT aia_health_tenant_config_tenant_type_check
@@ -39,16 +59,31 @@ ALTER TABLE aia_health_tenant_config
 
 
 -- ════════════════════════════════════════════════════════════════════
--- 2. Simplifica licensing_model (remove 'individual', renomeia
---    'b2c_family' → 'b2c_per_patient')
+-- 2. Simplifica licensing_model — mesmo modo defensivo
 -- ════════════════════════════════════════════════════════════════════
+
+DO $$
+DECLARE
+    v_constraint_name TEXT;
+BEGIN
+    SELECT conname INTO v_constraint_name
+    FROM pg_constraint
+    WHERE conrelid = 'aia_health_tenant_config'::regclass
+      AND contype = 'c'
+      AND pg_get_constraintdef(oid) LIKE '%licensing_model%';
+
+    IF v_constraint_name IS NOT NULL THEN
+        EXECUTE format(
+            'ALTER TABLE aia_health_tenant_config DROP CONSTRAINT %I',
+            v_constraint_name
+        );
+    END IF;
+END $$;
 
 UPDATE aia_health_tenant_config
    SET licensing_model = 'b2c_per_patient'
- WHERE licensing_model IN ('individual', 'b2c_family');
-
-ALTER TABLE aia_health_tenant_config
-    DROP CONSTRAINT IF EXISTS aia_health_tenant_config_licensing_model_check;
+ WHERE licensing_model IS NULL
+    OR licensing_model NOT IN ('b2b_organization', 'b2c_per_patient');
 
 ALTER TABLE aia_health_tenant_config
     ADD CONSTRAINT aia_health_tenant_config_licensing_model_check
