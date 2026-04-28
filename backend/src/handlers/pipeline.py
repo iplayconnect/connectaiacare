@@ -98,6 +98,8 @@ class EldercarePipeline:
         self.tenant_cfg = get_tenant_config_service()
         self.embeddings = get_embedding_service()
         self.db = get_postgres()
+        from src.services.shift_resolver_service import get_shift_resolver
+        self.shifts = get_shift_resolver()
 
     # ==================================================================
     # ENTRY POINT
@@ -187,12 +189,33 @@ class EldercarePipeline:
         except Exception as exc:
             logger.warning("audio_save_failed", error=str(exc), report_id=str(report_id))
 
-        # Biometria (identifica caregiver interno)
-        caregiver_id, voice_method = self._identify_caregiver_by_voice(phone, audio_bytes, tenant)
+        # Biometria — agora shift-aware (insight Grok do panel LLM)
+        caregiver_id, voice_method, fallback_options = (
+            self._identify_caregiver_by_voice(phone, audio_bytes, tenant)
+        )
+        # voice_method já está nos valores aceitos pelo CHECK constraint:
+        # '1:1' | '1:N' | 'phone' | 'none'. Não precisa mapeamento.
+        candidates_json: list[dict] = []
+        if fallback_options:
+            candidates_json = [
+                {"caregiver_id": opt["id"], "caregiver_name": opt["name"]}
+                for opt in fallback_options
+            ]
         if caregiver_id:
             self.db.execute(
-                "UPDATE aia_health_reports SET caregiver_id = %s, caregiver_voice_method = %s WHERE id = %s",
-                (caregiver_id, voice_method, report_id),
+                "UPDATE aia_health_reports SET caregiver_id = %s, "
+                "caregiver_voice_method = %s, caregiver_voice_candidates = %s "
+                "WHERE id = %s",
+                (caregiver_id, voice_method,
+                 self.db.json_adapt(candidates_json), report_id),
+            )
+        else:
+            # Sem identificação. Salva method + candidates pra Sofia
+            # perguntar "você é X, Y ou Z?" no próximo turno.
+            self.db.execute(
+                "UPDATE aia_health_reports SET caregiver_voice_method = %s, "
+                "caregiver_voice_candidates = %s WHERE id = %s",
+                (voice_method, self.db.json_adapt(candidates_json), report_id),
             )
 
         # Transcrição
@@ -656,11 +679,24 @@ class EldercarePipeline:
             self.evo.send_text(phone, "❌ Perdi o contexto. Pode reenviar?")
             return {"status": "error", "reason": "patient_missing"}
 
-        # Registra mensagem antes de responder
-        self.events.append_message(
-            str(event["id"]),
-            {"role": "caregiver", "kind": "text", "text": text},
+        # Identifica cuidador via phone_type + plantão (sem biometria —
+        # texto não tem voz). Permite que mensagem de texto também tenha
+        # caregiver_id rastreável + opções de fallback quando ambíguo.
+        caregiver_id, voice_method, fallback_options = (
+            self._identify_caregiver_no_voice(phone, tenant)
         )
+
+        # Registra mensagem antes de responder, com caregiver_id se houver
+        msg_payload: dict[str, Any] = {
+            "role": "caregiver", "kind": "text", "text": text,
+        }
+        if caregiver_id:
+            msg_payload["caregiver_id"] = caregiver_id
+        if voice_method:
+            msg_payload["caregiver_method"] = voice_method
+        if fallback_options:
+            msg_payload["caregiver_fallback_options"] = fallback_options
+        self.events.append_message(str(event["id"]), msg_payload)
 
         conversation_history = (event.get("context") or {}).get("messages") or []
         context = event.get("context") or {}
@@ -1235,33 +1271,155 @@ class EldercarePipeline:
 
     def _identify_caregiver_by_voice(
         self, phone: str, audio_bytes: bytes, tenant: str,
-    ) -> tuple[str | None, str]:
+    ) -> tuple[str | None, str, list[dict] | None]:
+        """Identifica cuidador via biometria de voz com cascata:
+
+        Plantão é o ENABLER da biometria mesmo em celular compartilhado:
+        com pool reduzido a 3-4 vozes, biometria fica até mais precisa
+        que 1:1 isolado.
+
+        [1] phone_type='personal' + caregiver_by_phone → 1:1 verify.
+            Confirma identidade da pessoa dona daquele número.
+
+        [2] Plantão configurado → identify_caregiver_in_shift.
+            Aplica em TODOS os phone_type (shared, personal sem 1:1
+            verify, unknown). Roda contra os 3-4 cuidadores ativos no
+            plantão atual. Se score baixo → fallback_options.
+
+        [3] Sem plantão configurado → modo legado:
+            - phone_type != 'shared' → identify_1toN global
+            - phone_type == 'shared' → desiste (impreciso demais)
+
+        Retorno: (caregiver_id, voice_method, fallback_options).
+        voice_method ∈ {'1:1', '1:N', 'phone', 'none'}.
+        fallback_options: pool do plantão pra Sofia perguntar
+        "você é X, Y ou Z?" quando biometria não decidiu.
+        """
         try:
+            phone_type = self.shifts.get_phone_type(tenant, phone)
             row = self.db.fetch_one(
-                "SELECT id FROM aia_health_caregivers WHERE tenant_id = %s AND phone = %s AND active = TRUE",
+                "SELECT id FROM aia_health_caregivers "
+                "WHERE tenant_id = %s AND phone = %s AND active = TRUE",
+                (tenant, phone),
+            )
+            caregiver_by_phone = row["id"] if row else None
+            shift_pool_ids = self.shifts.list_active_caregiver_ids(tenant)
+
+            # ─── [1] Personal + caregiver dono do número → 1:1 ────
+            # Em compartilhado, pular: o número não é exclusivo dele.
+            # Em 1:1 falhou, cai pra biometria no pool (pode ter
+            # emprestado celular pra colega cobrir).
+            if phone_type == "personal" and caregiver_by_phone:
+                result = self.voice_bio.verify_1to1(
+                    str(caregiver_by_phone), tenant, audio_bytes, sample_rate=0,
+                )
+                if result.get("verified"):
+                    return str(caregiver_by_phone), "1:1", None
+                if result.get("reason") == "not_enrolled":
+                    # Sem enrollment ainda — confia no número (personal)
+                    return str(caregiver_by_phone), "phone", None
+                # 1:1 falhou (score baixo). Não retorna ainda — segue
+                # pra biometria no pool do plantão (pode ter trocado).
+                logger.info(
+                    "voice_1to1_low_score phone=%s caregiver=%s — "
+                    "tentando pool do plantão",
+                    phone, caregiver_by_phone,
+                )
+
+            # ─── [2] Pool reduzido pelo plantão (independente do phone_type) ──
+            if shift_pool_ids:
+                shift_result = self.voice_bio.identify_caregiver_in_shift(
+                    tenant_id=tenant,
+                    audio_bytes=audio_bytes,
+                    shift_caregiver_ids=shift_pool_ids,
+                    sample_rate=0,
+                )
+                if shift_result.get("identified"):
+                    return str(shift_result["matched_caregiver_id"]), "1:N", None
+                # Score baixo no pool do plantão → fallback explícito.
+                # Sofia vai perguntar "você é X, Y ou Z?" usando estes
+                # nomes. Se cuidador responder fora do pool ("Sou Ana
+                # cobrindo"), backend registra shift_override automático.
+                fallback = shift_result.get("fallback_options") or None
+                logger.info(
+                    "voice_shift_low_score tenant=%s phone_type=%s pool=%d",
+                    tenant, phone_type, len(shift_pool_ids),
+                )
+                return None, "none", fallback
+
+            # ─── [3] Sem plantão cadastrado → modo legado ────────
+            logger.warning(
+                "voice_no_shift_configured tenant=%s — usando 1:N global",
+                tenant,
+            )
+            if phone_type == "shared":
+                # Compartilhado SEM plantão = nada a fazer com biometria
+                return None, "none", None
+
+            global_result = self.voice_bio.identify_1toN(
+                tenant, audio_bytes, sample_rate=0,
+            )
+            if global_result.get("identified"):
+                return str(global_result["matched_caregiver_id"]), "1:N", None
+
+            # Confia no número (personal) se existe cadastro
+            if caregiver_by_phone:
+                return str(caregiver_by_phone), "phone", None
+            return None, "none", None
+        except Exception as exc:
+            logger.warning("voice_identify_failed", phone=phone, error=str(exc))
+            return None, "none", None
+
+    def _identify_caregiver_no_voice(
+        self, phone: str, tenant: str,
+    ) -> tuple[str | None, str, list[dict] | None]:
+        """Identificação de cuidador para inputs de TEXTO (sem biometria).
+
+        Usado por _handle_text. Como não há áudio, biometria não rola —
+        só temos phone_type + plantão pra inferir identidade.
+
+        Cascata:
+        [1] phone_type='personal' + caregiver_by_phone → confia no número.
+            Voice_method='phone' (não houve verificação biométrica, apenas
+            match de número cadastrado).
+        [2] phone_type='shared' OU sem caregiver_by_phone:
+            - Se plantão tem pool → retorna fallback_options pra Sofia
+              perguntar "com quem estou falando?"
+            - Sem plantão → não há como identificar.
+        Retorno alinhado com _identify_caregiver_by_voice.
+        """
+        try:
+            phone_type = self.shifts.get_phone_type(tenant, phone)
+            row = self.db.fetch_one(
+                "SELECT id FROM aia_health_caregivers "
+                "WHERE tenant_id = %s AND phone = %s AND active = TRUE",
                 (tenant, phone),
             )
             caregiver_by_phone = row["id"] if row else None
 
-            if caregiver_by_phone:
-                result = self.voice_bio.verify_1to1(
-                    str(caregiver_by_phone), tenant, audio_bytes, sample_rate=0
-                )
-                if result.get("verified"):
-                    return str(caregiver_by_phone), "1:1"
-                if result.get("reason") == "not_enrolled":
-                    return str(caregiver_by_phone), "phone"
+            # [1] Personal + dono do número → confia
+            if phone_type == "personal" and caregiver_by_phone:
+                return str(caregiver_by_phone), "phone", None
 
-            result = self.voice_bio.identify_1toN(tenant, audio_bytes, sample_rate=0)
-            if result.get("identified"):
-                return str(result["matched_caregiver_id"]), "1:N"
-
+            # [2] Compartilhado OU número desconhecido — precisa perguntar.
+            # Sofia usa pool do plantão atual pra dar opções.
+            shift_pool = self.shifts.list_active_caregivers(tenant)
+            opts = (
+                [{"id": c["caregiver_id"], "name": c["full_name"]}
+                 for c in shift_pool]
+                if shift_pool else None
+            )
+            # Se mesmo assim temos caregiver_by_phone (ex: phone_type=
+            # unknown), confia no número como pista, mas mantém opts
+            # pra Sofia confirmar caso queira.
             if caregiver_by_phone:
-                return str(caregiver_by_phone), "phone"
-            return None, "none"
+                return str(caregiver_by_phone), "phone", opts
+            return None, "none", opts
         except Exception as exc:
-            logger.warning("voice_identify_failed", phone=phone, error=str(exc))
-            return None, "none"
+            logger.warning(
+                "no_voice_identify_failed", phone=phone, error=str(exc),
+            )
+            return None, "none", None
 
     @staticmethod
     def _extract_phone(data: dict) -> str:
