@@ -679,11 +679,24 @@ class EldercarePipeline:
             self.evo.send_text(phone, "❌ Perdi o contexto. Pode reenviar?")
             return {"status": "error", "reason": "patient_missing"}
 
-        # Registra mensagem antes de responder
-        self.events.append_message(
-            str(event["id"]),
-            {"role": "caregiver", "kind": "text", "text": text},
+        # Identifica cuidador via phone_type + plantão (sem biometria —
+        # texto não tem voz). Permite que mensagem de texto também tenha
+        # caregiver_id rastreável + opções de fallback quando ambíguo.
+        caregiver_id, voice_method, fallback_options = (
+            self._identify_caregiver_no_voice(phone, tenant)
         )
+
+        # Registra mensagem antes de responder, com caregiver_id se houver
+        msg_payload: dict[str, Any] = {
+            "role": "caregiver", "kind": "text", "text": text,
+        }
+        if caregiver_id:
+            msg_payload["caregiver_id"] = caregiver_id
+        if voice_method:
+            msg_payload["caregiver_method"] = voice_method
+        if fallback_options:
+            msg_payload["caregiver_fallback_options"] = fallback_options
+        self.events.append_message(str(event["id"]), msg_payload)
 
         conversation_history = (event.get("context") or {}).get("messages") or []
         context = event.get("context") or {}
@@ -1355,6 +1368,57 @@ class EldercarePipeline:
             return None, "none", None
         except Exception as exc:
             logger.warning("voice_identify_failed", phone=phone, error=str(exc))
+            return None, "none", None
+
+    def _identify_caregiver_no_voice(
+        self, phone: str, tenant: str,
+    ) -> tuple[str | None, str, list[dict] | None]:
+        """Identificação de cuidador para inputs de TEXTO (sem biometria).
+
+        Usado por _handle_text. Como não há áudio, biometria não rola —
+        só temos phone_type + plantão pra inferir identidade.
+
+        Cascata:
+        [1] phone_type='personal' + caregiver_by_phone → confia no número.
+            Voice_method='phone' (não houve verificação biométrica, apenas
+            match de número cadastrado).
+        [2] phone_type='shared' OU sem caregiver_by_phone:
+            - Se plantão tem pool → retorna fallback_options pra Sofia
+              perguntar "com quem estou falando?"
+            - Sem plantão → não há como identificar.
+        Retorno alinhado com _identify_caregiver_by_voice.
+        """
+        try:
+            phone_type = self.shifts.get_phone_type(tenant, phone)
+            row = self.db.fetch_one(
+                "SELECT id FROM aia_health_caregivers "
+                "WHERE tenant_id = %s AND phone = %s AND active = TRUE",
+                (tenant, phone),
+            )
+            caregiver_by_phone = row["id"] if row else None
+
+            # [1] Personal + dono do número → confia
+            if phone_type == "personal" and caregiver_by_phone:
+                return str(caregiver_by_phone), "phone", None
+
+            # [2] Compartilhado OU número desconhecido — precisa perguntar.
+            # Sofia usa pool do plantão atual pra dar opções.
+            shift_pool = self.shifts.list_active_caregivers(tenant)
+            opts = (
+                [{"id": c["caregiver_id"], "name": c["full_name"]}
+                 for c in shift_pool]
+                if shift_pool else None
+            )
+            # Se mesmo assim temos caregiver_by_phone (ex: phone_type=
+            # unknown), confia no número como pista, mas mantém opts
+            # pra Sofia confirmar caso queira.
+            if caregiver_by_phone:
+                return str(caregiver_by_phone), "phone", opts
+            return None, "none", opts
+        except Exception as exc:
+            logger.warning(
+                "no_voice_identify_failed", phone=phone, error=str(exc),
+            )
             return None, "none", None
 
     @staticmethod
