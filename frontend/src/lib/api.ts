@@ -1060,6 +1060,79 @@ export const api = {
       "/api/caregivers",
     ),
 
+  // ─── Plantões + phone_type ────────────────────
+  shiftsList: () =>
+    request<{
+      status: "ok";
+      shifts: Array<{
+        id: string;
+        caregiver_id: string;
+        full_name: string;
+        phone?: string;
+        phone_type: "personal" | "shared" | "unknown";
+        shift_name: string;
+        starts_at: string;
+        ends_at: string;
+        weekdays: number[];
+        active: boolean;
+        notes?: string;
+      }>;
+    }>("/api/shifts"),
+  shiftCreate: (body: {
+    caregiver_id: string;
+    shift_name: string;
+    starts_at: string;
+    ends_at: string;
+    weekdays?: number[];
+    notes?: string;
+  }) =>
+    request<{ status: "ok"; id: string }>("/api/shifts", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  shiftUpdate: (id: string, body: Record<string, any>) =>
+    request<{ status: "ok" }>(`/api/shifts/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
+  shiftDelete: (id: string) =>
+    request<{ status: "ok" }>(`/api/shifts/${id}`, { method: "DELETE" }),
+  caregiverPhoneType: (caregiverId: string, phoneType: "personal" | "shared" | "unknown") =>
+    request<{ status: "ok"; phone_type: string }>(
+      `/api/caregivers/${caregiverId}/phone-type`,
+      { method: "PATCH", body: JSON.stringify({ phone_type: phoneType }) },
+    ),
+  shiftsCurrent: () =>
+    request<{
+      status: "ok";
+      tenant_id: string;
+      current_shift_name: string | null;
+      active_caregivers: Array<{
+        caregiver_id: string;
+        full_name: string;
+        phone?: string;
+        phone_type: string;
+        shift_name: string;
+        source: "scheduled" | "override";
+      }>;
+      active_overrides: any[];
+      pool_size: number;
+    }>("/api/shifts/current"),
+  shiftOverridesList: () =>
+    request<{ status: "ok"; overrides: any[] }>("/api/shifts/overrides"),
+  shiftOverrideCreate: (body: {
+    caregiver_id: string;
+    shift_name: string;
+    valid_from: string;
+    valid_until: string;
+    reason?: string;
+    created_by?: string;
+  }) =>
+    request<{ status: "ok"; override_id: string }>(
+      "/api/shifts/overrides",
+      { method: "POST", body: JSON.stringify(body) },
+    ),
+
   // Profiles (Bloco C)
   listProfiles: () =>
     request<{ status: "ok"; profiles: ProfileRecord[] }>("/api/profiles"),

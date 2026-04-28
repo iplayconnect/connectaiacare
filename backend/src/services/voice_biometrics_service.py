@@ -868,6 +868,116 @@ class VoiceBiometricsService:
         )
         return int(row["cnt"]) if row else 0
 
+    # ══════════════════════════════════════════════════════════════════
+    # Identificação restrita ao pool do plantão atual (insight Grok)
+    # ══════════════════════════════════════════════════════════════════
+    #
+    # Em vez de comparar contra todos os cuidadores do tenant
+    # (1:N grande, impreciso), restringe ao pool de cuidadores
+    # ativos no plantão atual (3-4 vozes). Acerto sobe muito.
+    # Resolve também troca de plantão: se voz não bate no pool,
+    # caller faz fallback de pergunta explícita.
+
+    def identify_caregiver_in_shift(
+        self,
+        tenant_id: str,
+        audio_bytes: bytes,
+        shift_caregiver_ids: list[str] | None = None,
+        sample_rate: int = 0,
+    ) -> dict[str, Any]:
+        """Variante de identify_1toN que restringe o pool a uma lista
+        explícita de caregiver_ids (vinda do shift_resolver).
+
+        Se shift_caregiver_ids vazio ou None → falha graciosa com
+        reason='no_active_shift' (caller deve perguntar identidade).
+        """
+        if not shift_caregiver_ids:
+            return {
+                "identified": False, "score": 0.0, "method": "1:N_shift",
+                "reason": "no_active_shift",
+            }
+
+        result = self._extract(
+            audio_bytes, sample_rate=sample_rate,
+            min_quality=MIN_IDENTIFY_QUALITY,
+        )
+        if result.embedding is None:
+            return {
+                "identified": False, "score": 0.0, "method": "1:N_shift",
+                "reason": result.error or "unknown",
+            }
+
+        entry = self._load_tenant_embeddings(tenant_id)
+        # Filtra só os IDs do plantão
+        pool = {
+            cid: emb for cid, emb in entry.by_caregiver.items()
+            if cid in set(shift_caregiver_ids)
+        }
+        if not pool:
+            return {
+                "identified": False, "score": 0.0, "method": "1:N_shift",
+                "reason": "no_enrollments_in_shift",
+                "shift_pool_size": len(shift_caregiver_ids),
+            }
+
+        scores: list[tuple[str, float]] = [
+            (cid, self._cosine(result.embedding, mean_emb))
+            for cid, mean_emb in pool.items()
+        ]
+        scores.sort(key=lambda x: x[1], reverse=True)
+
+        top_cid, top_score = scores[0]
+        second_score = scores[1][1] if len(scores) > 1 else 0.0
+        margin = top_score - second_score
+        identified = (
+            top_score >= IDENTIFY_1TON_THRESHOLD
+            and margin >= IDENTIFY_AMBIGUITY_MARGIN
+        )
+        candidates = [
+            {
+                "caregiver_id": cid,
+                "caregiver_name": entry.names.get(cid, ""),
+                "score": round(s, 4),
+            }
+            for cid, s in scores[:3]
+        ]
+        self._log_calibration(
+            tenant_id=tenant_id, method="1:N_shift", score=top_score,
+            caregiver_id=top_cid if identified else None,
+            audio_quality=result.quality_score, accepted=identified,
+            extra={
+                "margin": margin, "top3": candidates,
+                "shift_pool_size": len(pool),
+            },
+        )
+        logger.info(
+            "voice_identify_in_shift tenant=%s pool=%d best=%s(%.3f) "
+            "margin=%.3f identified=%s",
+            tenant_id, len(pool), entry.names.get(top_cid, top_cid),
+            top_score, margin, identified,
+        )
+        return {
+            "identified": identified,
+            "score": round(top_score, 4),
+            "margin": round(margin, 4),
+            "method": "1:N_shift",
+            "shift_pool_size": len(pool),
+            "matched_caregiver_id": top_cid if identified else None,
+            "matched_caregiver_name": (
+                entry.names.get(top_cid, "") if identified else None
+            ),
+            "candidates": candidates,
+            "audio_quality": round(result.quality_score, 3),
+            # Caller pode usar isso para montar pergunta de fallback
+            # tipo "você é Carla, Joana ou Maria?"
+            "fallback_options": (
+                [{"id": cid, "name": entry.names.get(cid, "")}
+                 for cid in shift_caregiver_ids
+                 if cid in entry.names]
+                if not identified else None
+            ),
+        }
+
     def list_coverage_summary(self, tenant_id: str) -> dict[str, Any]:
         """Retorna resumo de cobertura para a página admin."""
         try:
