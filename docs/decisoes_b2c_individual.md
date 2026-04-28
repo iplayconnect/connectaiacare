@@ -1,72 +1,91 @@
 # Decisões — B2C + Individual (estrutura de licença + tom + uso)
 
 **Data**: 2026-04-28
+**Última revisão**: 2026-04-28 — após correção arquitetural do Alexandre.
+
 **Origem**: Alexandre confirmou que tem casos de **usuários
 individuais** entrando agora. Precisamos fechar 3 pontos:
 
 1. B2C: 1 paciente ou múltiplos por tenant?
-2. Tom da Sofia em `individual` (forma de tratamento)
+2. Tom da Sofia para paciente que reporta sobre si mesmo (forma de
+   tratamento)
 3. Cap de mensagens em planos com mensalidade
 
-Cada decisão traz minha posição + alternativa + schema correspondente.
+> **Correção arquitetural (sessão 2026-04-28)**: a primeira versão
+> deste doc tinha `tenant_type='individual'` e `licensing_model=
+> 'individual'` como entidades de primeira classe. **Errado**.
+> Alexandre apontou: "B2C direto no ID_CPF, não vamos queimar uma
+> posição de Tenant pra um único usuário, mas podemos pensar em
+> casos de 3 cuidadores manhã/tarde/noite". A arquitetura final
+> está abaixo.
 
 ---
 
-## 1. Estrutura de licença: B2C vs individual
+## 1. Estrutura de licença: tudo dentro de B2C, "individual" é flag por paciente
 
 ### Cenários reais que vão acontecer
 
 | Cenário | Quem assina | Quem é paciente | Quem reporta |
 |---------|-------------|-----------------|--------------|
-| Filho cuida da mãe em casa | Filho | Mãe | Filho (família) ou cuidador particular contratado |
+| Filho cuida da mãe em casa | Filho | Mãe | Filho ou cuidador particular |
 | Filho cuida do pai E da mãe juntos | Filho | Pai E mãe | Filho ou 1+ cuidadores |
 | Casal idoso, cada um contrata sua Sofia | Cada idoso | Si mesmo | Si mesmo (privacidade) |
 | Idoso solo na casa, autônomo | Idoso | Si mesmo | Si mesmo |
-| Filho mora longe, paga Sofia + cuidador particular pra mãe | Filho | Mãe | Cuidador particular reporta, filho recebe alertas |
+| Filho mora longe, paga Sofia + 3 cuidadores rotativos pra mãe | Filho | Mãe | 3 cuidadores (manhã/tarde/noite) |
 
-### Posição (recomendação)
+### Posição (final, após correção)
 
-**Dois modelos distintos no banco:**
+**Não criamos tenant separado pra cada paciente "individual"**. Em
+vez disso, **1 tenant B2C agrega N pacientes**, com privacy via
+patient_id + RBAC.
 
-- **`B2C`** = 1 tenant, 1 contratante (familiar), **1-N pacientes**
-  - Casos: filho cuidando de pai+mãe, filho contratando cuidador
-    particular pra um pai, etc.
-  - Cobra **por paciente** (R$ Y/paciente/mês)
-  - Cuidadores cadastrados (familiares + cuidador particular se
-    houver)
-  - Plantões opcionais (se tem cuidador profissional rotativo)
+**Modelo único pra fora de instituição:**
 
-- **`individual`** = 1 tenant, **1 paciente que assina sozinho**
-  - Caso: idoso solo, autônomo, fala direto com Sofia
-  - Cobra **por conta**
-  - 0 cuidadores cadastrados (paciente é o único usuário)
-  - Sem plantão (nunca)
-  - Sofia trata paciente diretamente
+- `tenant_type = 'B2C'` — todos os casos domiciliares.
+- `licensing_model = 'b2c_per_patient'` — fatura por paciente.
+- Cada paciente identificado por **CPF** (`aia_health_patients.cpf`),
+  índice único por tenant.
+- Paciente sem cuidador (idoso solo) marcado por
+  `is_self_reporting = TRUE`.
+- Paciente com 1-3 cuidadores: relação explícita em
+  `aia_health_caregiver_patient_assignments`.
+- Plantão por cuidador (já implementado), agora cruzado com
+  assignments na VIEW `aia_health_active_caregivers_by_patient`.
 
-**Casal idoso onde cada um contrata** = 2 contas `individual`
-separadas (privacidade total — Sofia da esposa não acessa dados do
-marido nem vice-versa).
+**Casos resolvidos:**
+
+| Cenário | Configuração |
+|---------|--------------|
+| Filho cuidando de mãe em casa | tenant B2C, 1 paciente (mãe), filho como caregiver `family` is_primary, mãe `is_self_reporting=FALSE` |
+| Filho cuidando de pai E mãe | tenant B2C, 2 pacientes, filho assigned aos dois |
+| Idoso solo na casa | tenant B2C, 1 paciente com `is_self_reporting=TRUE`, 0 caregivers |
+| Casal idoso, contas separadas | 2 tenants B2C distintos, 1 paciente cada (privacidade) |
+| 3 cuidadores rotativos manhã/tarde/noite | tenant B2C, 1 paciente, 3 caregivers assignados, cada um com `aia_health_shift_schedules` no seu turno |
 
 ### Por que assim?
 
-1. **Privacidade**: casal pode ter informações que um não quer
-   compartilhar com outro (depressão, dor, dependência alcoólica).
-   Tenants separados resolvem.
-2. **Simplicidade de licença**: 2 SKUs vs 5. B2C cobra por
-   paciente, individual cobra por conta. Fim.
-3. **Escala futura**: B2C com filho cuidando de 2 pais não vira
-   "individual x2" — mantém família como unidade.
+1. **Não desperdiça posição de tenant** (preocupação válida do
+   Alexandre — escala administrativa).
+2. **Privacy preservada** entre pacientes via patient_id + RBAC.
+3. **Plantão funciona em B2C também**: 3 cuidadores rotativos por
+   paciente já cabem no schema atual + `caregiver_patient_assignments`.
+4. **CPF como login estável** (não muda quando paciente troca de
+   telefone/cuidador).
+5. **`is_self_reporting`** captura o caso "idoso solo" como flag de
+   comportamento, sem inflação de schema.
 
-### Alternativa que descarto
+### Casal idoso — caso de privacidade absoluta
 
-Tratar tudo como `B2C` (até paciente solo seria "B2C com 1
-paciente"). **Risco**: confunde modelo comercial e cria fluxos
-condicionais demais ("se for B2C E só 1 paciente E paciente é o
-contratante, comportar como individual").
+Marido e esposa onde **cada um quer privacidade total** = 2 tenants
+B2C distintos. Não é "1 tenant com 2 pacientes". O dado da depressão
+da esposa não pode estar na mesma fronteira de privacidade do marido.
+
+(Se eles aceitam compartilhar, podem usar 1 tenant com 2 pacientes
+e ter Sofia atendendo família — mas é decisão deles na contratação.)
 
 ---
 
-## 2. Tom da Sofia em `individual`
+## 2. Tom da Sofia para paciente `is_self_reporting=TRUE`
 
 ### Considerações
 
@@ -98,8 +117,8 @@ melhor errar pelo respeito.
 
 ### Tom independente da forma
 
-Tom da Sofia em `individual` é **sempre acolhedor**, independente
-de como chama. Características:
+Tom da Sofia em paciente `is_self_reporting=TRUE` é **sempre
+acolhedor**, independente de como chama. Características:
 
 - Frases curtas (idoso processa mais devagar texto longo)
 - Pausas naturais em áudio (TTS com SSML)
@@ -131,7 +150,7 @@ deve atender.
 |-------|--------------|---------------|
 | Essencial | 100 msg/mês | Cobre uso normal (3-4 msg/dia) |
 | Padrão | 300 msg/mês | Pra famílias mais ativas |
-| Premium | ilimitado | + atendimento humano prioritário |
+| Premium | 2.000 msg/mês | Teto suave + atendimento humano prioritário; cap rígido só acima de 2.000 (proteção contra abuso) |
 
 **Regras:**
 
@@ -161,51 +180,59 @@ clínica.
 
 ---
 
-## 4. Schema implementado (migration 053)
+## 4. Schema final (migrations 052 + 053 + 054)
+
+Migrations 052 e 053 criaram a base. Migration 054 corrigiu a
+arquitetura após o feedback do Alexandre:
 
 ```sql
--- Forma de tratamento por paciente
-ALTER TABLE aia_health_patients
-    ADD COLUMN preferred_form_of_address TEXT
-        CHECK (preferred_form_of_address IN (
-            'first_name', 'formal', 'full_first_name', 'nickname'
-        ))
-        DEFAULT 'formal';
-
--- Modelo de licença + quota por tenant
+-- 052: tenant_type (sem 'individual' após 054)
+-- valores finais: 'ILPI' | 'clinica' | 'hospital' | 'B2C'
 ALTER TABLE aia_health_tenant_config
-    ADD COLUMN licensing_model TEXT
-        DEFAULT 'b2b_organization'
-        CHECK (licensing_model IN (
-            'b2b_organization',  -- ILPI/clínica/hospital — fatura por paciente
-            'b2c_family',        -- 1 contratante, 1-N pacientes
-            'individual'         -- paciente solo
-        )),
-    ADD COLUMN message_quota_monthly INT,  -- NULL = unlimited
+    ADD COLUMN tenant_type TEXT NOT NULL DEFAULT 'ILPI';
+
+-- 053 + 054: licensing_model binário
+-- valores finais: 'b2b_organization' | 'b2c_per_patient'
+ALTER TABLE aia_health_tenant_config
+    ADD COLUMN licensing_model TEXT DEFAULT 'b2b_organization';
+
+-- Quota
+ALTER TABLE aia_health_tenant_config
+    ADD COLUMN message_quota_monthly INT,  -- NULL = ilimitado
     ADD COLUMN quota_warning_threshold_pct INT NOT NULL DEFAULT 80;
 
--- Contador mensal por tenant
-CREATE TABLE aia_health_message_usage (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    tenant_id TEXT NOT NULL,
-    period_year INT NOT NULL,
-    period_month INT NOT NULL,
-    message_count INT NOT NULL DEFAULT 0,
-    last_warning_sent_at TIMESTAMPTZ,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW(),
-    UNIQUE (tenant_id, period_year, period_month)
+-- 053: forma de tratamento por paciente
+ALTER TABLE aia_health_patients
+    ADD COLUMN preferred_form_of_address TEXT
+        DEFAULT 'formal'
+        CHECK (preferred_form_of_address IN (
+            'first_name', 'formal', 'full_first_name', 'nickname'
+        ));
+
+-- 054: paciente solo + CPF
+ALTER TABLE aia_health_patients
+    ADD COLUMN is_self_reporting BOOLEAN NOT NULL DEFAULT FALSE,
+    ADD COLUMN cpf TEXT;
+CREATE UNIQUE INDEX idx_patients_cpf_per_tenant
+    ON aia_health_patients(tenant_id, cpf) WHERE cpf IS NOT NULL;
+
+-- 054: relação explícita cuidador ↔ paciente (N:M)
+CREATE TABLE aia_health_caregiver_patient_assignments (
+    id UUID PRIMARY KEY,
+    tenant_id TEXT,
+    caregiver_id UUID REFERENCES aia_health_caregivers,
+    patient_id UUID REFERENCES aia_health_patients,
+    relationship TEXT,  -- professional|family|volunteer
+    is_primary BOOLEAN,
+    active BOOLEAN
 );
 
--- Audit override de emergência
-CREATE TABLE aia_health_quota_overrides (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    tenant_id TEXT NOT NULL,
-    triggered_at TIMESTAMPTZ DEFAULT NOW(),
-    keyword_matched TEXT,
-    report_id UUID,
-    reason TEXT
-);
+-- 054: VIEW pra resolver pool de biometria por paciente
+CREATE VIEW aia_health_active_caregivers_by_patient AS ...
+
+-- 053: contadores de uso e overrides de emergência
+CREATE TABLE aia_health_message_usage (...);
+CREATE TABLE aia_health_quota_overrides (...);
 ```
 
 ---
@@ -231,23 +258,27 @@ pode ser wired quando tivermos os primeiros tenants reais usando.
 
 ---
 
-## 6. Pontos sensíveis pra Alexandre validar
+## 6. Status das decisões (sessão 2026-04-28)
 
-1. **B2C cobra por paciente, individual cobra por conta** — confirma
-   o modelo? Ou prefere algo mais simples (cobra por conta sempre)?
+| # | Decisão | Status | Notas |
+|---|---------|--------|-------|
+| 1 | B2C por paciente / individual = flag, não tenant | ✅ Confirmado + corrigido em 054 | "Não vamos queimar tenant pra usuário único" |
+| 2 | `preferred_form_of_address` default formal | ✅ Implícito em manter o default | Sofia pergunta no onboarding pra ajustar |
+| 3 | Quotas 100/300/Premium com teto 2000 + cap rígido acima | ✅ Confirmado | Premium não é ilimitado, é "alto e protegido" |
+| 4 | Emergency override (keywords críticas sempre passam) | ✅ Confirmado | Não-negociável |
 
-2. **`preferred_form_of_address` default formal** — concorda? Em ILPI
-   pode parecer estranho ("Sr. João" pra cuidador profissional que
-   chama todo mundo de "Seu João"). Default por `tenant_type` (formal
-   em B2C/individual, first_name em ILPI)?
+### Observações pendentes (próximos sprints)
 
-3. **Quotas dos planos**:
-   - Essencial 100 msg/mês — ok pra residente solo?
-   - Padrão 300 msg/mês — ok pra família ativa?
-   - Premium ilimitado — preciso garantir que eu não me prejudique
-     (premium ilimitado + atendimento humano prioritário pode ficar
-     caro). Vale ter um teto suave (ex: 2000) e cap rígido só acima?
+- **Plantão por paciente** em B2C com 3 cuidadores rotativos:
+  schema cobre via `aia_health_caregiver_patient_assignments` +
+  `aia_health_shift_schedules`. UI de cadastro precisa expor a
+  relação (frontend `/admin/plantoes` ainda assume cuidador→tenant
+  sem `patient_id` no fluxo de cadastro).
 
-4. **Emergency override** — confirma que palavras-chave médicas
-   (queda, parada, AVC, sangramento) sempre passam mesmo zerada
-   quota? Acho não-negociável mas vale validar.
+- **Onboarding de paciente B2C com CPF** como login: a tela
+  precisa coletar CPF + telefone + se é `is_self_reporting` ou
+  tem cuidadores. Sofia conduz isso via WhatsApp (já existe ADR-026
+  pra B2C onboarding).
+
+- **Enforcement de quota** (cron de reset + check no pipeline):
+  fica pra sprint dedicado. Schema preparado, lógica não.
