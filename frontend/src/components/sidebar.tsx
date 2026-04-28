@@ -22,6 +22,7 @@ import {
   GitBranch,
   GitFork,
   Volume2,
+  CalendarClock,
 } from "lucide-react";
 
 import { useAuth } from "@/context/auth-context";
@@ -96,6 +97,13 @@ const NAV_ITEMS: NavItem[] = [
     href: "/admin/biometria-voz",
     label: "Biometria de Voz",
     icon: Volume2,
+    roles: ["super_admin", "admin_tenant", "medico", "enfermeiro"],
+    group: "admin",
+  },
+  {
+    href: "/admin/plantoes",
+    label: "Plantões",
+    icon: CalendarClock,
     roles: ["super_admin", "admin_tenant", "medico", "enfermeiro"],
     group: "admin",
   },
