@@ -235,6 +235,9 @@ ON CONFLICT DO NOTHING;
 -- FALL RISK SCORE para classes novas
 -- ════════════════════════════════════════════════════════════════
 
+-- Nota: schema fall_risk só aceita score 1/2/3 (não 0).
+-- Classes "sem risco" simplesmente NÃO entram nesta tabela
+-- (ausência = risco não significativo).
 INSERT INTO aia_health_drug_fall_risk
     (therapeutic_class, fall_risk_score, rationale, source,
      auto_generated, review_status)
@@ -242,9 +245,6 @@ VALUES
 ('antibiotico_quinolona', 1,
  'Risco neuropatia periférica + tendinopatia (ruptura tendão Aquileu)',
  'fda_black_box', TRUE, 'auto_pending'),
-('antibiotico_tetraciclina', 0,
- 'Sem aumento direto de risco de queda',
- 'manual', TRUE, 'auto_pending'),
 ('antagonista_h2', 1,
  'Confusão mental em idoso (especialmente em IRC) → risco queda',
  'manual', TRUE, 'auto_pending')

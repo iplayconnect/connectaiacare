@@ -178,9 +178,9 @@ VALUES
  TRUE, 'auto_pending', 'rename_2024_auto',
  'Posologia: 60mg SC a cada 6 meses. Não é dose diária.'),
 ('cianocobalamina', 'oral', 1000, 'mcg', 'vitamina_b12', 18, 'anvisa',
- TRUE, 'auto_pending', 'rename_2024_auto'),
+ TRUE, 'auto_pending', 'rename_2024_auto', NULL),
 ('bromoprida', 'oral', 30, 'mg', 'procinetico_d2', 18, 'anvisa',
- TRUE, 'auto_pending', 'rename_2024_auto'),
+ TRUE, 'auto_pending', 'rename_2024_auto', NULL),
 ('domperidona', 'oral', 30, 'mg', 'procinetico_d2_periferico', 18, 'anvisa',
  TRUE, 'auto_pending', 'rename_2024_auto',
  'Cuidado QT longo — ANVISA recomenda ECG basal em idoso')
@@ -305,10 +305,8 @@ VALUES
  'stopp_2023', TRUE, 'auto_pending'),
 ('antihistaminico_h1_sedativo', 2, 'Sedação · efeito anticolinérgico · confusão em idoso',
  'stopp_2023', TRUE, 'auto_pending'),
-('inibidor_alfa_glicosidase', 0, 'Sem aumento direto de risco de queda',
- 'stopp_2023', TRUE, 'auto_pending'),
-('dpp4_inibidor', 0, 'Risco hipoglicemia muito baixo (sem aumento direto de queda)',
- 'stopp_2023', TRUE, 'auto_pending'),
+-- Nota: schema fall_risk só aceita score 1/2/3. Classes "sem risco"
+-- (inibidor_alfa_glicosidase, dpp4_inibidor) não entram nesta tabela.
 ('insulina_basal_longa', 1, 'Hipoglicemia (menor risco que NPH em uso noturno)',
  'stopp_2023', TRUE, 'auto_pending'),
 ('insulina_rapida_analoga', 1, 'Hipoglicemia pós-prandial',
