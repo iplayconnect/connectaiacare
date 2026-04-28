@@ -21,6 +21,7 @@ import {
   PhoneOutgoing,
   GitBranch,
   GitFork,
+  Volume2,
 } from "lucide-react";
 
 import { useAuth } from "@/context/auth-context";
@@ -88,6 +89,13 @@ const NAV_ITEMS: NavItem[] = [
     href: "/admin/regras-clinicas/revisao",
     label: "Revisão Clínica",
     icon: ClipboardCheck,
+    roles: ["super_admin", "admin_tenant", "medico", "enfermeiro"],
+    group: "admin",
+  },
+  {
+    href: "/admin/biometria-voz",
+    label: "Biometria de Voz",
+    icon: Volume2,
     roles: ["super_admin", "admin_tenant", "medico", "enfermeiro"],
     group: "admin",
   },

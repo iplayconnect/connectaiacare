@@ -462,6 +462,173 @@ def voice_delete_enrollment(caregiver_id: str):
     return jsonify(result), 200 if result.get("success") else 400
 
 
+# ---------- Voice Biometrics — Pacientes (migration 050) ----------
+#
+# Embedding biométrico de paciente é dado biométrico sensível (LGPD Art.
+# 11). Endpoints abaixo exigem RBAC + auditoria.
+
+@bp.post("/api/voice/patient/enroll")
+def voice_enroll_patient():
+    """Cadastra amostra de voz de um paciente.
+
+    Body: { patient_id, audio_base64, sample_label?, sample_rate? }
+    """
+    import base64
+
+    from config.settings import settings
+    from src.handlers.auth_routes import require_role
+    from src.services.voice_biometrics_service import get_voice_biometrics
+
+    @require_role("super_admin", "admin_tenant", "medico", "enfermeiro")
+    def _impl():
+        body = request.get_json(silent=True) or {}
+        patient_id = body.get("patient_id")
+        audio_b64 = body.get("audio_base64")
+        if not patient_id or not audio_b64:
+            return jsonify({
+                "error": "patient_id e audio_base64 obrigatórios",
+            }), 400
+        try:
+            audio_bytes = base64.b64decode(audio_b64)
+        except Exception:
+            return jsonify({"error": "audio_base64 inválido"}), 400
+
+        svc = get_voice_biometrics()
+        result = svc.enroll_patient(
+            patient_id=patient_id,
+            tenant_id=settings.tenant_id,
+            audio_bytes=audio_bytes,
+            sample_label=body.get("sample_label", "enrollment"),
+            consent_ip=request.remote_addr or "",
+            sample_rate=int(body.get("sample_rate", 0)),
+        )
+        return jsonify(result), 200 if result.get("success") else 400
+
+    return _impl()
+
+
+@bp.get("/api/voice/patient/enrollment/<patient_id>")
+def voice_patient_enrollment_status(patient_id: str):
+    from config.settings import settings
+    from src.handlers.auth_routes import require_role
+    from src.services.voice_biometrics_service import get_voice_biometrics
+
+    @require_role("super_admin", "admin_tenant", "medico", "enfermeiro")
+    def _impl():
+        svc = get_voice_biometrics()
+        return jsonify(svc.get_patient_enrollment_status(patient_id, settings.tenant_id))
+
+    return _impl()
+
+
+@bp.delete("/api/voice/patient/enrollment/<patient_id>")
+def voice_delete_patient_enrollment(patient_id: str):
+    from config.settings import settings
+    from src.handlers.auth_routes import require_role
+    from src.services.voice_biometrics_service import get_voice_biometrics
+
+    @require_role("super_admin", "admin_tenant")
+    def _impl():
+        svc = get_voice_biometrics()
+        result = svc.delete_patient_enrollment(
+            patient_id, settings.tenant_id, ip=request.remote_addr or "",
+        )
+        return jsonify(result), 200 if result.get("success") else 400
+
+    return _impl()
+
+
+@bp.get("/api/voice/coverage")
+def voice_coverage_summary():
+    """Resumo de cobertura para painel admin."""
+    from config.settings import settings
+    from src.handlers.auth_routes import require_role
+    from src.services.voice_biometrics_service import get_voice_biometrics
+
+    @require_role("super_admin", "admin_tenant", "medico", "enfermeiro")
+    def _impl():
+        svc = get_voice_biometrics()
+        return jsonify({
+            "status": "ok",
+            "tenant_id": settings.tenant_id,
+            "coverage": svc.list_coverage_summary(settings.tenant_id),
+        })
+
+    return _impl()
+
+
+@bp.get("/api/voice/enrollments")
+def voice_list_enrollments():
+    """Lista todas as pessoas com enrollment ativo (caregiver + patient).
+
+    Usado pela página /admin/biometria-voz para mostrar tabela de
+    pessoas enroladas + número de amostras + qualidade média.
+    """
+    from config.settings import settings
+    from src.handlers.auth_routes import require_role
+    from src.services.postgres import get_postgres
+
+    @require_role("super_admin", "admin_tenant", "medico", "enfermeiro")
+    def _impl():
+        db = get_postgres()
+        tenant_id = settings.tenant_id
+
+        cgs = db.fetch_all(
+            """
+            SELECT c.id AS person_id, c.full_name, 'caregiver' AS person_type,
+                   COUNT(ve.id) AS sample_count,
+                   AVG(ve.quality_score) AS avg_quality,
+                   MAX(ve.created_at) AS last_enrollment
+            FROM aia_health_caregivers c
+            LEFT JOIN aia_health_voice_embeddings ve
+                ON ve.caregiver_id = c.id AND ve.person_type = 'caregiver'
+            WHERE c.tenant_id = %s AND c.active = TRUE
+            GROUP BY c.id, c.full_name
+            HAVING COUNT(ve.id) > 0
+            ORDER BY c.full_name
+            """,
+            (tenant_id,),
+        )
+        try:
+            pts = db.fetch_all(
+                """
+                SELECT p.id AS person_id, p.full_name, 'patient' AS person_type,
+                       COUNT(ve.id) AS sample_count,
+                       AVG(ve.quality_score) AS avg_quality,
+                       MAX(ve.created_at) AS last_enrollment
+                FROM aia_health_patients p
+                LEFT JOIN aia_health_voice_embeddings ve
+                    ON ve.patient_id = p.id AND ve.person_type = 'patient'
+                WHERE p.tenant_id = %s AND p.active = TRUE
+                GROUP BY p.id, p.full_name
+                HAVING COUNT(ve.id) > 0
+                ORDER BY p.full_name
+                """,
+                (tenant_id,),
+            )
+        except Exception:
+            pts = []
+
+        items = []
+        for r in (cgs or []) + (pts or []):
+            items.append({
+                "person_id": str(r["person_id"]),
+                "person_type": r["person_type"],
+                "full_name": r["full_name"],
+                "sample_count": int(r["sample_count"]),
+                "avg_quality": (
+                    round(float(r["avg_quality"]), 3)
+                    if r.get("avg_quality") else None
+                ),
+                "last_enrollment": (
+                    str(r["last_enrollment"]) if r.get("last_enrollment") else None
+                ),
+            })
+        return jsonify({"status": "ok", "items": items})
+
+    return _impl()
+
+
 # ---------- Vital Signs (MedMonitor-ready) ----------
 @bp.get("/api/patients/<patient_id>/vitals")
 def list_vitals(patient_id: str):
