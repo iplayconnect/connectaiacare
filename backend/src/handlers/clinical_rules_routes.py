@@ -557,6 +557,207 @@ def rename_gaps():
     })
 
 
+# ════════════════════════════════════════════════════════════════
+# REVISÃO CLÍNICA — admin/farmacêutico revisa regras auto_pending
+# ════════════════════════════════════════════════════════════════
+#
+# 4 tabelas com flag review_status='auto_pending':
+# - aia_health_drug_dose_limits
+# - aia_health_condition_contraindications
+# - aia_health_drug_anticholinergic_burden
+# - aia_health_drug_fall_risk
+
+_REVIEW_TABLES = {
+    "dose_limits": {
+        "table": "aia_health_drug_dose_limits",
+        "label": "Dose máxima",
+        "id_column": "id",
+        "key_column": "principle_active",
+        "display_columns": [
+            "principle_active", "route", "max_daily_dose_value",
+            "max_daily_dose_unit", "therapeutic_class", "age_group_min",
+            "source", "source_auto", "auto_review_notes",
+        ],
+    },
+    "contraindications": {
+        "table": "aia_health_condition_contraindications",
+        "label": "Contraindicação por condição (Beers/CID)",
+        "id_column": "id",
+        "key_column": "affected_principle_active",
+        "display_columns": [
+            "condition_term", "condition_icd10", "affected_principle_active",
+            "affected_therapeutic_class", "severity", "rationale",
+            "recommendation", "source", "source_ref", "confidence",
+        ],
+    },
+    "acb": {
+        "table": "aia_health_drug_anticholinergic_burden",
+        "label": "ACB Score (Boustani)",
+        "id_column": "id",
+        "key_column": "principle_active",
+        "display_columns": [
+            "principle_active", "burden_score", "notes", "source",
+        ],
+    },
+    "fall_risk": {
+        "table": "aia_health_drug_fall_risk",
+        "label": "Fall Risk Score",
+        "id_column": "id",
+        "key_column": "therapeutic_class",
+        "display_columns": [
+            "principle_active", "therapeutic_class", "fall_risk_score",
+            "rationale", "source",
+        ],
+    },
+}
+
+
+@bp.get("/api/clinical-rules/review/pending")
+@require_role("super_admin", "admin_tenant", "medico", "enfermeiro")
+def list_pending_review():
+    """Lista TODAS as regras com review_status='auto_pending' de todas
+    as tabelas do motor. Retorno organizado por tabela."""
+    from src.services.postgres import get_postgres
+    db = get_postgres()
+    out = {}
+    total_pending = 0
+    for slug, meta in _REVIEW_TABLES.items():
+        cols = ", ".join(meta["display_columns"])
+        rows = db.fetch_all(
+            f"""SELECT {meta['id_column']} AS row_id, {cols}
+                FROM {meta['table']}
+                WHERE review_status = 'auto_pending'
+                ORDER BY {meta['key_column']}"""
+        )
+        items = []
+        for r in rows or []:
+            d = dict(r)
+            d["row_id"] = str(d["row_id"])
+            items.append(d)
+        out[slug] = {
+            "label": meta["label"],
+            "table": meta["table"],
+            "count": len(items),
+            "items": items,
+        }
+        total_pending += len(items)
+    return jsonify({
+        "status": "ok",
+        "total_pending": total_pending,
+        "by_table": out,
+    })
+
+
+@bp.post("/api/clinical-rules/review/<slug>/<row_id>/approve")
+@require_role("super_admin", "admin_tenant")
+def approve_pending_review(slug: str, row_id: str):
+    """Marca uma linha como 'verified' (aprovada por curador clínico).
+
+    Body opcional: { "notes": "comentário do revisor" }
+    """
+    from src.services.postgres import get_postgres
+    from src.services.audit_service import audit_log
+    from flask import g
+
+    if slug not in _REVIEW_TABLES:
+        return jsonify({"status": "error", "reason": "invalid_table_slug"}), 400
+
+    meta = _REVIEW_TABLES[slug]
+    body = request.get_json(silent=True) or {}
+    user_ctx = getattr(g, "user", None) or {}
+    reviewer = user_ctx.get("sub")
+
+    extra_set = ""
+    extra_params: tuple = ()
+    if "reviewed_by" in [
+        c["column_name"]
+        for c in get_postgres().fetch_all(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name = %s",
+            (meta["table"],),
+        )
+    ]:
+        extra_set = ", reviewed_by = %s, reviewed_at = NOW()"
+        extra_params = (reviewer,)
+
+    notes_set = ""
+    notes_params: tuple = ()
+    if body.get("notes") and "auto_review_notes" in [
+        c["column_name"]
+        for c in get_postgres().fetch_all(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name = %s",
+            (meta["table"],),
+        )
+    ]:
+        notes_set = ", auto_review_notes = %s"
+        notes_params = (body["notes"],)
+
+    sql = (
+        f"UPDATE {meta['table']} "
+        f"SET review_status = 'verified'{extra_set}{notes_set} "
+        f"WHERE {meta['id_column']} = %s "
+        f"AND review_status = 'auto_pending' "
+        f"RETURNING {meta['id_column']}"
+    )
+    params = extra_params + notes_params + (row_id,)
+    row = get_postgres().fetch_one(sql, params)
+    if not row:
+        return jsonify({
+            "status": "error",
+            "reason": "row_not_found_or_not_auto_pending",
+        }), 404
+
+    audit_log(action="clinical_rules.review.approved", payload={
+        "table": meta["table"], "row_id": row_id,
+        "reviewer": reviewer, "notes": body.get("notes"),
+    })
+    return jsonify({"status": "ok", "table": slug, "row_id": row_id})
+
+
+@bp.post("/api/clinical-rules/review/<slug>/<row_id>/reject")
+@require_role("super_admin", "admin_tenant")
+def reject_pending_review(slug: str, row_id: str):
+    """Rejeita uma regra auto_pending (desativa via active=FALSE).
+    Mantém histórico mas remove da fila ativa do motor.
+
+    Body: { "reason": "motivo da rejeição" }
+    """
+    from src.services.postgres import get_postgres
+    from src.services.audit_service import audit_log
+    from flask import g
+
+    if slug not in _REVIEW_TABLES:
+        return jsonify({"status": "error", "reason": "invalid_table_slug"}), 400
+
+    meta = _REVIEW_TABLES[slug]
+    body = request.get_json(silent=True) or {}
+    user_ctx = getattr(g, "user", None) or {}
+
+    if not body.get("reason"):
+        return jsonify({
+            "status": "error", "reason": "rejection_reason_required",
+        }), 400
+
+    row = get_postgres().fetch_one(
+        f"UPDATE {meta['table']} SET active = FALSE "
+        f"WHERE {meta['id_column']} = %s AND review_status = 'auto_pending' "
+        f"RETURNING {meta['id_column']}",
+        (row_id,),
+    )
+    if not row:
+        return jsonify({
+            "status": "error",
+            "reason": "row_not_found_or_not_auto_pending",
+        }), 404
+
+    audit_log(action="clinical_rules.review.rejected", payload={
+        "table": meta["table"], "row_id": row_id,
+        "reviewer": user_ctx.get("sub"), "reason": body["reason"],
+    })
+    return jsonify({"status": "ok", "table": slug, "row_id": row_id})
+
+
 @bp.post("/api/clinical-rules/rename/<principle>/mark-covered")
 @require_role("super_admin", "admin_tenant")
 def mark_rename_drug_covered(principle: str):

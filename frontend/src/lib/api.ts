@@ -944,6 +944,35 @@ export const api = {
       { method: "DELETE" },
     ),
 
+  // ─── Revisão Clínica (regras auto_pending) ─────
+  clinicalReviewPending: () =>
+    request<{
+      status: "ok";
+      total_pending: number;
+      by_table: Record<string, {
+        label: string;
+        table: string;
+        count: number;
+        items: any[];
+      }>;
+    }>("/api/clinical-rules/review/pending"),
+  clinicalReviewApprove: (slug: string, rowId: string, notes?: string) =>
+    request<{ status: "ok"; table: string; row_id: string }>(
+      `/api/clinical-rules/review/${slug}/${rowId}/approve`,
+      {
+        method: "POST",
+        body: JSON.stringify(notes ? { notes } : {}),
+      },
+    ),
+  clinicalReviewReject: (slug: string, rowId: string, reason: string) =>
+    request<{ status: "ok"; table: string; row_id: string }>(
+      `/api/clinical-rules/review/${slug}/${rowId}/reject`,
+      {
+        method: "POST",
+        body: JSON.stringify({ reason }),
+      },
+    ),
+
   // Profiles (Bloco C)
   listProfiles: () =>
     request<{ status: "ok"; profiles: ProfileRecord[] }>("/api/profiles"),
