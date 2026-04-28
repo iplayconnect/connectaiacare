@@ -76,8 +76,12 @@ CREATE INDEX IF NOT EXISTS idx_contraindications_auto_pending
 
 -- ════════════════════════════════════════════════════════════════
 -- View consolidada: cobertura RENAME com breakdown auto vs verified
+-- DROP antes do CREATE pra permitir mudança de nome de colunas
+-- (PostgreSQL não permite renomear colunas via CREATE OR REPLACE)
 -- ════════════════════════════════════════════════════════════════
-CREATE OR REPLACE VIEW aia_health_rename_coverage_summary AS
+DROP VIEW IF EXISTS aia_health_rename_coverage_summary;
+
+CREATE VIEW aia_health_rename_coverage_summary AS
 SELECT
     r.componente,
     r.geriatric_relevance,
