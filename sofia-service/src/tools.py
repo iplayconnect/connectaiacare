@@ -608,6 +608,119 @@ def _tool_query_drug_rules(*, persona_ctx: dict, medication_name: str, **_: Any)
     }
 
 
+def _tool_query_clinical_review_status(
+    *, persona_ctx: dict, principle_active: str = "", **_: Any
+) -> dict:
+    """Verifica se as regras codificadas para um princípio ativo já foram
+    validadas pela curadoria clínica humana ou ainda estão em
+    auto_pending. Útil quando profissional pergunta "essa informação tá
+    confirmada?" ou "quem aprovou essa regra?".
+
+    Inspeciona 4 tabelas do motor (dose_limits, condition_contraindications,
+    anticholinergic_burden, fall_risk) e retorna breakdown por status.
+    """
+    if not principle_active:
+        return {"ok": False, "error": "principle_active_required"}
+
+    pa = _resolve_principle(principle_active)
+    if not pa:
+        return {
+            "ok": False, "error": "principle_not_found",
+            "input": principle_active,
+        }
+
+    # Inspeciona cada tabela do motor que tem flag review_status.
+    queries = [
+        ("dose_limit", "aia_health_drug_dose_limits", "principle_active = %s"),
+        ("contraindication", "aia_health_condition_contraindications",
+         "affected_principle_active = %s"),
+        ("acb", "aia_health_drug_anticholinergic_burden",
+         "principle_active = %s"),
+        ("fall_risk", "aia_health_drug_fall_risk", "therapeutic_class = ("
+         "SELECT therapeutic_class FROM aia_health_drug_dose_limits "
+         "WHERE principle_active = %s LIMIT 1)"),
+    ]
+
+    rules: list[dict] = []
+    counts = {"verified": 0, "auto_pending": 0, "auto_approved": 0}
+    has_pending = False
+
+    for label, table, where in queries:
+        try:
+            rows = persistence.fetch_all(
+                f"""SELECT review_status, auto_generated, source, source_ref
+                    FROM {table}
+                    WHERE active = TRUE AND {where}""",
+                (pa,),
+            )
+        except Exception:
+            rows = []
+        for r in rows:
+            status = r.get("review_status") or "verified"
+            counts[status] = counts.get(status, 0) + 1
+            if status == "auto_pending":
+                has_pending = True
+            rules.append({
+                "dimension": label,
+                "review_status": status,
+                "auto_generated": bool(r.get("auto_generated")),
+                "source": r.get("source"),
+                "source_ref": r.get("source_ref"),
+            })
+
+    cascades = persistence.fetch_all(
+        """SELECT name, severity, review_status, auto_generated, source_ref
+           FROM aia_health_drug_cascades
+           WHERE active = TRUE
+             AND ( %s = ANY(drug_a_principles)
+                OR %s = ANY(drug_c_principles) )""",
+        (pa, pa),
+    ) or []
+    for c in cascades:
+        status = c.get("review_status") or "verified"
+        counts[status] = counts.get(status, 0) + 1
+        if status == "auto_pending":
+            has_pending = True
+        rules.append({
+            "dimension": "cascade",
+            "name": c.get("name"),
+            "severity": c.get("severity"),
+            "review_status": status,
+            "auto_generated": bool(c.get("auto_generated")),
+            "source_ref": c.get("source_ref"),
+        })
+
+    total = sum(counts.values())
+    if total == 0:
+        return {
+            "ok": True,
+            "principle_active": pa,
+            "no_rules_yet": True,
+            "message": "Nenhuma regra codificada ainda para este "
+                       "princípio ativo. Curadoria clínica em fila.",
+        }
+
+    return {
+        "ok": True,
+        "principle_active": pa,
+        "input_resolved_from": (
+            principle_active if principle_active.lower() != pa else None
+        ),
+        "total_rules": total,
+        "by_status": counts,
+        "has_auto_pending": has_pending,
+        "rules": rules,
+        "review_url": "/admin/regras-clinicas/revisao",
+        "guidance": (
+            "Há regras em revisão clínica (review_status=auto_pending) — "
+            "informação preliminar, confirme com farmacêutico."
+            if has_pending else
+            "Todas as regras deste princípio foram validadas por curador "
+            "clínico humano."
+        ),
+    }
+
+
 def _tool_check_drug_interaction(
     *, persona_ctx: dict, med_a: str, med_b: str, **_: Any
 ) -> dict:
@@ -992,6 +1105,18 @@ TOOLS: dict[str, dict[str, Any]] = {
             "required": ["medication_name"],
         },
         "handler": _tool_query_drug_rules,
+        "allowed_personas": ["medico", "enfermeiro", "admin_tenant", "super_admin"],
+    },
+    "query_clinical_review_status": {
+        "description": "Verifica se as regras codificadas para um princípio ativo já foram validadas pela curadoria clínica humana (review_status=verified) ou ainda estão em fila de revisão (review_status=auto_pending). Use quando profissional pergunta 'essa informação tá confirmada?', 'quem validou essa regra?', 'isso é definitivo?'. Inspeciona dose_limits, contraindications, ACB, fall_risk e cascades. Retorna breakdown + URL pra curador.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "principle_active": {"type": "string", "description": "Princípio ativo ou nome comercial (resolve alias). Ex: 'paracetamol', 'cefalexina'."},
+            },
+            "required": ["principle_active"],
+        },
+        "handler": _tool_query_clinical_review_status,
         "allowed_personas": ["medico", "enfermeiro", "admin_tenant", "super_admin"],
     },
     "check_drug_interaction": {
