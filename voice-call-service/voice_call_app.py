@@ -51,6 +51,10 @@ def _init_sip():
         sip = SipLayer.get()
         if sip.initialize():
             _ensure_call_class()
+            # Instala guard anti-crash: registra thread atual no pjlib
+            # antes de cada GC sweep, prevenindo SIGABRT quando Python
+            # libera objetos pjsua2 em threads Werkzeug aleatórias.
+            sip.install_gc_thread_guard()
             logger.info("sip_layer_ready")
         else:
             logger.error("sip_layer_init_failed")

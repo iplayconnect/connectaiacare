@@ -190,25 +190,60 @@ class SipLayer:
     def push_audio_8k(self, call_id: str, pcm16_8k: bytes) -> None:
         """Camada externa (audio_bridge depois de downsample) chama isso
         pra que o áudio da Sofia chegue no telefone do paciente."""
+        self.register_current_thread("push-audio")
         ctx = self._calls.get(call_id)
         if ctx and ctx.pj_call:
             ctx.pj_call.feed_audio_to_sip(pcm16_8k)
 
     def drain_outbound_audio(self, call_id: str) -> int:
         """Esvazia o buffer de áudio Sofia→SIP. Usado quando o usuário
-        interrompe a fala da Sofia — mata o áudio em curso na hora.
-        Retorna bytes drenados (telemetria)."""
+        interrompe a fala da Sofia — mata o áudio em curso na hora."""
+        self.register_current_thread("drain-outbound")
         ctx = self._calls.get(call_id)
         if ctx and ctx.pj_call:
             return ctx.pj_call.drain_outbound_buffer()
         return 0
 
     def hangup(self, call_id: str) -> bool:
+        self.register_current_thread("hangup")
         ctx = self._calls.pop(call_id, None)
         if not ctx:
             return False
         ctx.hangup()
         return True
+
+    def install_gc_thread_guard(self) -> None:
+        """Instala callback que registra a thread atual no pjlib ANTES
+        de cada GC sweep. Resolve o cenário crítico onde Python GC roda
+        em thread Werkzeug/aleatória e libera objetos pjsua2 (pj.ByteVector,
+        pj.MediaFormatAudio, pj.CallOpParam) cujo destrutor toca pjlib
+        e dispara assertion fatal.
+
+        Idempotente: chame uma vez no boot, depois do sip.initialize().
+        """
+        import gc
+
+        if getattr(self, "_gc_guard_installed", False):
+            return
+
+        sip_self = self  # closure
+
+        def _gc_register_thread(phase: str, info: dict) -> None:
+            # Roda em ambas as fases (start + stop). Custo é desprezível
+            # comparado ao crash. Idempotente do lado do pjlib.
+            if phase != "start":
+                return
+            try:
+                if sip_self._initialized and sip_self._endpoint:
+                    sip_self._endpoint.libRegisterThread(
+                        f"gc-{threading.get_ident()}"
+                    )
+            except Exception:
+                pass  # silenciosamente — nunca propague erro de GC
+
+        gc.callbacks.append(_gc_register_thread)
+        self._gc_guard_installed = True
+        logger.info("gc_thread_guard_installed")
 
     def _normalize_dest(self, destination: str) -> str:
         """Normaliza destino pra o formato que o trunk Flux aceita.
