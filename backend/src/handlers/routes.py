@@ -403,63 +403,79 @@ def list_teleconsultation_participants(event_id: str):
     })
 
 
-# ---------- Voice Biometrics ----------
+# ---------- Voice Biometrics — Cuidadores ----------
+#
+# Embedding biométrico (LGPD Art. 11). Endpoints abaixo agora exigem
+# RBAC + audit (alinhado com endpoints de paciente abaixo).
+
 @bp.post("/api/voice/enroll")
 def voice_enroll():
     """Cadastra amostra de voz de um cuidador.
 
-    Body: {
-        "caregiver_id": "uuid",
-        "audio_base64": "...",
-        "sample_label": "enrollment_1",
-        "sample_rate": 0  # 0 = auto-detect via ffmpeg
-    }
+    Body: { caregiver_id, audio_base64, sample_label?, sample_rate? }
     """
     import base64
 
     from config.settings import settings
+    from src.handlers.auth_routes import require_role
     from src.services.voice_biometrics_service import get_voice_biometrics
 
-    body = request.get_json(silent=True) or {}
-    caregiver_id = body.get("caregiver_id")
-    audio_b64 = body.get("audio_base64")
-    if not caregiver_id or not audio_b64:
-        return jsonify({"error": "caregiver_id e audio_base64 obrigatórios"}), 400
+    @require_role("super_admin", "admin_tenant", "medico", "enfermeiro")
+    def _impl():
+        body = request.get_json(silent=True) or {}
+        caregiver_id = body.get("caregiver_id")
+        audio_b64 = body.get("audio_base64")
+        if not caregiver_id or not audio_b64:
+            return jsonify({"error": "caregiver_id e audio_base64 obrigatórios"}), 400
 
-    try:
-        audio_bytes = base64.b64decode(audio_b64)
-    except Exception:
-        return jsonify({"error": "audio_base64 inválido"}), 400
+        try:
+            audio_bytes = base64.b64decode(audio_b64)
+        except Exception:
+            return jsonify({"error": "audio_base64 inválido"}), 400
 
-    svc = get_voice_biometrics()
-    result = svc.enroll(
-        caregiver_id=caregiver_id,
-        tenant_id=settings.tenant_id,
-        audio_bytes=audio_bytes,
-        sample_label=body.get("sample_label", "enrollment"),
-        consent_ip=request.remote_addr or "",
-        sample_rate=int(body.get("sample_rate", 0)),
-    )
-    return jsonify(result), 200 if result.get("success") else 400
+        svc = get_voice_biometrics()
+        result = svc.enroll(
+            caregiver_id=caregiver_id,
+            tenant_id=settings.tenant_id,
+            audio_bytes=audio_bytes,
+            sample_label=body.get("sample_label", "enrollment"),
+            consent_ip=request.remote_addr or "",
+            sample_rate=int(body.get("sample_rate", 0)),
+        )
+        return jsonify(result), 200 if result.get("success") else 400
+
+    return _impl()
 
 
 @bp.get("/api/voice/enrollment/<caregiver_id>")
 def voice_enrollment_status(caregiver_id: str):
     from config.settings import settings
+    from src.handlers.auth_routes import require_role
     from src.services.voice_biometrics_service import get_voice_biometrics
 
-    svc = get_voice_biometrics()
-    return jsonify(svc.get_enrollment_status(caregiver_id, settings.tenant_id))
+    @require_role("super_admin", "admin_tenant", "medico", "enfermeiro")
+    def _impl():
+        svc = get_voice_biometrics()
+        return jsonify(svc.get_enrollment_status(caregiver_id, settings.tenant_id))
+
+    return _impl()
 
 
 @bp.delete("/api/voice/enrollment/<caregiver_id>")
 def voice_delete_enrollment(caregiver_id: str):
     from config.settings import settings
+    from src.handlers.auth_routes import require_role
     from src.services.voice_biometrics_service import get_voice_biometrics
 
-    svc = get_voice_biometrics()
-    result = svc.delete_enrollment(caregiver_id, settings.tenant_id, ip=request.remote_addr or "")
-    return jsonify(result), 200 if result.get("success") else 400
+    @require_role("super_admin", "admin_tenant")
+    def _impl():
+        svc = get_voice_biometrics()
+        result = svc.delete_enrollment(
+            caregiver_id, settings.tenant_id, ip=request.remote_addr or "",
+        )
+        return jsonify(result), 200 if result.get("success") else 400
+
+    return _impl()
 
 
 # ---------- Voice Biometrics — Pacientes (migration 050) ----------
