@@ -98,6 +98,8 @@ class EldercarePipeline:
         self.tenant_cfg = get_tenant_config_service()
         self.embeddings = get_embedding_service()
         self.db = get_postgres()
+        from src.services.shift_resolver_service import get_shift_resolver
+        self.shifts = get_shift_resolver()
 
     # ==================================================================
     # ENTRY POINT
@@ -187,12 +189,40 @@ class EldercarePipeline:
         except Exception as exc:
             logger.warning("audio_save_failed", error=str(exc), report_id=str(report_id))
 
-        # Biometria (identifica caregiver interno)
-        caregiver_id, voice_method = self._identify_caregiver_by_voice(phone, audio_bytes, tenant)
+        # Biometria — agora shift-aware (insight Grok do panel LLM)
+        caregiver_id, voice_method, fallback_options = (
+            self._identify_caregiver_by_voice(phone, audio_bytes, tenant)
+        )
+        # Persistência: caregiver_voice_method aceita
+        # ('1:1','1:N','phone','manual','none') por CHECK constraint.
+        # 'shared_phone' não cabe — gravamos como 'phone' e marcamos
+        # o motivo nos candidates JSONB.
+        persisted_method = "phone" if voice_method == "shared_phone" else voice_method
+        candidates_json: list[dict] = []
+        if fallback_options:
+            candidates_json = [
+                {
+                    "caregiver_id": opt["id"],
+                    "caregiver_name": opt["name"],
+                    "fallback_reason": voice_method,  # 'shared_phone'|'none'|'phone'
+                }
+                for opt in fallback_options
+            ]
         if caregiver_id:
             self.db.execute(
-                "UPDATE aia_health_reports SET caregiver_id = %s, caregiver_voice_method = %s WHERE id = %s",
-                (caregiver_id, voice_method, report_id),
+                "UPDATE aia_health_reports SET caregiver_id = %s, "
+                "caregiver_voice_method = %s, caregiver_voice_candidates = %s "
+                "WHERE id = %s",
+                (caregiver_id, persisted_method,
+                 self.db.json_adapt(candidates_json), report_id),
+            )
+        else:
+            # Sem identificação. Salva method + candidates pra Sofia
+            # poder perguntar "você é X, Y ou Z?" no próximo turno.
+            self.db.execute(
+                "UPDATE aia_health_reports SET caregiver_voice_method = %s, "
+                "caregiver_voice_candidates = %s WHERE id = %s",
+                (persisted_method, self.db.json_adapt(candidates_json), report_id),
             )
 
         # Transcrição
@@ -1235,33 +1265,90 @@ class EldercarePipeline:
 
     def _identify_caregiver_by_voice(
         self, phone: str, audio_bytes: bytes, tenant: str,
-    ) -> tuple[str | None, str]:
+    ) -> tuple[str | None, str, list[dict] | None]:
+        """Identifica cuidador via biometria de voz com 3 cenários:
+
+        1. phone_type='shared' → bypass biometria, retorna (None, 'phone').
+           Pipeline pergunta "com quem falo?" depois.
+        2. phone_type='personal' + caregiver achado por phone → tenta 1:1.
+        3. phone_type unknown → cai pra identify_caregiver_in_shift
+           (pool reduzido pelo plantão atual). Se não bater, retorna
+           fallback_options gravadas em caregiver_voice_candidates pra
+           Sofia perguntar "você é X, Y ou Z?" no próximo passo.
+
+        Retorno: (caregiver_id, voice_method, fallback_options).
+        - caregiver_id: UUID do cuidador identificado, ou None.
+        - voice_method: '1:1' | '1:N' | 'phone' | 'shared_phone' | 'none'.
+        - fallback_options: lista [{id, name}] do pool do plantão quando
+          biometria não bateu — caller usa pra perguntar "você é X, Y
+          ou Z?". None se não aplicável.
+        """
         try:
+            phone_type = self.shifts.get_phone_type(tenant, phone)
+
+            # Caso 1: celular compartilhado do plantão. Não tenta
+            # biometria — várias vozes no mesmo número não dão match.
+            # Retorna pool do plantão pra caller perguntar "com quem falo?"
+            if phone_type == "shared":
+                shift_pool = self.shifts.list_active_caregivers(tenant)
+                opts = [
+                    {"id": c["caregiver_id"], "name": c["full_name"]}
+                    for c in shift_pool
+                ]
+                logger.info(
+                    "voice_skipped_shared_phone phone=%s tenant=%s pool=%d",
+                    phone, tenant, len(opts),
+                )
+                return None, "shared_phone", opts or None
+
+            # Lookup direto por número (vale para personal e unknown)
             row = self.db.fetch_one(
-                "SELECT id FROM aia_health_caregivers WHERE tenant_id = %s AND phone = %s AND active = TRUE",
+                "SELECT id FROM aia_health_caregivers "
+                "WHERE tenant_id = %s AND phone = %s AND active = TRUE",
                 (tenant, phone),
             )
             caregiver_by_phone = row["id"] if row else None
 
+            # Caso 2: 1:1 verify quando temos match exato pelo número
             if caregiver_by_phone:
                 result = self.voice_bio.verify_1to1(
-                    str(caregiver_by_phone), tenant, audio_bytes, sample_rate=0
+                    str(caregiver_by_phone), tenant, audio_bytes, sample_rate=0,
                 )
                 if result.get("verified"):
-                    return str(caregiver_by_phone), "1:1"
+                    return str(caregiver_by_phone), "1:1", None
                 if result.get("reason") == "not_enrolled":
-                    return str(caregiver_by_phone), "phone"
+                    # Cadastrado por phone mas sem amostra de voz — confia no número
+                    return str(caregiver_by_phone), "phone", None
 
-            result = self.voice_bio.identify_1toN(tenant, audio_bytes, sample_rate=0)
-            if result.get("identified"):
-                return str(result["matched_caregiver_id"]), "1:N"
+            # Caso 3: pool reduzido pelo plantão atual (Grok insight)
+            shift_pool_ids = self.shifts.list_active_caregiver_ids(tenant)
+            shift_fallback: list[dict] | None = None
+            if shift_pool_ids:
+                shift_result = self.voice_bio.identify_caregiver_in_shift(
+                    tenant_id=tenant,
+                    audio_bytes=audio_bytes,
+                    shift_caregiver_ids=shift_pool_ids,
+                    sample_rate=0,
+                )
+                if shift_result.get("identified"):
+                    return str(shift_result["matched_caregiver_id"]), "1:N", None
+                shift_fallback = shift_result.get("fallback_options") or None
 
+            # Caso 4: fallback final — 1:N global (legado, mantém
+            # compatibilidade com tenants ainda sem plantão cadastrado)
+            global_result = self.voice_bio.identify_1toN(
+                tenant, audio_bytes, sample_rate=0,
+            )
+            if global_result.get("identified"):
+                return str(global_result["matched_caregiver_id"]), "1:N", None
+
+            # Último recurso: confia no número se existe cadastro
             if caregiver_by_phone:
-                return str(caregiver_by_phone), "phone"
-            return None, "none"
+                return str(caregiver_by_phone), "phone", shift_fallback
+            return None, "none", shift_fallback
         except Exception as exc:
             logger.warning("voice_identify_failed", phone=phone, error=str(exc))
-            return None, "none"
+            return None, "none", None
 
     @staticmethod
     def _extract_phone(data: dict) -> str:
