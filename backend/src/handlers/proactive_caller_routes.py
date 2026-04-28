@@ -253,14 +253,16 @@ def stats():
     """Resumo das últimas 24h."""
     user_ctx = getattr(g, "user", None) or {}
     tenant_id = user_ctx.get("tenant_id") or "connectaiacare_demo"
+    # Atenção: psycopg2 usa % como placeholder. Pra LIKE com '%' literal,
+    # precisa escapar como '%%' no SQL passado pra cur.execute(query, params).
     row = get_postgres().fetch_one(
         """SELECT
             COUNT(*) AS total,
             COUNT(*) FILTER (WHERE decision = 'will_call') AS will_call,
             COUNT(*) FILTER (WHERE decision = 'failed_dispatch') AS failed,
-            COUNT(*) FILTER (WHERE decision LIKE 'skip_%') AS skipped,
+            COUNT(*) FILTER (WHERE decision LIKE 'skip\\_%%') AS skipped,
             AVG(trigger_score) FILTER (WHERE decision = 'will_call') AS avg_score_called,
-            AVG(trigger_score) FILTER (WHERE decision LIKE 'skip_%') AS avg_score_skipped
+            AVG(trigger_score) FILTER (WHERE decision LIKE 'skip\\_%%') AS avg_score_skipped
            FROM aia_health_proactive_call_decisions
            WHERE tenant_id = %s AND evaluated_at > NOW() - INTERVAL '24 hours'""",
         (tenant_id,),
