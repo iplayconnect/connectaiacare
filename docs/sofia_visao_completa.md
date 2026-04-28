@@ -13,8 +13,8 @@ Este é o material técnico-clínico de referência da plataforma **Sofia**, da 
 
 - ✅ em produção
 - 🟡 em finalização
-- 🔵 roadmap próximo (8-12 semanas)
-- 🟣 visão futura (3-12 meses)
+- 🔵 roadmap próximo (4-6 semanas)
+- 🟣 horizonte estratégico (2-6 meses)
 
 ---
 
@@ -572,29 +572,42 @@ Nada inventado. Tudo o que está em ✅ pode ser testado hoje. 🟡 está na ret
 
 ## 13. Roadmap clínico expandido
 
-### 13.1 Próximas 8 a 12 semanas (🔵)
+### 13.1 Próximas 4 a 6 semanas (🔵)
 
-- Cobertura motor 48 → 80 princípios ativos. Curadoria depende de input clínico-farmacológico sênior.
-- Cascatas adicionais: diurético tiazídico → hiperuricemia → alopurinol; beta-bloqueador → bradicardia; inibidor de colinesterase → bradicardia; opioide → constipação → laxante (separada da cascata anticolinérgica); antipsicótico → síndrome neuroléptica → bromocriptina (rara mas grave).
-- STOPP/START como camada complementar a Beers — avaliar se traz valor adicional ou se Beers já cobre 80% do clinicamente relevante.
-- Inbound calls: Sofia atende ligações que chegam, com roteador identificando caller_id (paciente conhecido → modo familiar; profissional cadastrado → modo clínico; desconhecido → comercial).
-- LiveKit Cloud + SIP trunk redundante para resiliência da camada de voz em escala.
+- **Cobertura motor 48 → 80 princípios ativos.** Curadoria em andamento com expansão do corpo técnico clínico-farmacológico (ver seção 13.4). Lotes de 5 a 10 fármacos por sprint, com revisão clínica antes de promoção para produção.
+- **Cascatas adicionais:** diurético tiazídico → hiperuricemia → alopurinol; beta-bloqueador → bradicardia; inibidor de colinesterase → bradicardia; opioide → constipação → laxante (separada da cascata anticolinérgica); antipsicótico → síndrome neuroléptica → bromocriptina (rara mas grave).
+- **STOPP/START como camada complementar a Beers** — implementação iniciada; avaliação clínica em curso para identificar onde traz valor adicional.
+- **Inbound calls:** Sofia atende ligações que chegam, com roteador identificando caller_id (paciente conhecido → modo familiar; profissional cadastrado → modo clínico; desconhecido → comercial). Infra preparada — depende apenas da configuração final do trunk SIP.
+- **LiveKit Cloud + SIP trunk redundante** para resiliência da camada de voz em escala. Scaffolding do agente já implantado.
+- **Comitê de governança IA estabelecido** (CFM 2.314/2022 + 2.454/2026) com expansão do corpo médico/farmacêutico em curso.
 
-### 13.2 Três a seis meses (🟣)
+### 13.2 Próximos 2 a 3 meses (🟣)
 
-- Biomarcadores vocais: análise quantitativa de jitter, shimmer, prosódia, fluência para detecção precoce de desidratação, descompensação cardíaca, depressão, declínio cognitivo. Geração de observação clínica (não diagnóstico).
-- Detecção longitudinal de padrões cognitivos. Cada idoso tem padrão próprio de fala, silêncio, queixa. Comparação por desvio individual ao longo do tempo, não apenas pontual.
-- Recall semântico cross-tenant com differential privacy formal (insights coletivos protegidos).
-- WhatsApp Calling outbound nativo via Meta Business API.
-- Imagem multimodal avançada: análise visual de lesão/ferida com follow-up temporal — comparar foto de hoje com foto de 3 dias atrás para evolução de cicatrização.
+- **Biomarcadores vocais:** análise quantitativa de jitter, shimmer, prosódia, fluência para detecção precoce de desidratação, descompensação cardíaca, depressão, declínio cognitivo. Geração de observação clínica (não diagnóstico). Base técnica (gravação + transcrição) já existe — falta camada de extração de parâmetros e calibração com baseline individual.
+- **Detecção longitudinal de padrões cognitivos.** Cada idoso tem padrão próprio de fala, silêncio, queixa. Comparação por desvio individual ao longo do tempo, não apenas pontual.
+- **Recall semântico cross-tenant** com differential privacy formal (insights coletivos protegidos por desenho).
+- **WhatsApp Calling outbound nativo** via Meta Business API.
+- **Imagem multimodal avançada:** análise visual de lesão/ferida com follow-up temporal — comparar foto de hoje com foto de 3 dias atrás para evolução de cicatrização.
+- **Início do processo formal ANVISA SaMD Classe IIa** (preparação de documentação técnica + farmacêutico responsável técnico designado).
 
-### 13.3 Seis a doze meses (🟣)
+### 13.3 Próximos 4 a 6 meses (🟣)
 
-- Plano "Cuidado Sem Limites" B2C massivo: idosos que moram sozinhos, contratam direto via WhatsApp, sem clínica intermediária.
-- Federated learning entre tenants — modelos compartilhando aprendizado sem compartilhar dados.
-- ANVISA SaMD Classe IIa formalizado.
-- Co-publicação científica formal de resultados após 100+ pacientes acompanhados.
-- Comitê de governança IA estabelecido com geriatra externo + farmacêutico responsável técnico + advogado de saúde digital.
+- **Plano "Cuidado Sem Limites" B2C massivo:** idosos que moram sozinhos, contratam direto via WhatsApp, sem clínica intermediária.
+- **Federated learning entre tenants** — modelos compartilhando aprendizado sem compartilhar dados.
+- **ANVISA SaMD Classe IIa formalizado** — registro completo após acumulação dos primeiros 1.000 pacientes acompanhados em produção.
+- **Co-publicação científica** formal de resultados após 100 ou mais pacientes acompanhados — em parceria com universidades de Farmácia/Medicina.
+- **Estudo prospectivo de não-inferioridade** vs acompanhamento humano padrão em casa geriátrica/hospital parceiro.
+
+### 13.4 Expansão do corpo técnico clínico
+
+Em paralelo ao roadmap técnico, está em curso a **expansão estruturada da equipe clínica-farmacológica** que atua na curadoria do motor, validação de regras e roadmap regulatório:
+
+- **Farmacêutico Responsável Técnico** (em definição) — para registro ANVISA SaMD Classe IIa.
+- **Geriatra externo** (em definição) — composição do Comitê de Governança IA conforme CFM 2.454/2026.
+- **Profissionais clínico-farmacológicos sênior** (em prospecção) — revisão de regras existentes, curadoria de expansão para 80 fármacos, calibração de cascatas adicionais, biomarcadores vocais.
+- **Parcerias acadêmicas** com universidades de Farmácia para revisão por pares e co-publicação científica.
+
+Essa expansão é deliberada: à medida que o produto ganha cobertura clínica e volume de pacientes, a profundidade da expertise clínica embarcada no produto também precisa crescer. **Não se constrói uma plataforma clínica decisória apenas com engenharia.**
 
 ---
 
@@ -646,8 +659,8 @@ NDA padrão da plataforma é assinado antes do compartilhamento de documentaçã
 
 Para discussões técnicas, parcerias clínicas, propostas de pilotos ou solicitação do material complementar:
 
-**ConnectaIACare**
-contato@connectaia.com.br
+**Alexandre Veras** — ConnectaIACare
+WhatsApp: +55 51 99616-1700
 
 ---
 
