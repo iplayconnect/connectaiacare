@@ -153,6 +153,33 @@ class MedMonitorClient:
         results = self.list_caretakers(phone=phone)
         return results[0] if results else None
 
+    def find_caretaker_by_cpf(self, cpf: str) -> dict | None:
+        """Lookup por CPF — Matheus subiu em 2026-04-29. Aceita CPF
+        com ou sem máscara, normaliza pra dígitos."""
+        cpf_clean = re.sub(r"\D", "", cpf or "")
+        if not cpf_clean:
+            return None
+        results = self._request("GET", "/caretakers/", params={"cpf": cpf_clean})
+        if isinstance(results, list) and results:
+            return results[0]
+        return None
+
+    def find_patient_by_phone(self, phone: str) -> dict | None:
+        """Busca paciente por telefone normalizado (TotalCare aceita
+        +5551... ou variações). Retorna dict ou None."""
+        results = self.list_patients(phone=phone)
+        return results[0] if results else None
+
+    def find_patient_by_cpf(self, cpf: str) -> dict | None:
+        """Lookup por CPF (após Matheus subir suporte 2026-04-29)."""
+        cpf_clean = re.sub(r"\D", "", cpf or "")
+        if not cpf_clean:
+            return None
+        results = self._request("GET", "/patients/", params={"cpf": cpf_clean})
+        if isinstance(results, list) and results:
+            return results[0]
+        return None
+
     # ---------- members (admin/staff/operators) ----------
     def list_members(
         self,
@@ -218,6 +245,113 @@ class MedMonitorClient:
                 patient_id=patient_id,
             )
         return result
+
+    def create_care_note_streaming(
+        self,
+        caretaker_id: int,
+        patient_id: int,
+        content: str,
+        content_resume: str,
+        occurred_at: str | None = None,
+        status: str = "OPEN",
+    ) -> dict | None:
+        """Cria CareNote com status explícito (OPEN ou CLOSED).
+
+        Cenário 2 da API Tecnosenior: abre CareNote OPEN pra receber
+        addendums depois. Quando passa CLOSED, vira one-off do cenário 1.
+        """
+        if not content or not content.strip():
+            logger.warning("care_note_content_empty")
+            return None
+        resume_clean = (content_resume or "").strip()
+        if len(resume_clean) > MAX_CARE_NOTE_RESUME_LEN:
+            resume_clean = resume_clean[:MAX_CARE_NOTE_RESUME_LEN - 1].rstrip() + "…"
+        if not resume_clean:
+            resume_clean = content.strip()[:MAX_CARE_NOTE_RESUME_LEN - 1] + "…"
+        if status not in ("OPEN", "CLOSED"):
+            status = "OPEN"
+
+        body: dict[str, Any] = {
+            "caretaker": caretaker_id,
+            "patient": patient_id,
+            "content": content.strip(),
+            "content_resume": resume_clean,
+            "status": status,
+        }
+        if occurred_at:
+            body["occurred_at"] = occurred_at
+        return self._request("POST", "/care-notes/", json_body=body)
+
+    def create_care_note_bulk(
+        self,
+        caretaker_id: int,
+        patient_id: int,
+        content: str,
+        content_resume: str,
+        addendums: list[dict],
+        occurred_at: str | None = None,
+        status: str = "OPEN",
+    ) -> dict | None:
+        """Cenário 3/4 da Tecnosenior: cria CareNote + addendums em chamada
+        atômica. Cada addendum é {content, content_resume, occurred_at}.
+
+        Atômico: se 1 addendum falhar validação, NADA é gravado.
+        """
+        if not content or not content.strip():
+            return None
+        resume_clean = (content_resume or "").strip()
+        if len(resume_clean) > MAX_CARE_NOTE_RESUME_LEN:
+            resume_clean = resume_clean[:MAX_CARE_NOTE_RESUME_LEN - 1].rstrip() + "…"
+        if not resume_clean:
+            resume_clean = content.strip()[:MAX_CARE_NOTE_RESUME_LEN - 1] + "…"
+        if status not in ("OPEN", "CLOSED"):
+            status = "OPEN"
+
+        body: dict[str, Any] = {
+            "caretaker": caretaker_id,
+            "patient": patient_id,
+            "content": content.strip(),
+            "content_resume": resume_clean,
+            "status": status,
+            "addendums": addendums or [],
+        }
+        if occurred_at:
+            body["occurred_at"] = occurred_at
+        return self._request("POST", "/care-notes/bulk/", json_body=body)
+
+    def add_addendum(
+        self,
+        care_note_id: int,
+        content: str,
+        content_resume: str,
+        occurred_at: str | None = None,
+        status: str | None = None,
+    ) -> dict | None:
+        """POST /care-notes/{id}/addendums/ — adiciona addendum a uma
+        CareNote OPEN.
+
+        status='CLOSED' no addendum dispara fechamento da CareNote pai.
+        Sem status: addendum normal (CareNote permanece OPEN).
+        """
+        if not content or not content.strip():
+            return None
+        resume_clean = (content_resume or "").strip()
+        if len(resume_clean) > MAX_CARE_NOTE_RESUME_LEN:
+            resume_clean = resume_clean[:MAX_CARE_NOTE_RESUME_LEN - 1].rstrip() + "…"
+        if not resume_clean:
+            resume_clean = content.strip()[:MAX_CARE_NOTE_RESUME_LEN - 1] + "…"
+
+        body: dict[str, Any] = {
+            "content": content.strip(),
+            "content_resume": resume_clean,
+        }
+        if occurred_at:
+            body["occurred_at"] = occurred_at
+        if status == "CLOSED":
+            body["status"] = "CLOSED"
+        return self._request(
+            "POST", f"/care-notes/{care_note_id}/addendums/", json_body=body,
+        )
 
     def list_care_notes(
         self,
