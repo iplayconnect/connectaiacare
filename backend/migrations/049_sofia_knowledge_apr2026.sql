@@ -92,7 +92,7 @@ Quando Sofia menciona uma regra clínica, ela pode citar "conforme RENAME
 2024 / Beers 2023 / KDIGO" para dar âncora oficial à informação.',
  'RENAME 2024 (CONITEC) é a base oficial de cobertura do motor; 35+ fármacos validados por farmacêutico (abr/2026).',
  ARRAY['rename', 'conitec', 'ministerio saude', 'cobertura', 'motor', 'henrique bordin'],
- 90, 'high', 'rename_2024', 'guideline_official'),
+ 90, 'high', 'rename_2024', 'clinical_guideline'),
 
 -- ════════════════════════════════════════════════════════════════════
 -- 3. Cascatas (dimensão 13) — anticolinérgico + opioide + IMAO
@@ -163,7 +163,7 @@ Sofia deve sempre lembrar: ajuste renal + reação cruzada penicilina ↔
 β-lactâmicos.',
  'Quinolonas + nitrofurantoína + bactrim em idoso exigem ClCr; claritromicina interage com estatinas.',
  ARRAY['antibiotico', 'quinolona', 'ciprofloxacino', 'nitrofurantoina', 'metronidazol', 'claritromicina', 'beers'],
- 80, 'high', 'beers_2023', 'guideline_official'),
+ 80, 'high', 'beers_2023', 'clinical_guideline'),
 
 ('default', 'medications', 'antacids_time_separation',
  'Antiácidos não-IBP — interações por absorção (espaçar)',
@@ -185,7 +185,7 @@ severity=moderate + orientação de horário ("tomar antibiótico 2h antes
 ou 4h depois do antiácido"). É educação, não bloqueio.',
  'Antiácidos com cátions divalentes quelam quinolonas, tetraciclinas, levotiroxina, ferro — espaçar 2-4h.',
  ARRAY['antiacido', 'time_separation', 'levotiroxina', 'quinolona', 'ferro', 'bifosfonato'],
- 80, 'high', 'beers_2023', 'guideline_official'),
+ 80, 'high', 'beers_2023', 'clinical_guideline'),
 
 -- ════════════════════════════════════════════════════════════════════
 -- 5. Biometria de voz (Resemblyzer)
