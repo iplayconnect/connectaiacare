@@ -973,6 +973,93 @@ export const api = {
       },
     ),
 
+  // ─── Biometria de voz ────────────────────────────
+  voiceCoverage: () =>
+    request<{
+      status: "ok";
+      tenant_id: string;
+      coverage: Record<string, {
+        people_enrolled: number;
+        samples_total: number;
+        avg_quality?: number;
+        last_enrollment?: string;
+      }>;
+    }>("/api/voice/coverage"),
+  voiceListEnrollments: () =>
+    request<{
+      status: "ok";
+      items: Array<{
+        person_id: string;
+        person_type: "caregiver" | "patient";
+        full_name: string;
+        sample_count: number;
+        avg_quality: number | null;
+        last_enrollment: string | null;
+      }>;
+    }>("/api/voice/enrollments"),
+  voiceCaregiverEnroll: (body: {
+    caregiver_id: string;
+    audio_base64: string;
+    sample_label?: string;
+    sample_rate?: number;
+  }) =>
+    request<{
+      success: boolean;
+      message?: string;
+      samples_count?: number;
+      enrollment_complete?: boolean;
+      quality_score?: number;
+    }>("/api/voice/enroll", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  voiceCaregiverStatus: (caregiverId: string) =>
+    request<{
+      enrolled: boolean;
+      sample_count: number;
+      enrollment_complete: boolean;
+      avg_quality?: number;
+    }>(`/api/voice/enrollment/${caregiverId}`),
+  voiceCaregiverDelete: (caregiverId: string) =>
+    request<{ success: boolean; deleted_count?: number }>(
+      `/api/voice/enrollment/${caregiverId}`,
+      { method: "DELETE" },
+    ),
+  voicePatientEnroll: (body: {
+    patient_id: string;
+    audio_base64: string;
+    sample_label?: string;
+    sample_rate?: number;
+  }) =>
+    request<{
+      success: boolean;
+      message?: string;
+      samples_count?: number;
+      enrollment_complete?: boolean;
+      quality_score?: number;
+      person_type?: "patient";
+    }>("/api/voice/patient/enroll", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  voicePatientStatus: (patientId: string) =>
+    request<{
+      enrolled: boolean;
+      sample_count: number;
+      enrollment_complete: boolean;
+      person_type: "patient";
+      avg_quality?: number;
+    }>(`/api/voice/patient/enrollment/${patientId}`),
+  voicePatientDelete: (patientId: string) =>
+    request<{ success: boolean; deleted_count?: number }>(
+      `/api/voice/patient/enrollment/${patientId}`,
+      { method: "DELETE" },
+    ),
+  voiceListCaregivers: () =>
+    request<{ caregivers: Array<{ id: string; full_name: string; phone?: string }> }>(
+      "/api/caregivers",
+    ),
+
   // Profiles (Bloco C)
   listProfiles: () =>
     request<{ status: "ok"; profiles: ProfileRecord[] }>("/api/profiles"),

@@ -61,6 +61,8 @@ class _CacheEntry:
     by_caregiver: dict[str, np.ndarray]  # caregiver_id → mean embedding
     names: dict[str, str]                # caregiver_id → full_name
     loaded_at: float
+    by_patient: dict[str, np.ndarray] | None = None  # patient_id → mean embedding
+    patient_names: dict[str, str] | None = None      # patient_id → full_name
 
 
 class VoiceBiometricsService:
@@ -161,48 +163,91 @@ class VoiceBiometricsService:
             return None
 
     def _load_tenant_embeddings(self, tenant_id: str) -> _CacheEntry:
-        """Carrega média de embeddings por cuidador ativo do tenant (com cache)."""
+        """Carrega média de embeddings por cuidador E paciente ativo do tenant.
+
+        Após migration 050, a mesma tabela armazena ambos via person_type +
+        XOR de caregiver_id/patient_id. Carrega tudo em uma passada.
+        """
         cached = self._get_cached_tenant(tenant_id)
         if cached:
             return cached
 
-        rows = self.postgres.fetch_all(
+        # Cuidadores
+        rows_c = self.postgres.fetch_all(
             """
             SELECT ve.caregiver_id, c.full_name,
                    ve.embedding, ve.quality_score
             FROM aia_health_voice_embeddings ve
             JOIN aia_health_caregivers c ON c.id = ve.caregiver_id
             WHERE ve.tenant_id = %s AND c.active = TRUE
+              AND ve.person_type = 'caregiver'
             """,
             (tenant_id,),
         )
 
-        by_caregiver: dict[str, list[tuple[np.ndarray, float]]] = {}
+        # Pacientes (best-effort: column person_type pode não existir
+        # antes da migration 050. Fallback gracioso pra zero pacientes.)
+        try:
+            rows_p = self.postgres.fetch_all(
+                """
+                SELECT ve.patient_id, p.full_name,
+                       ve.embedding, ve.quality_score
+                FROM aia_health_voice_embeddings ve
+                JOIN aia_health_patients p ON p.id = ve.patient_id
+                WHERE ve.tenant_id = %s AND p.active = TRUE
+                  AND ve.person_type = 'patient'
+                """,
+                (tenant_id,),
+            )
+        except Exception as exc:
+            logger.warning("patient_embeddings_load_skipped reason=%s", exc)
+            rows_p = []
+
+        means_c, names_c = self._aggregate_embeddings(rows_c, "caregiver_id")
+        means_p, names_p = self._aggregate_embeddings(rows_p, "patient_id")
+
+        entry = _CacheEntry(
+            by_caregiver=means_c,
+            names=names_c,
+            by_patient=means_p,
+            patient_names=names_p,
+            loaded_at=time.time(),
+        )
+        with self._cache_lock:
+            self._cache[tenant_id] = entry
+        logger.info(
+            "tenant_embeddings_cached tenant=%s caregivers=%d patients=%d",
+            tenant_id, len(means_c), len(means_p),
+        )
+        return entry
+
+    @staticmethod
+    def _aggregate_embeddings(
+        rows: list[dict],
+        key_field: str,
+    ) -> tuple[dict[str, np.ndarray], dict[str, str]]:
+        """Agrupa embeddings por pessoa e retorna média ponderada por qualidade."""
+        grouped: dict[str, list[tuple[np.ndarray, float]]] = {}
         names: dict[str, str] = {}
         for r in rows:
-            cid = str(r["caregiver_id"])
-            emb = np.array(self._parse_vector(r["embedding"]), dtype=np.float32)
+            pid = str(r[key_field])
+            emb_raw = r["embedding"]
+            emb = np.array(VoiceBiometricsService._parse_vector(emb_raw), dtype=np.float32)
             q = float(r.get("quality_score") or 0.5)
-            by_caregiver.setdefault(cid, []).append((emb, q))
-            names[cid] = r.get("full_name", "")
+            grouped.setdefault(pid, []).append((emb, q))
+            names[pid] = r.get("full_name", "")
 
         means: dict[str, np.ndarray] = {}
-        for cid, items in by_caregiver.items():
+        for pid, items in grouped.items():
             embs = np.stack([e for e, _ in items])
             weights = np.array([max(0.1, w) for _, w in items])
             weights = weights / weights.sum()
             mean_emb = (embs * weights[:, None]).sum(axis=0)
-            # Normaliza para magnitude 1 (cosine ignora magnitude, mas estabiliza operações)
             norm = np.linalg.norm(mean_emb)
             if norm > 0:
                 mean_emb = mean_emb / norm
-            means[cid] = mean_emb.astype(np.float32)
-
-        entry = _CacheEntry(by_caregiver=means, names=names, loaded_at=time.time())
-        with self._cache_lock:
-            self._cache[tenant_id] = entry
-        logger.info("tenant_embeddings_cached tenant=%s caregivers=%d", tenant_id, len(means))
-        return entry
+            means[pid] = mean_emb.astype(np.float32)
+        return means, names
 
     def invalidate_cache(self, tenant_id: str | None = None):
         with self._cache_lock:
@@ -495,6 +540,361 @@ class VoiceBiometricsService:
             (caregiver_id, tenant_id),
         )
         return int(row["cnt"]) if row else 0
+
+    # ══════════════════════════════════════════════════════════════════
+    # Paciente — enroll / verify / identify / status / delete
+    # ══════════════════════════════════════════════════════════════════
+    #
+    # Migration 050 estende aia_health_voice_embeddings com person_type +
+    # patient_id (XOR com caregiver_id). Os métodos abaixo são análogos
+    # aos de cuidador mas operam sobre patient_id.
+
+    def enroll_patient(
+        self,
+        patient_id: str,
+        tenant_id: str,
+        audio_bytes: bytes,
+        sample_label: str = "enrollment",
+        consent_ip: str = "",
+        sample_rate: int = 0,
+    ) -> dict[str, Any]:
+        if not self.postgres:
+            return {"success": False, "message": "DB indisponível"}
+
+        current = self._count_patient_samples(patient_id, tenant_id)
+        if current >= MAX_ENROLLMENT_SAMPLES:
+            return {
+                "success": False,
+                "message": f"Limite de {MAX_ENROLLMENT_SAMPLES} amostras atingido",
+            }
+
+        result = self._extract(
+            audio_bytes, sample_rate=sample_rate, min_quality=MIN_ENROLL_QUALITY,
+        )
+        if result.error or result.embedding is None:
+            return {
+                "success": False,
+                "message": f"Áudio rejeitado: {result.error}",
+                "quality_detail": result.processed.quality.__dict__ if result.processed else None,
+            }
+
+        duration_ms = result.processed.quality.duration_ms if result.processed else 0
+        embedding_str = "[" + ",".join(str(float(v)) for v in result.embedding) + "]"
+
+        try:
+            self.postgres.execute(
+                """
+                INSERT INTO aia_health_voice_embeddings
+                    (patient_id, person_type, tenant_id, embedding, sample_label,
+                     audio_duration_ms, quality_score, consent_ip)
+                VALUES (%s, 'patient', %s, %s::vector, %s, %s, %s, %s)
+                """,
+                (
+                    patient_id, tenant_id, embedding_str, sample_label,
+                    duration_ms, result.quality_score, consent_ip,
+                ),
+            )
+            self.postgres.execute(
+                """
+                INSERT INTO aia_health_voice_consent_log
+                    (patient_id, person_type, tenant_id, action, ip_address)
+                VALUES (%s, 'patient', %s, 'enrollment_added', %s)
+                """,
+                (patient_id, tenant_id, consent_ip),
+            )
+            self.invalidate_cache(tenant_id)
+
+            new_count = current + 1
+            logger.info(
+                "voice_enrolled_patient patient=%s samples=%d/%d quality=%.2f",
+                patient_id, new_count, MAX_ENROLLMENT_SAMPLES, result.quality_score,
+            )
+            return {
+                "success": True,
+                "person_type": "patient",
+                "samples_count": new_count,
+                "samples_needed": max(0, MIN_SAMPLES_FOR_COMPLETE - new_count),
+                "quality_score": result.quality_score,
+                "enrollment_complete": new_count >= MIN_SAMPLES_FOR_COMPLETE,
+                "quality_detail": result.processed.quality.__dict__ if result.processed else None,
+            }
+        except Exception as exc:
+            logger.exception("enroll_patient_db_failed error=%s", exc)
+            return {"success": False, "message": f"DB: {exc}"}
+
+    def verify_patient_1to1(
+        self,
+        patient_id: str,
+        tenant_id: str,
+        audio_bytes: bytes,
+        sample_rate: int = 0,
+    ) -> dict[str, Any]:
+        result = self._extract(
+            audio_bytes, sample_rate=sample_rate, min_quality=MIN_IDENTIFY_QUALITY,
+        )
+        if result.embedding is None:
+            return {
+                "verified": False, "score": 0.0, "method": "1:1",
+                "person_type": "patient", "reason": result.error or "unknown",
+            }
+
+        entry = self._load_tenant_embeddings(tenant_id)
+        stored = (entry.by_patient or {}).get(str(patient_id))
+        if stored is None:
+            return {
+                "verified": False, "score": 0.0, "method": "1:1",
+                "person_type": "patient", "reason": "not_enrolled",
+            }
+
+        score = self._cosine(result.embedding, stored)
+        verified = score >= VERIFY_1TO1_THRESHOLD
+
+        self._log_calibration(
+            tenant_id=tenant_id, method="1:1_patient", score=score,
+            audio_quality=result.quality_score, accepted=verified,
+            extra={"patient_id": str(patient_id)},
+        )
+        logger.info(
+            "voice_verify_patient_1to1 patient=%s score=%.3f verified=%s",
+            patient_id, score, verified,
+        )
+        return {
+            "verified": verified,
+            "score": round(score, 4),
+            "method": "1:1",
+            "person_type": "patient",
+            "patient_id": str(patient_id),
+            "audio_quality": round(result.quality_score, 3),
+        }
+
+    def identify_patient_1toN(
+        self, tenant_id: str, audio_bytes: bytes, sample_rate: int = 0,
+    ) -> dict[str, Any]:
+        """Identifica paciente entre os pacientes ativos do tenant."""
+        result = self._extract(
+            audio_bytes, sample_rate=sample_rate, min_quality=MIN_IDENTIFY_QUALITY,
+        )
+        if result.embedding is None:
+            return {
+                "identified": False, "score": 0.0, "method": "1:N",
+                "person_type": "patient", "reason": result.error or "unknown",
+            }
+
+        entry = self._load_tenant_embeddings(tenant_id)
+        candidates_pool = entry.by_patient or {}
+        patient_names = entry.patient_names or {}
+        if not candidates_pool:
+            return {
+                "identified": False, "score": 0.0, "method": "1:N",
+                "person_type": "patient", "reason": "no_enrollments",
+            }
+
+        scores: list[tuple[str, float]] = [
+            (pid, self._cosine(result.embedding, mean_emb))
+            for pid, mean_emb in candidates_pool.items()
+        ]
+        scores.sort(key=lambda x: x[1], reverse=True)
+
+        top_pid, top_score = scores[0]
+        second_score = scores[1][1] if len(scores) > 1 else 0.0
+        margin = top_score - second_score
+        identified = (
+            top_score >= IDENTIFY_1TON_THRESHOLD
+            and margin >= IDENTIFY_AMBIGUITY_MARGIN
+        )
+
+        candidates = [
+            {
+                "patient_id": pid,
+                "patient_name": patient_names.get(pid, ""),
+                "score": round(s, 4),
+            }
+            for pid, s in scores[:3]
+        ]
+        self._log_calibration(
+            tenant_id=tenant_id, method="1:N_patient", score=top_score,
+            audio_quality=result.quality_score, accepted=identified,
+            extra={"margin": margin, "top3": candidates},
+        )
+        logger.info(
+            "voice_identify_patient_1toN tenant=%s best=%s(%.3f) margin=%.3f identified=%s",
+            tenant_id, patient_names.get(top_pid, top_pid), top_score, margin, identified,
+        )
+        return {
+            "identified": identified,
+            "score": round(top_score, 4),
+            "margin": round(margin, 4),
+            "method": "1:N",
+            "person_type": "patient",
+            "matched_patient_id": top_pid if identified else None,
+            "matched_patient_name": patient_names.get(top_pid, "") if identified else None,
+            "candidates": candidates,
+            "audio_quality": round(result.quality_score, 3),
+        }
+
+    def identify_any_1toN(
+        self, tenant_id: str, audio_bytes: bytes, sample_rate: int = 0,
+    ) -> dict[str, Any]:
+        """Identifica em pool unificado (cuidadores + pacientes).
+
+        Útil para áudios em domicílio onde paciente e cuidador podem
+        responder pela mesma linha. Retorna tipo + id do match.
+        """
+        result = self._extract(
+            audio_bytes, sample_rate=sample_rate, min_quality=MIN_IDENTIFY_QUALITY,
+        )
+        if result.embedding is None:
+            return {
+                "identified": False, "score": 0.0, "method": "1:N_any",
+                "reason": result.error or "unknown",
+            }
+
+        entry = self._load_tenant_embeddings(tenant_id)
+        scores: list[tuple[str, str, str, float]] = []
+        for cid, mean in entry.by_caregiver.items():
+            scores.append((
+                "caregiver", cid, entry.names.get(cid, ""),
+                self._cosine(result.embedding, mean),
+            ))
+        for pid, mean in (entry.by_patient or {}).items():
+            scores.append((
+                "patient", pid, (entry.patient_names or {}).get(pid, ""),
+                self._cosine(result.embedding, mean),
+            ))
+        if not scores:
+            return {
+                "identified": False, "score": 0.0, "method": "1:N_any",
+                "reason": "no_enrollments",
+            }
+        scores.sort(key=lambda x: x[3], reverse=True)
+
+        top_type, top_id, top_name, top_score = scores[0]
+        second_score = scores[1][3] if len(scores) > 1 else 0.0
+        margin = top_score - second_score
+        identified = (
+            top_score >= IDENTIFY_1TON_THRESHOLD
+            and margin >= IDENTIFY_AMBIGUITY_MARGIN
+        )
+        candidates = [
+            {
+                "person_type": t, "person_id": i, "person_name": n,
+                "score": round(s, 4),
+            }
+            for t, i, n, s in scores[:3]
+        ]
+        return {
+            "identified": identified,
+            "score": round(top_score, 4),
+            "margin": round(margin, 4),
+            "method": "1:N_any",
+            "matched_person_type": top_type if identified else None,
+            "matched_person_id": top_id if identified else None,
+            "matched_person_name": top_name if identified else None,
+            "candidates": candidates,
+            "audio_quality": round(result.quality_score, 3),
+        }
+
+    def get_patient_enrollment_status(
+        self, patient_id: str, tenant_id: str,
+    ) -> dict[str, Any]:
+        row = self.postgres.fetch_one(
+            """
+            SELECT COUNT(*) AS cnt,
+                   MAX(created_at) AS last_updated,
+                   AVG(quality_score) AS avg_quality
+            FROM aia_health_voice_embeddings
+            WHERE patient_id = %s AND tenant_id = %s
+              AND person_type = 'patient'
+            """,
+            (patient_id, tenant_id),
+        )
+        if not row or row["cnt"] == 0:
+            return {
+                "enrolled": False, "sample_count": 0, "enrollment_complete": False,
+                "person_type": "patient",
+            }
+        return {
+            "enrolled": True,
+            "person_type": "patient",
+            "sample_count": int(row["cnt"]),
+            "enrollment_complete": int(row["cnt"]) >= MIN_SAMPLES_FOR_COMPLETE,
+            "last_updated": str(row["last_updated"]) if row["last_updated"] else None,
+            "avg_quality": round(float(row["avg_quality"]), 3) if row["avg_quality"] else None,
+        }
+
+    def delete_patient_enrollment(
+        self, patient_id: str, tenant_id: str, ip: str = "",
+    ) -> dict[str, Any]:
+        try:
+            row = self.postgres.fetch_one(
+                """
+                SELECT COUNT(*) AS cnt FROM aia_health_voice_embeddings
+                WHERE patient_id = %s AND tenant_id = %s AND person_type = 'patient'
+                """,
+                (patient_id, tenant_id),
+            )
+            count = row["cnt"] if row else 0
+            self.postgres.execute(
+                """
+                DELETE FROM aia_health_voice_embeddings
+                WHERE patient_id = %s AND tenant_id = %s AND person_type = 'patient'
+                """,
+                (patient_id, tenant_id),
+            )
+            self.postgres.execute(
+                """
+                INSERT INTO aia_health_voice_consent_log
+                    (patient_id, person_type, tenant_id, action, ip_address)
+                VALUES (%s, 'patient', %s, 'data_deleted', %s)
+                """,
+                (patient_id, tenant_id, ip),
+            )
+            self.invalidate_cache(tenant_id)
+            logger.info(
+                "voice_enrollment_deleted_patient patient=%s count=%d",
+                patient_id, count,
+            )
+            return {"success": True, "deleted_count": count}
+        except Exception as exc:
+            return {"success": False, "message": str(exc)}
+
+    def _count_patient_samples(self, patient_id: str, tenant_id: str) -> int:
+        row = self.postgres.fetch_one(
+            """
+            SELECT COUNT(*) AS cnt FROM aia_health_voice_embeddings
+            WHERE patient_id = %s AND tenant_id = %s AND person_type = 'patient'
+            """,
+            (patient_id, tenant_id),
+        )
+        return int(row["cnt"]) if row else 0
+
+    def list_coverage_summary(self, tenant_id: str) -> dict[str, Any]:
+        """Retorna resumo de cobertura para a página admin."""
+        try:
+            rows = self.postgres.fetch_all(
+                """
+                SELECT person_type, people_enrolled, samples_total,
+                       avg_quality, last_enrollment
+                FROM aia_health_voice_coverage_summary
+                WHERE tenant_id = %s
+                """,
+                (tenant_id,),
+            )
+        except Exception:
+            rows = []
+        out = {
+            "caregiver": {"people_enrolled": 0, "samples_total": 0},
+            "patient": {"people_enrolled": 0, "samples_total": 0},
+        }
+        for r in rows or []:
+            pt = r.get("person_type", "caregiver")
+            out[pt] = {
+                "people_enrolled": int(r.get("people_enrolled") or 0),
+                "samples_total": int(r.get("samples_total") or 0),
+                "avg_quality": float(r["avg_quality"]) if r.get("avg_quality") else None,
+                "last_enrollment": str(r["last_enrollment"]) if r.get("last_enrollment") else None,
+            }
+        return out
 
 
 _instance: VoiceBiometricsService | None = None
