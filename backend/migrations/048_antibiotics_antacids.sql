@@ -128,7 +128,7 @@ INSERT INTO aia_health_condition_contraindications (
  '5-10x → rabdomiólise. Sinvastatina é a pior.',
  'Suspender estatina durante curso de claritromicina (5-14 dias) OU substituir '
  'antibiótico por azitromicina (menos interação)',
- 'lexicomp', 'Lexicomp interação severa', 0.95,
+ 'manual', 'Lexicomp interação severa (curadoria interna)', 0.95,
  TRUE, 'auto_pending'),
 
 -- Levofloxacino — tendinopatia

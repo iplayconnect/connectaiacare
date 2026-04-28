@@ -46,7 +46,7 @@ VALUES
  TRUE, 'auto_pending', 'rename_2024_auto')
 ON CONFLICT DO NOTHING;
 
--- ── Antidiabéticos / endócrino adicionais ──
+-- ── Antidiabéticos / endócrino adicionais (insulinas com schema notes) ──
 INSERT INTO aia_health_drug_dose_limits
     (principle_active, route, max_daily_dose_value, max_daily_dose_unit,
      therapeutic_class, age_group_min, source,
@@ -63,7 +63,15 @@ VALUES
  'Schema customizado: dose pré-prandial por carbohidrato.'),
 ('insulina_glulisina', 'subcutanea', 200, 'UI', 'insulina_rapida_analoga', 18, 'anvisa',
  TRUE, 'auto_pending', 'rename_2024_auto',
- 'Schema customizado: dose pré-prandial por carbohidrato.'),
+ 'Schema customizado: dose pré-prandial por carbohidrato.')
+ON CONFLICT DO NOTHING;
+
+-- ── Antidiabéticos orais + antitireoidiano (sem auto_review_notes) ──
+INSERT INTO aia_health_drug_dose_limits
+    (principle_active, route, max_daily_dose_value, max_daily_dose_unit,
+     therapeutic_class, age_group_min, source,
+     auto_generated, review_status, source_auto)
+VALUES
 ('sitagliptina', 'oral', 100, 'mg', 'dpp4_inibidor', 18, 'anvisa',
  TRUE, 'auto_pending', 'rename_2024_auto'),
 ('acarbose', 'oral', 300, 'mg', 'inibidor_alfa_glicosidase', 18, 'anvisa',
@@ -133,12 +141,12 @@ VALUES
  TRUE, 'auto_pending', 'rename_2024_auto',
  'Dose oral; em uso EV/SC dose menor. Em idoso titular cuidadosamente.'),
 ('oxicodona', 'oral', 80, 'mg', 'opioide', 18, 'anvisa',
- TRUE, 'auto_pending', 'rename_2024_auto'),
+ TRUE, 'auto_pending', 'rename_2024_auto', NULL),
 ('nimesulida', 'oral', 400, 'mg', 'aine_seletivo_cox2_parcial', 18, 'anvisa',
  TRUE, 'auto_pending', 'rename_2024_auto',
  'Hepatotoxicidade — ANVISA limita uso a 15 dias'),
 ('meloxicam', 'oral', 15, 'mg', 'aine_seletivo_cox2_parcial', 18, 'anvisa',
- TRUE, 'auto_pending', 'rename_2024_auto')
+ TRUE, 'auto_pending', 'rename_2024_auto', NULL)
 ON CONFLICT DO NOTHING;
 
 -- ── Antialérgicos H1 ──
