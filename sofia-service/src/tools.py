@@ -1159,6 +1159,39 @@ _CLINICAL_DISCLAIMER = (
     "você com o médico responsável. A Sofia não substitui consulta médica."
 )
 
+# Disclaimer reforçado quando regra do motor veio de auto-populate
+# (review_status='auto_pending'). Usado em fase POC enquanto curador
+# clínico sênior não validou.
+_CLINICAL_DISCLAIMER_AUTO_PENDING = (
+    "⚠️ Atenção: esta informação foi gerada automaticamente a partir de "
+    "fontes públicas (RENAME 2024 / ANVISA Bulário / Beers 2023) e está "
+    "AINDA EM REVISÃO clínica pela equipe farmacológica. **Confirme com seu "
+    "médico ou farmacêutico antes de tomar qualquer decisão clínica.** "
+    "A Sofia não substitui consulta profissional."
+)
+
+
+def _output_has_auto_pending(output: dict) -> bool:
+    """Detecta se algum item do output veio de regra com review_status='auto_pending'.
+
+    Heurística simples: procura recursivamente por chaves 'review_status',
+    'auto_generated' ou marca 'auto_pending' em qualquer lugar do dict.
+    """
+    if not isinstance(output, dict):
+        return False
+    for k, v in output.items():
+        if k == "review_status" and v == "auto_pending":
+            return True
+        if k == "auto_generated" and v is True:
+            return True
+        if isinstance(v, dict) and _output_has_auto_pending(v):
+            return True
+        if isinstance(v, list):
+            for item in v:
+                if isinstance(item, dict) and _output_has_auto_pending(item):
+                    return True
+    return False
+
 # Tools que executam AÇÃO clínica (afetam estado, comunicação externa) →
 # precisam passar pelo Safety Guardrail.
 # Tools só de leitura/info → recebem apenas disclaimer.
@@ -1307,6 +1340,12 @@ def execute_tool(name: str, args: dict, persona_ctx: dict) -> dict:
 
     # ─── Disclaimer em tools clínicas (info ou ação) ───
     if name in _TOOLS_CLINICAL_INFO or name in _TOOLS_REQUIRING_REVIEW:
-        output.setdefault("_disclaimer", _CLINICAL_DISCLAIMER)
+        # Se output contém regra auto-pending, usa disclaimer reforçado.
+        # Caso contrário, disclaimer padrão.
+        if _output_has_auto_pending(output):
+            output["_disclaimer"] = _CLINICAL_DISCLAIMER_AUTO_PENDING
+            output.setdefault("_review_status", "auto_pending")
+        else:
+            output.setdefault("_disclaimer", _CLINICAL_DISCLAIMER)
 
     return output
