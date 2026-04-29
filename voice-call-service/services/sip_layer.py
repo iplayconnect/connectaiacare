@@ -118,11 +118,15 @@ class SipLayer:
                 acc_cfg.sipConfig.authCreds.append(cred)
                 acc_cfg.regConfig.timeoutSec = Config.REGISTRATION_INTERVAL
 
-                # NAT config minimalista — confia no comportamento padrão
-                # do pjsua que ontem funcionava com Flux. As flags
-                # contactRewrite/sdpNatRewrite + publicAddress que
-                # adicionei hoje QUEBRARAM o RTP no Docker bridge
-                # (RX 0pkts + peer=-). Voltando ao default.
+                # FIX RTP: força pjsua a usar a faixa de portas RTP que
+                # o Docker compose tem mapeada pro host (10500-10600).
+                # Sem isso, pjsua aloca em 4000+ (default) e os pacotes
+                # RTP são dropados pelo NAT do Docker — observado em
+                # 2026-04-29 03:23: SDP m=audio 4000, RX/TX 0 ou peer=-.
+                acc_cfg.mediaConfig.transportConfig.port = Config.RTP_PORT_MIN
+                acc_cfg.mediaConfig.transportConfig.portRange = (
+                    Config.RTP_PORT_MAX - Config.RTP_PORT_MIN
+                )
 
                 # Account customizado pra capturar onIncomingCall.
                 # Sem isso, chamadas inbound caem em "no media handler"
