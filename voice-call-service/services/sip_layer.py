@@ -352,8 +352,26 @@ def _make_my_call_class(pj):
                 if not audio_data:
                     return
                 self._frame_count += 1
-                if self._frame_count == 1:
-                    logger.info("first_audio_frame_received bytes=%d", len(audio_data))
+                # Log periódico com energia média pra debug — silêncio
+                # absoluto = RMS muito baixo. Ajuda a saber se é falta
+                # de áudio ou só limite de VAD muito alto.
+                if self._frame_count == 1 or self._frame_count % 100 == 0:
+                    # RMS rápido sem numpy (frame é PCM16 LE)
+                    n = len(audio_data) // 2
+                    if n > 0:
+                        sumsq = 0
+                        for i in range(0, len(audio_data), 2):
+                            s = int.from_bytes(
+                                audio_data[i:i+2], "little", signed=True,
+                            )
+                            sumsq += s * s
+                        rms = int((sumsq / n) ** 0.5)
+                    else:
+                        rms = 0
+                    logger.info(
+                        "audio_frame_in count=%d bytes=%d rms=%d",
+                        self._frame_count, len(audio_data), rms,
+                    )
                 self._on_audio_in(audio_data)
             except Exception as exc:
                 logger.warning("on_frame_received_error: %s", exc)

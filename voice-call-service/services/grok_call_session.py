@@ -237,6 +237,18 @@ class GrokCallSession:
                 "type": "input_audio_buffer.append",
                 "audio": _b64(pcm16_24k),
             }))
+            # Counter de debug — sem isso fica cego sobre se o áudio
+            # do paciente está realmente chegando ao Grok.
+            self._audio_chunks_sent = (
+                getattr(self, "_audio_chunks_sent", 0) + 1
+            )
+            if self._audio_chunks_sent in (1, 50, 100) or \
+               self._audio_chunks_sent % 250 == 0:
+                logger.info(
+                    "grok_audio_sent count=%d bytes=%d session=%s",
+                    self._audio_chunks_sent, len(pcm16_24k),
+                    self.session_id,
+                )
         except Exception as exc:
             logger.warning("grok_call_feed_failed: %s", exc)
 
