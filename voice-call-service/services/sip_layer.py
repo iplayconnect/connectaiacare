@@ -131,11 +131,23 @@ class SipLayer:
                 # (host port 5061 → container 5060). Flux memoriza esse
                 # Contact e roteia INVITE inbound pra ele — precisa ser
                 # endereço externo válido.
+                #
+                # IMPORTANTE: desligar contactRewrite/viaRewrite. Caso
+                # contrário, no segundo REGISTER (após 401 auth challenge)
+                # o pjsua sobrescreve o contactForced usando o IP/porta
+                # detectados via "received/rport" do response — que aqui
+                # seriam 72.60.242.245:5060 (porta interna). Como 5060
+                # externo está ocupado pelo voip-service, INVITE bate em
+                # serviço errado. Desligando o rewrite, o contactForced
+                # sobrevive a todos os ciclos REGISTER.
                 if Config.PUBLIC_IP:
                     acc_cfg.sipConfig.contactForced = (
                         f"<sip:{Config.SIP_USER}@{Config.PUBLIC_IP}"
                         f":{Config.SIP_PUBLIC_PORT};ob>"
                     )
+                    acc_cfg.natConfig.contactRewriteUse = 0
+                    acc_cfg.natConfig.viaRewriteUse = 0
+                    acc_cfg.natConfig.sdpNatRewriteUse = 0
 
                 # FIX RTP — Docker bridge NAT:
                 # 1. Porta no range mapeado pelo compose (10500-10600)
