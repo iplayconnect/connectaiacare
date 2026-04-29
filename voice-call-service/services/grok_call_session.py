@@ -117,12 +117,28 @@ class GrokCallSession:
             extra = self.persona_ctx.get("extra_context") or {}
             patient = extra.get("patient")
             if patient:
+                # conditions/allergies podem vir como lista de strings OU
+                # de dicts com {description: ..., severity: ...} (jsonb).
+                # Extrai descrição quando dict; usa str direto caso contrário.
+                def _stringify(items):
+                    if not items:
+                        return "—"
+                    parts = []
+                    for it in items:
+                        if isinstance(it, dict):
+                            v = it.get("description") or it.get("name") or ""
+                            if v:
+                                parts.append(str(v))
+                        else:
+                            parts.append(str(it))
+                    return ", ".join(parts) or "—"
+
                 instructions += (
                     "\n\n# CONTEXTO DO PACIENTE NA LIGAÇÃO\n"
                     f"Nome: {patient.get('full_name')} "
                     f"(apelido: {patient.get('nickname') or '—'})\n"
-                    f"Condições: {', '.join(patient.get('conditions') or []) or '—'}\n"
-                    f"Alergias: {', '.join(patient.get('allergies') or []) or '—'}\n"
+                    f"Condições: {_stringify(patient.get('conditions'))}\n"
+                    f"Alergias: {_stringify(patient.get('allergies'))}\n"
                     f"Unidade: {patient.get('care_unit') or '—'} "
                     f"Quarto: {patient.get('room_number') or '—'}"
                 )
