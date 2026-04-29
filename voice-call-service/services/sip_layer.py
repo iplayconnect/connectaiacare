@@ -118,15 +118,23 @@ class SipLayer:
                 acc_cfg.sipConfig.authCreds.append(cred)
                 acc_cfg.regConfig.timeoutSec = Config.REGISTRATION_INTERVAL
 
-                # FIX RTP: força pjsua a usar a faixa de portas RTP que
-                # o Docker compose tem mapeada pro host (10500-10600).
-                # Sem isso, pjsua aloca em 4000+ (default) e os pacotes
-                # RTP são dropados pelo NAT do Docker — observado em
-                # 2026-04-29 03:23: SDP m=audio 4000, RX/TX 0 ou peer=-.
+                # FIX RTP — Docker bridge NAT:
+                # 1. Porta no range mapeado pelo compose (10500-10600)
+                # 2. publicAddress NO MEDIA APENAS (não no transport
+                #    geral) anuncia 72.60.242.245 no c= do SDP.
+                #    Sem isso o SDP carrega 172.19.0.4 (interno Docker),
+                #    Flux tenta mandar RTP pra esse IP não-roteável e
+                #    RX fica zerado + peer=-.
+                #    Tentativa anterior (28/04 23:34) com tp_cfg.publicAddress
+                #    afetou também o REGISTER e quebrou. Aqui é só media.
                 acc_cfg.mediaConfig.transportConfig.port = Config.RTP_PORT_MIN
                 acc_cfg.mediaConfig.transportConfig.portRange = (
                     Config.RTP_PORT_MAX - Config.RTP_PORT_MIN
                 )
+                if Config.PUBLIC_IP:
+                    acc_cfg.mediaConfig.transportConfig.publicAddress = (
+                        Config.PUBLIC_IP
+                    )
 
                 # Account customizado pra capturar onIncomingCall.
                 # Sem isso, chamadas inbound caem em "no media handler"
