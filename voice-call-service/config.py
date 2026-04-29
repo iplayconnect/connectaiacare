@@ -18,6 +18,15 @@ class Config:
     SIP_TRANSPORT = os.getenv("VOIP_SIP_TRANSPORT", "UDP")
     SIP_USER = os.getenv("VOIP_SIP_USER", "")
     SIP_PASSWORD = os.getenv("VOIP_SIP_PASSWORD", "")
+    # Caller ID a aparecer no destinatário. Pode ser diferente do SIP_USER:
+    # nVoip exige que seja um Número Virtual (DID) alocado à conta — auth
+    # é feita pelo SIP_USER, mas o From/CID precisa ser o DID. Default
+    # vazio = usa SIP_USER (Flux aceita).
+    SIP_CALLER_ID = os.getenv("VOIP_SIP_CALLER_ID", "")
+    # IP público do host (Docker está atrás de NAT bridge). Anunciado no
+    # SDP/Contact pra que RTP de retorno chegue. Sem isso pjsua anuncia
+    # 172.x interno → trunk envia RTP pra IP errado → áudio inbound zera.
+    PUBLIC_IP = os.getenv("VOIP_PUBLIC_IP", "")
     # Faixa RTP DIFERENTE do voip-service (10000-10100) pra evitar conflito
     RTP_PORT_MIN = int(os.getenv("VOICE_RTP_PORT_MIN", "10500"))
     RTP_PORT_MAX = int(os.getenv("VOICE_RTP_PORT_MAX", "10600"))
