@@ -54,6 +54,13 @@ def _fetch_one(sql: str, params=()) -> dict | None:
         return dict(row) if row else None
 
 
+def _fetch_all(sql: str, params=()) -> list[dict]:
+    with _cursor(commit=False) as cur:
+        cur.execute(sql, params)
+        rows = cur.fetchall()
+        return [dict(r) for r in rows or []]
+
+
 def _execute(sql: str, params=()) -> None:
     with _cursor() as cur:
         cur.execute(sql, params)

@@ -140,9 +140,16 @@ def dial():
             # Marca razão do disconnect pra UI ler depois (active-calls)
             ctx = _active_calls.get(call_id)
             if ctx:
-                # Se nunca atendeu (sem CONFIRMED), provavelmente foi
-                # bloqueado pelo trunk OU número não atendeu
                 ctx["disconnected_at"] = call_id
+            # Memory writeback — extrai aprendizado da conversa pra
+            # o user continuar lembrado nos próximos turnos (chat/whatsapp).
+            user_id = persona_ctx.get("user_id")
+            if user_id:
+                try:
+                    from services.persistence import update_user_memory_force
+                    update_user_memory_force(user_id)
+                except Exception as exc:
+                    logger.warning("memory_writeback_failed: %s", exc)
             # Encerra Grok + para o loop
             asyncio.run_coroutine_threadsafe(grok.close(), loop)
             loop.call_later(2, loop.stop)
