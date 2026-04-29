@@ -79,16 +79,16 @@ class SipLayer:
                 ep.libCreate()
                 ep.libInit(ep_cfg)
 
-                # Transport UDP — anuncia IP público (NAT bridge Docker)
+                # Transport UDP. NÃO setamos publicAddress aqui — em
+                # Docker bridge, anunciar IP público no SDP quebra
+                # ambas as direções RTP (RX 0pkts + TX peer=-). Em vez
+                # disso confiamos no Contact rewrite via REGISTER
+                # response (acc_cfg.natConfig abaixo) pra que o pjsua
+                # auto-detecte o endereço externo observado pelo
+                # registrar Flux.
                 tp_cfg = pj.TransportConfig()
                 tp_cfg.port = 0  # bind ephemeral local pra signaling
                 tp_cfg.portRange = Config.RTP_PORT_MAX - Config.RTP_PORT_MIN
-                if Config.PUBLIC_IP:
-                    # publicAddress força pjsua a anunciar este IP no
-                    # SDP+Contact. Sem isso anuncia o IP da bridge Docker
-                    # (172.x.x.x) que não é roteável pra fora — RTP de
-                    # retorno do trunk cai no buraco.
-                    tp_cfg.publicAddress = Config.PUBLIC_IP
                 self._transport = ep.transportCreate(
                     pj.PJSIP_TRANSPORT_UDP, tp_cfg
                 )
@@ -118,25 +118,11 @@ class SipLayer:
                 acc_cfg.sipConfig.authCreds.append(cred)
                 acc_cfg.regConfig.timeoutSec = Config.REGISTRATION_INTERVAL
 
-                # ─── NAT traversal ───
-                # Docker container atrás de bridge NAT. Sem essas configs
-                # o RTP de retorno não chega (problema observado nos testes
-                # de 27/04 e 28/04 — TX OK mas RX zerado).
-                nat = acc_cfg.natConfig
-                # Detecta IP público real via REGISTER response Contact
-                nat.contactRewriteUse = 1
-                nat.contactRewriteMethod = 2  # 2 = use new transport
-                # Mantém Contact alive via SIP keep-alive
-                nat.viaRewriteUse = 1
-                nat.sdpNatRewriteUse = 1
-                # RTP simétrico — responde RTP pra mesma porta de origem
-                # do pacote recebido (ignora SDP do peer). Resolve NAT
-                # do lado deles também.
-                acc_cfg.mediaConfig.rtcpMux = False
-                acc_cfg.mediaConfig.transportConfig.port = 0  # ephemeral
-                # Permite renegociação RTP em caso de NAT changes
-                nat.udpKaIntervalSec = 15
-                nat.udpKaData = "\r\n"
+                # NAT config minimalista — confia no comportamento padrão
+                # do pjsua que ontem funcionava com Flux. As flags
+                # contactRewrite/sdpNatRewrite + publicAddress que
+                # adicionei hoje QUEBRARAM o RTP no Docker bridge
+                # (RX 0pkts + peer=-). Voltando ao default.
 
                 # Account customizado pra capturar onIncomingCall.
                 # Sem isso, chamadas inbound caem em "no media handler"

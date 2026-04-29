@@ -155,12 +155,11 @@ services:
       XAI_API_KEY: ${XAI_API_KEY:-}
       SOFIA_GROK_VOICE_MODEL: grok-voice-think-fast-1.0
       SOFIA_GROK_VOICE: ara
-      # VAD threshold do Grok Server VAD. Áudio PCMA/PCMU 8kHz do
-      # telefone perde MUITO sinal após upsample 8k→24k. Threshold
-      # default 0.5 não dispara speech_started; 0.3 ainda alto demais.
-      # 0.15 = mais sensível, custo: pode disparar com ruído de fundo.
-      GROK_VAD_THRESHOLD: ${GROK_VAD_THRESHOLD:-0.15}
-      GROK_VAD_SILENCE_DURATION_MS: ${GROK_VAD_SILENCE_DURATION_MS:-500}
+      # VAD threshold do Grok Server VAD. Default original do Grok
+      # (0.5 / 700ms). Mexer só se VAD não disparar consistentemente.
+      # Override via env se precisar abaixar.
+      GROK_VAD_THRESHOLD: ${GROK_VAD_THRESHOLD:-0.5}
+      GROK_VAD_SILENCE_DURATION_MS: ${GROK_VAD_SILENCE_DURATION_MS:-700}
     depends_on:
       postgres:
         condition: service_healthy
