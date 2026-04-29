@@ -71,10 +71,16 @@ class SipLayer:
                 ep.libCreate()
                 ep.libInit(ep_cfg)
 
-                # Transport UDP
+                # Transport UDP — anuncia IP público (NAT bridge Docker)
                 tp_cfg = pj.TransportConfig()
                 tp_cfg.port = 0  # bind ephemeral local pra signaling
                 tp_cfg.portRange = Config.RTP_PORT_MAX - Config.RTP_PORT_MIN
+                if Config.PUBLIC_IP:
+                    # publicAddress força pjsua a anunciar este IP no
+                    # SDP+Contact. Sem isso anuncia o IP da bridge Docker
+                    # (172.x.x.x) que não é roteável pra fora — RTP de
+                    # retorno do trunk cai no buraco.
+                    tp_cfg.publicAddress = Config.PUBLIC_IP
                 self._transport = ep.transportCreate(
                     pj.PJSIP_TRANSPORT_UDP, tp_cfg
                 )
@@ -89,11 +95,13 @@ class SipLayer:
                 except Exception as exc:
                     logger.warning("set_null_dev_failed: %s", exc)
 
-                # Conta — display name "ConnectaIA Care" aparece no caller ID
-                # do destinatário (quando a operadora preserva o From header).
+                # Conta — Caller ID (From) pode ser diferente do SIP_USER.
+                # nVoip exige que From seja o Número Virtual (DID) alocado.
+                # Auth ainda é pelo SIP_USER técnico.
+                caller_id = Config.SIP_CALLER_ID or Config.SIP_USER
                 acc_cfg = pj.AccountConfig()
                 acc_cfg.idUri = (
-                    f'"ConnectaIA Care" <sip:{Config.SIP_USER}@{Config.SIP_DOMAIN}>'
+                    f'"ConnectaIA Care" <sip:{caller_id}@{Config.SIP_DOMAIN}>'
                 )
                 acc_cfg.regConfig.registrarUri = f"sip:{Config.SIP_DOMAIN}"
                 cred = pj.AuthCredInfo(
@@ -102,13 +110,35 @@ class SipLayer:
                 acc_cfg.sipConfig.authCreds.append(cred)
                 acc_cfg.regConfig.timeoutSec = Config.REGISTRATION_INTERVAL
 
+                # ─── NAT traversal ───
+                # Docker container atrás de bridge NAT. Sem essas configs
+                # o RTP de retorno não chega (problema observado nos testes
+                # de 27/04 e 28/04 — TX OK mas RX zerado).
+                nat = acc_cfg.natConfig
+                # Detecta IP público real via REGISTER response Contact
+                nat.contactRewriteUse = 1
+                nat.contactRewriteMethod = 2  # 2 = use new transport
+                # Mantém Contact alive via SIP keep-alive
+                nat.viaRewriteUse = 1
+                nat.sdpNatRewriteUse = 1
+                # RTP simétrico — responde RTP pra mesma porta de origem
+                # do pacote recebido (ignora SDP do peer). Resolve NAT
+                # do lado deles também.
+                acc_cfg.mediaConfig.rtcpMux = False
+                acc_cfg.mediaConfig.transportConfig.port = 0  # ephemeral
+                # Permite renegociação RTP em caso de NAT changes
+                nat.udpKaIntervalSec = 15
+                nat.udpKaData = "\r\n"
+
                 self._account = pj.Account()
                 self._account.create(acc_cfg)
 
                 self._initialized = True
                 logger.info(
-                    "sip_initialized user=%s domain=%s rtp_range=%d-%d",
-                    Config.SIP_USER, Config.SIP_DOMAIN,
+                    "sip_initialized user=%s caller_id=%s domain=%s "
+                    "public_ip=%s rtp_range=%d-%d",
+                    Config.SIP_USER, caller_id, Config.SIP_DOMAIN,
+                    Config.PUBLIC_IP or "(auto)",
                     Config.RTP_PORT_MIN, Config.RTP_PORT_MAX,
                 )
                 return True

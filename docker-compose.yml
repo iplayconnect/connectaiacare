@@ -148,6 +148,10 @@ services:
       VOIP_SIP_DOMAIN: ${VOIP_SIP_DOMAIN:-revendapbx.flux.net.br}
       VOIP_SIP_USER: ${VOIP_SIP_USER:-}
       VOIP_SIP_PASSWORD: ${VOIP_SIP_PASSWORD:-}
+      # Caller ID (From) — nVoip exige Número Virtual; Flux aceita SIP_USER.
+      VOIP_SIP_CALLER_ID: ${VOIP_SIP_CALLER_ID:-}
+      # IP público pro SDP (Docker bridge NAT). 72.60.242.245 = host VPS.
+      VOIP_PUBLIC_IP: ${VOIP_PUBLIC_IP:-72.60.242.245}
       XAI_API_KEY: ${XAI_API_KEY:-}
       SOFIA_GROK_VOICE_MODEL: grok-voice-think-fast-1.0
       SOFIA_GROK_VOICE: ara
