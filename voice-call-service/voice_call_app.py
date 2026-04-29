@@ -73,6 +73,28 @@ import threading
 threading.Thread(target=_init_sip, daemon=True, name="sip-init").start()
 
 
+# ─── Graceful shutdown ────────────────────────────────────────────
+# Docker para o container com SIGTERM. Sem handler explícito, o
+# gunicorn morre sem chamar sip.shutdown() → un-register não é
+# enviado → Flux acumula "ghost registrations" (4+ contatos ativos
+# da mesma linha, INVITE bate em ghosts mortos = "linha não atende").
+import atexit
+import signal
+
+
+def _graceful_shutdown(*_args):
+    try:
+        SipLayer.get().shutdown()
+        logger.info("sip_layer_shutdown_complete")
+    except Exception:
+        logger.exception("graceful_shutdown_error")
+
+
+atexit.register(_graceful_shutdown)
+signal.signal(signal.SIGTERM, lambda *_: (_graceful_shutdown(), sys.exit(0)))
+signal.signal(signal.SIGINT, lambda *_: (_graceful_shutdown(), sys.exit(0)))
+
+
 if __name__ == "__main__":
     # Em produção: gunicorn -w 1 voice_call_app:app
     # (1 worker pq PJSIP é singleton — múltiplos workers conflitariam no UDP)

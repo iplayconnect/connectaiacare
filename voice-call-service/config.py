@@ -15,6 +15,14 @@ class Config:
     # ─── SIP / Trunk ───
     SIP_DOMAIN = os.getenv("VOIP_SIP_DOMAIN", "revendapbx.flux.net.br")
     SIP_PORT = int(os.getenv("VOIP_SIP_PORT", "5060"))
+    # Porta SIP que pjsua escuta DENTRO do container. Fixa (não ephemeral)
+    # pra que o Contact anunciado seja estável entre rebuilds e o Flux
+    # não acumule "ghost registrations" (4+ contatos da mesma linha).
+    SIP_LISTEN_PORT = int(os.getenv("VOICE_SIP_LISTEN_PORT", "5060"))
+    # Porta externa mapeada pelo docker-compose (5061 host → 5060
+    # container). Anunciada no Contact via tp_cfg.publicAddress pra que
+    # INVITE inbound da Flux chegue até a borda Docker.
+    SIP_PUBLIC_PORT = int(os.getenv("VOICE_SIP_PUBLIC_PORT", "5061"))
     SIP_TRANSPORT = os.getenv("VOIP_SIP_TRANSPORT", "UDP")
     SIP_USER = os.getenv("VOIP_SIP_USER", "")
     SIP_PASSWORD = os.getenv("VOIP_SIP_PASSWORD", "")
