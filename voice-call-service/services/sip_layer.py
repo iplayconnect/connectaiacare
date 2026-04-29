@@ -42,6 +42,14 @@ class SipLayer:
         self._lock = threading.Lock()
         # call_id (string) → CallContext
         self._calls: dict[str, "CallContext"] = {}
+        # Callback chamado quando alguém liga PRA nós (inbound).
+        # Recebe (caller_phone, on_audio_in, on_call_state). Caller
+        # implementa em routes/inbound.py com a lógica de spawn da
+        # GrokCallSession + bridge audio.
+        self._on_incoming_call: (
+            Callable[[str, Callable, Callable], "_MyCall"] | None
+        ) = None
+        self._inbound_call_counter = 0
 
     @classmethod
     def get(cls) -> "SipLayer":
@@ -130,7 +138,19 @@ class SipLayer:
                 nat.udpKaIntervalSec = 15
                 nat.udpKaData = "\r\n"
 
-                self._account = pj.Account()
+                # Account customizado pra capturar onIncomingCall.
+                # Sem isso, chamadas inbound caem em "no media handler"
+                # e o trunk recebe 503 / 408.
+                sip_self = self  # closure pra callback poder acessar
+
+                class _MyAccount(pj.Account):
+                    def onIncomingCall(self, prm):
+                        try:
+                            sip_self._handle_incoming_call(prm)
+                        except Exception:
+                            logger.exception("on_incoming_call_failed")
+
+                self._account = _MyAccount()
                 self._account.create(acc_cfg)
 
                 self._initialized = True
@@ -270,6 +290,120 @@ class SipLayer:
             return False
         ctx.hangup()
         return True
+
+    # ══════════════════════════════════════════════════════════════════
+    # Inbound — chamadas que ALGUÉM faz pra nós (Sofia atende)
+    # ══════════════════════════════════════════════════════════════════
+
+    def register_on_incoming_call(
+        self,
+        callback: Callable[[str, Callable, Callable], object],
+    ) -> None:
+        """Registra handler de chamada inbound.
+
+        Callback assina: (caller_phone: str, on_audio_in: Callable,
+        on_call_state: Callable) → algo. O callback fica responsável
+        por iniciar a Grok session e devolver o áudio via on_audio_in.
+        """
+        self._on_incoming_call = callback
+
+    def _handle_incoming_call(self, prm) -> None:
+        """Chamado pelo onIncomingCall do _MyAccount. Aceita o INVITE
+        com 200 OK + cria _MyCall pra bridgeing áudio.
+        """
+        if not self._initialized or not self._pj:
+            return
+
+        pj = self._pj
+        self.register_current_thread("incoming-call")
+
+        # Cria _MyCall pra essa chamada inbound (subclass de pj.Call)
+        self._inbound_call_counter += 1
+        import time as _time
+        call_id = f"in-call-{self._inbound_call_counter}-{int(_time.time())}"
+
+        # Caller phone vem do From URI do INVITE. Acessamos via
+        # pj_call.getInfo().remoteUri após criar.
+        if not self._on_incoming_call:
+            logger.warning(
+                "incoming_call_no_handler — rejecting with 503",
+            )
+            try:
+                tmp_call = _MyCall(
+                    account=self._account,
+                    call_id_local=call_id,
+                    on_audio_in=lambda b: None,
+                    on_call_state=None,
+                )
+                tmp_call.makeCall  # placeholder
+            except Exception:
+                pass
+            return
+
+        # Callback de áudio inbound (paciente fala) será preenchido
+        # pelo handler externo. Mesma assinatura do dial outbound.
+        captured_call: dict = {"call": None, "on_audio_in": None,
+                                "on_call_state": None}
+
+        def _on_audio_in(audio: bytes):
+            cb = captured_call.get("on_audio_in")
+            if cb:
+                cb(audio)
+
+        def _on_call_state(local_id: str, state: str):
+            cb = captured_call.get("on_call_state")
+            if cb:
+                cb(local_id, state)
+
+        call = _MyCall(
+            account=self._account,
+            call_id_local=call_id,
+            on_audio_in=_on_audio_in,
+            on_call_state=_on_call_state,
+        )
+        # Pega caller phone do remoteUri (vem do INVITE)
+        try:
+            ci = call.getInfo()
+            remote_uri = ci.remoteUri  # ex: '"X" <sip:5551996161700@...>'
+            caller_phone = self._extract_phone_from_uri(remote_uri)
+        except Exception:
+            caller_phone = "unknown"
+
+        logger.info(
+            "incoming_call call_id=%s caller=%s — answering",
+            call_id, caller_phone,
+        )
+
+        # Aceita a chamada (200 OK)
+        try:
+            answer_prm = pj.CallOpParam()
+            answer_prm.statusCode = 200
+            call.answer(answer_prm)
+        except Exception as exc:
+            logger.exception("incoming_call_answer_failed: %s", exc)
+            return
+
+        # Delega pra handler externo (que cria GrokCallSession)
+        try:
+            on_audio_in_cb, on_call_state_cb = self._on_incoming_call(
+                caller_phone, call_id, call,
+            )
+            captured_call["on_audio_in"] = on_audio_in_cb
+            captured_call["on_call_state"] = on_call_state_cb
+        except Exception:
+            logger.exception("incoming_call_handler_failed")
+
+        ctx = CallContext(call_id=call_id, pj_call=call)
+        self._calls[call_id] = ctx
+
+    @staticmethod
+    def _extract_phone_from_uri(uri: str) -> str:
+        """Extrai o número de telefone de um URI SIP.
+        Ex: '"Joao" <sip:5551996161700@dom.com>' → '5551996161700'
+        """
+        import re
+        m = re.search(r"sip:([+]?\d+)@", uri or "")
+        return m.group(1) if m else "unknown"
 
     def install_gc_thread_guard(self) -> None:
         """Instala callback que registra a thread atual no pjlib ANTES
