@@ -121,8 +121,34 @@ Antes de classificar, faça internamente (sem expor no output):
   "suggested_next_check_in_hours": 0-24,
   "classification": "routine|attention|urgent|critical",
   "classification_reasoning": "por que classifiquei assim, em 1 frase, citando os fatos-chave (sintoma + condição + medicação quando aplicável)",
-  "tags": ["tags categóricas: dor_articular, sinal_vital_estavel, polimedicacao, descompensacao_IC, etc"]
+  "tags": ["tags categóricas: dor_articular, sinal_vital_estavel, polimedicacao, descompensacao_IC, etc"],
+  "event_type": "relato_geral|cuidado_higiene|alimentacao_hidratacao|medicacao|sinal_vital|intercorrencia|sintoma_novo|apoio_emocional",
+  "event_type_reasoning": "qual evidência do relato indica este tipo, em 1 frase curta"
 }
+
+# Regras de event_type (multiclassificação funcional)
+
+Escolha UMA das 8 classes — a que MELHOR representa o INPUT principal do relato:
+
+- **cuidado_higiene**: troca de fralda, banho, troca de curativos, mobilização no leito, posicionamento. Foco: cuidado físico de rotina sem queixa clínica.
+- **alimentacao_hidratacao**: refeição (comeu/recusou), aceitação de líquidos, hidratação, dieta. Foco: ingesta.
+- **medicacao**: administração de medicamento (deu/não deu/recusou), efeito observado, dose perdida, ajuste sugerido. Foco: medicação como evento principal.
+- **sinal_vital**: aferição de PA, FC, glicemia, SpO₂, temperatura, peso. Foco: medição numérica reportada.
+- **intercorrencia**: queda, agitação súbita, episódio agudo, alteração súbita de comportamento, mal-estar inesperado. Foco: evento adverso pontual.
+- **sintoma_novo**: dor (qualquer região), tontura, febre, dispneia, confusão, fraqueza nova reportada. Foco: queixa subjetiva nova/recorrente.
+- **apoio_emocional**: cuidador desabafa, expressa cansaço/dúvida não-clínica, busca apoio. Foco: o cuidador, não o paciente.
+- **relato_geral**: relato amplo cobrindo múltiplos tipos sem dominância clara, OU resumo de plantão. Use quando nenhuma das 7 outras se destaca.
+
+PRIORIDADE quando o relato cobrir múltiplos:
+1. Se há **intercorrencia** ou **sintoma_novo** preocupante → escolha esses (tem mais peso clínico).
+2. Se há **medicacao** com problema (recusa/efeito) → medicacao.
+3. Senão, escolha o foco principal explícito do cuidador.
+4. Em dúvida real → relato_geral.
+
+Esta classificação é INDEPENDENTE de severity (`classification` routine/attention/urgent/critical):
+- Um relato pode ser `cuidado_higiene` + `routine` (troca de fralda comum) OU
+  `cuidado_higiene` + `urgent` (troca expondo lesão por pressão grau IV).
+- Sintoma_novo é sempre tipo, mas severity varia (dor leve = attention, dor torácica = critical).
 
 # Regras de classificação
 
