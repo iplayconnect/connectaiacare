@@ -412,6 +412,7 @@ class SipLayer:
             call_id_local=call_id,
             on_audio_in=_on_audio_in,
             on_call_state=_on_call_state,
+            pj_call_id=prm.callId,  # liga _MyCall à chamada do pjsua
         )
         # Pega caller phone do remoteUri (vem do INVITE)
         try:
@@ -622,8 +623,19 @@ def _make_my_call_class(pj):
                 logger.warning("on_frame_received_error: %s", exc)
 
     class MyCall(pj.Call):
-        def __init__(self, account, call_id_local, on_audio_in, on_call_state):
-            super().__init__(account)
+        def __init__(
+            self, account, call_id_local, on_audio_in, on_call_state,
+            pj_call_id=None,
+        ):
+            # Inbound calls: pj_call_id vem de OnIncomingCallParam.callId
+            # (atribuído pelo pjsua ao receber INVITE). Sem isso,
+            # getInfo() dispara assert fail (call_id inválido) e
+            # SIGSEGV o processo. Outbound: deixa default (-1) e o
+            # makeCall() preenche depois.
+            if pj_call_id is not None:
+                super().__init__(account, pj_call_id)
+            else:
+                super().__init__(account)
             self._call_id_local = call_id_local
             self._on_audio_in_cb = on_audio_in
             self._on_call_state = on_call_state
