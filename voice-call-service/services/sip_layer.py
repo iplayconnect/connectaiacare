@@ -254,8 +254,12 @@ class SipLayer:
 
     def push_audio_8k(self, call_id: str, pcm16_8k: bytes) -> None:
         """Camada externa (audio_bridge depois de downsample) chama isso
-        pra que o áudio da Sofia chegue no telefone do paciente."""
-        self.register_current_thread("push-audio")
+        pra que o áudio da Sofia chegue no telefone do paciente.
+
+        NÃO chama register_current_thread aqui — método roda a 50Hz e
+        a operação interna não toca pjlib (só bytearray). O GC guard
+        já cobre threads que tocam pjlib indireto via destruição.
+        """
         ctx = self._calls.get(call_id)
         if ctx and ctx.pj_call:
             ctx.pj_call.feed_audio_to_sip(pcm16_8k)
@@ -263,13 +267,13 @@ class SipLayer:
     def drain_outbound_audio(self, call_id: str) -> int:
         """Esvazia o buffer de áudio Sofia→SIP. Usado quando o usuário
         interrompe a fala da Sofia — mata o áudio em curso na hora."""
-        self.register_current_thread("drain-outbound")
         ctx = self._calls.get(call_id)
         if ctx and ctx.pj_call:
             return ctx.pj_call.drain_outbound_buffer()
         return 0
 
     def hangup(self, call_id: str) -> bool:
+        # hangup() toca pjlib (CallOpParam, hangup) — precisa register
         self.register_current_thread("hangup")
         ctx = self._calls.pop(call_id, None)
         if not ctx:
