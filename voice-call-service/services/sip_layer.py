@@ -79,7 +79,7 @@ class SipLayer:
                 ep.libCreate()
                 ep.libInit(ep_cfg)
 
-                # Transport UDP — PORTA FIXA + publicAddress.
+                # Transport UDP — PORTA FIXA.
                 # Histórico: tp_cfg.port=0 (ephemeral) fazia o pjsua
                 # anunciar Contact com porta INTERNA do container (ex:
                 # 39109), que não está mapeada externamente. Cada
@@ -88,17 +88,14 @@ class SipLayer:
                 # Flux mandava INVITE pras portas mortas e dava timeout.
                 #
                 # Fix (29/04): porta fixa 5060 dentro do container
-                # (Docker compose mapeia 5061:5060/udp), publicAddress
-                # com PUBLIC_IP:5061 pra Contact ficar
-                # 72.60.242.245:5061 — endereço externo válido. Mesmo
-                # entre rebuilds o Contact é estável → Flux só tem 1
-                # registro ativo, INVITE inbound chega no container.
+                # (Docker compose mapeia 5061:5060/udp). Contact é
+                # forçado via acc_cfg.sipConfig.contactForced (abaixo)
+                # pra anunciar PUBLIC_IP:SIP_PUBLIC_PORT (5061 externa).
+                # publicAddress no transport não funciona porque pjsua
+                # tenta resolver "IP:porta" como hostname e falha
+                # (gethostbyname → PJ_ERESOLVE).
                 tp_cfg = pj.TransportConfig()
                 tp_cfg.port = Config.SIP_LISTEN_PORT  # 5060 (fixo)
-                if Config.PUBLIC_IP:
-                    tp_cfg.publicAddress = (
-                        f"{Config.PUBLIC_IP}:{Config.SIP_PUBLIC_PORT}"
-                    )
                 self._transport = ep.transportCreate(
                     pj.PJSIP_TRANSPORT_UDP, tp_cfg
                 )
@@ -127,6 +124,18 @@ class SipLayer:
                 )
                 acc_cfg.sipConfig.authCreds.append(cred)
                 acc_cfg.regConfig.timeoutSec = Config.REGISTRATION_INTERVAL
+
+                # Contact forçado — anuncia 72.60.242.245:5061 (porta
+                # externa Docker) em REGISTER + INVITE. Sem isso pjsua
+                # anunciaria a porta interna 5060 que não está exposta
+                # (host port 5061 → container 5060). Flux memoriza esse
+                # Contact e roteia INVITE inbound pra ele — precisa ser
+                # endereço externo válido.
+                if Config.PUBLIC_IP:
+                    acc_cfg.sipConfig.contactForced = (
+                        f"<sip:{Config.SIP_USER}@{Config.PUBLIC_IP}"
+                        f":{Config.SIP_PUBLIC_PORT};ob>"
+                    )
 
                 # FIX RTP — Docker bridge NAT:
                 # 1. Porta no range mapeado pelo compose (10500-10600)
