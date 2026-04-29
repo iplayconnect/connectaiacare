@@ -160,6 +160,12 @@ services:
       # Override via env se precisar abaixar.
       GROK_VAD_THRESHOLD: ${GROK_VAD_THRESHOLD:-0.5}
       GROK_VAD_SILENCE_DURATION_MS: ${GROK_VAD_SILENCE_DURATION_MS:-700}
+      # Delay (ms) antes da Sofia falar a saudação ao atender. Default
+      # 1500ms = ~1.5s — evita atropelar paciente que diz "alô" e dá
+      # tempo do canal de áudio "abrir" em algumas operadoras. 0
+      # restaura comportamento original (Sofia fala IMEDIATAMENTE
+      # ao detectar CONFIRMED).
+      GROK_KICKOFF_DELAY_MS: ${GROK_KICKOFF_DELAY_MS:-1500}
     depends_on:
       postgres:
         condition: service_healthy

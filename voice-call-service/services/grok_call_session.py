@@ -199,13 +199,34 @@ class GrokCallSession:
         self._receive_task = asyncio.create_task(self._receive_loop())
         # Kickoff guardado mas NÃO disparado — quem dispara é a camada SIP
         # via .start_kickoff() quando state == CONFIRMED (paciente atendeu).
-        self._kickoff_text = (
-            f"[INÍCIO DA LIGAÇÃO TELEFÔNICA] Cumprimente {first_name} pelo "
-            f"primeiro nome com '{greet}' e tom caloroso (1 frase curta). "
-            "Diga que é a Sofia da ConnectaIACare. Em seguida pergunte como "
-            "pode ajudar."
+        # Texto MUDA por direção:
+        # - Inbound  = alguém ligou pra Sofia → ela atende perguntando
+        #              como pode ajudar
+        # - Outbound = Sofia ligou pra alguém → ela já sabe o motivo
+        #              (vem do scenario_system_prompt), NÃO pergunta
+        #              "como posso ajudar"
+        is_inbound = bool(
+            (self.persona_ctx.get("extra_context") or {}).get("inbound")
         )
+        if is_inbound:
+            self._kickoff_text = (
+                f"[INÍCIO DA LIGAÇÃO TELEFÔNICA — INBOUND, alguém ligou pra você] "
+                f"Cumprimente com '{greet}' e tom caloroso (1 frase curta). "
+                f"Diga que é a Sofia da ConnectaIACare. Em seguida pergunte "
+                f"como pode ajudar."
+            )
+        else:
+            self._kickoff_text = (
+                f"[INÍCIO DA LIGAÇÃO TELEFÔNICA — OUTBOUND, você ligou para {first_name}] "
+                f"Cumprimente com '{greet}' pelo primeiro nome e tom caloroso "
+                f"(1 frase curta). Identifique-se como Sofia da ConnectaIACare. "
+                f"Em seguida siga IMEDIATAMENTE o objetivo da ligação "
+                f"conforme suas instruções de sistema (cenário). "
+                f"NÃO pergunte 'como posso ajudar' — você é quem iniciou "
+                f"a ligação e já sabe o motivo."
+            )
         self._kickoff_sent = False
+        self._is_inbound = is_inbound
         logger.info(
             "grok_call_started session_id=%s persona=%s model=%s",
             self.session_id, self.persona, Config.GROK_VOICE_MODEL,
@@ -213,9 +234,26 @@ class GrokCallSession:
 
     async def start_kickoff(self) -> None:
         """Dispara a 1ª fala da Sofia. Chamado pela camada SIP ao detectar
-        CONFIRMED (paciente atendeu). Idempotente."""
+        CONFIRMED (paciente atendeu). Idempotente.
+
+        Suporta delay configurável via GROK_KICKOFF_DELAY_MS:
+        - 0 (default): Sofia fala assim que atende (comportamento original)
+        - >0: aguarda N ms antes de falar — útil pra evitar atropelamento
+              quando paciente diz "alô" no primeiro segundo, ou pra dar
+              tempo do canal de áudio "abrir" em algumas operadoras
+        """
         if self._kickoff_sent or self._closed or not self._ws:
             return
+        delay_ms = int(os.getenv("GROK_KICKOFF_DELAY_MS", "0"))
+        if delay_ms > 0:
+            logger.info(
+                "grok_kickoff_delay_waiting session_id=%s ms=%d",
+                self.session_id, delay_ms,
+            )
+            await asyncio.sleep(delay_ms / 1000.0)
+            # Re-confere após o sleep — pode ter desligado nesse meio
+            if self._kickoff_sent or self._closed or not self._ws:
+                return
         self._kickoff_sent = True
         await self._ws.send(json.dumps({
             "type": "conversation.item.create",
@@ -226,7 +264,11 @@ class GrokCallSession:
             },
         }))
         await self._ws.send(json.dumps({"type": "response.create"}))
-        logger.info("grok_call_kickoff_sent session_id=%s", self.session_id)
+        logger.info(
+            "grok_call_kickoff_sent session_id=%s direction=%s",
+            self.session_id,
+            "inbound" if self._is_inbound else "outbound",
+        )
 
     async def feed_audio_24k(self, pcm16_24k: bytes) -> None:
         """Camada SIP empurra cada frame de áudio (já upsampleado pra 24k)."""
