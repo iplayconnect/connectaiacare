@@ -367,7 +367,13 @@ class SipLayer:
             return
 
         pj = self._pj
-        self.register_current_thread("incoming-call")
+        # IMPORTANTE: NÃO chamar register_current_thread aqui. Esta
+        # thread É uma worker interna do pjsua (callback do
+        # onIncomingCall), já tem thread descriptor + group lock
+        # ownership. Re-registrar cria um segundo descriptor →
+        # quando call.answer() tenta pegar o group lock, o owner
+        # mismatch dispara assert "grp_lock_set_owner_thread" e
+        # SIGABRT. Só registrar threads externas (Flask, asyncio).
 
         # Cria _MyCall pra essa chamada inbound (subclass de pj.Call)
         self._inbound_call_counter += 1
