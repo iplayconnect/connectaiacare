@@ -331,6 +331,174 @@ class TecnoseniorCareNoteSyncService:
     # Status / Inspeção
     # ══════════════════════════════════════════════════════════════════
 
+    def add_addendum_to_existing(
+        self,
+        care_event_id: str,
+        content: str,
+        content_resume: str,
+        occurred_at: str | None = None,
+        closes_note: bool = False,
+    ) -> dict[str, Any]:
+        """Adiciona um addendum a uma CareNote já criada (cenário 2 —
+        streaming).
+
+        Usado quando a Sofia recebe novo report dentro de um care_event
+        ainda ativo. Se closes_note=True, manda status=CLOSED no addendum
+        (fecha a CareNote pai).
+        """
+        if not self.enabled:
+            return {"status": "error", "reason": "client_disabled"}
+
+        sync = self.db.fetch_one(
+            "SELECT tecnosenior_carenote_id, tecnosenior_status "
+            "FROM aia_health_tecnosenior_sync WHERE care_event_id = %s",
+            (care_event_id,),
+        )
+        if not sync or not sync.get("tecnosenior_carenote_id"):
+            return {
+                "status": "error",
+                "reason": "carenote_not_synced_yet",
+                "hint": "Chame sync_care_event primeiro com status=OPEN",
+            }
+        if sync.get("tecnosenior_status") == "CLOSED" and not closes_note:
+            return {
+                "status": "error",
+                "reason": "carenote_already_closed",
+            }
+
+        carenote_id = int(sync["tecnosenior_carenote_id"])
+        result = self.client.add_addendum(
+            care_note_id=carenote_id,
+            content=content,
+            content_resume=content_resume,
+            occurred_at=occurred_at,
+            status="CLOSED" if closes_note else None,
+        )
+        if not result or "id" not in result:
+            return {
+                "status": "error", "reason": "remote_addendum_failed",
+                "carenote_id": carenote_id,
+            }
+
+        addendum_id = int(result["id"])
+        # Persiste na tabela auxiliar pra audit
+        try:
+            self.db.execute(
+                """
+                INSERT INTO aia_health_tecnosenior_addendums
+                    (care_event_id, tecnosenior_carenote_id,
+                     tecnosenior_addendum_id, content, content_resume,
+                     occurred_at, closes_note, last_synced_at,
+                     last_response_payload)
+                VALUES (%s, %s, %s, %s, %s, COALESCE(%s, NOW()),
+                        %s, NOW(), %s)
+                """,
+                (
+                    care_event_id, carenote_id, addendum_id,
+                    content, content_resume,
+                    occurred_at, closes_note,
+                    self.db.json_adapt(result),
+                ),
+            )
+        except Exception as exc:
+            logger.warning("addendum_persist_failed: %s", exc)
+
+        # Se fechou a CareNote, atualiza status local
+        if closes_note:
+            self.db.execute(
+                "UPDATE aia_health_tecnosenior_sync "
+                "SET tecnosenior_status = 'CLOSED', closed_at_remote = NOW() "
+                "WHERE care_event_id = %s",
+                (care_event_id,),
+            )
+
+        return {
+            "status": "ok",
+            "tecnosenior_carenote_id": carenote_id,
+            "tecnosenior_addendum_id": addendum_id,
+            "closes_note": closes_note,
+        }
+
+    def open_carenote_for_streaming(
+        self, care_event_id: str,
+    ) -> dict[str, Any]:
+        """Cria CareNote com status=OPEN explícito (forçado), permitindo
+        addendums depois. Diferente do sync_care_event que decide
+        OPEN/CLOSED baseado em care_events.status.
+        """
+        if not self.enabled:
+            return {"status": "error", "reason": "client_disabled"}
+
+        existing = self.db.fetch_one(
+            "SELECT tecnosenior_carenote_id, tecnosenior_status "
+            "FROM aia_health_tecnosenior_sync WHERE care_event_id = %s",
+            (care_event_id,),
+        )
+        if existing and existing.get("tecnosenior_carenote_id"):
+            return {
+                "status": "already_synced",
+                "tecnosenior_carenote_id": existing["tecnosenior_carenote_id"],
+                "tecnosenior_status": existing.get("tecnosenior_status"),
+            }
+
+        ev = self.db.fetch_one(
+            """SELECT id::text AS id, patient_id::text AS patient_id,
+                      caregiver_id::text AS caregiver_id, caregiver_phone,
+                      summary, reasoning, opened_at, current_classification,
+                      event_type, event_tags, closed_reason
+               FROM aia_health_care_events WHERE id = %s""",
+            (care_event_id,),
+        )
+        if not ev:
+            return {"status": "error", "reason": "event_not_found"}
+
+        from datetime import datetime, timezone as tz
+        patient_int = self.resolve_patient_id(ev["patient_id"])
+        if not patient_int:
+            return {"status": "error", "reason": "patient_not_resolved"}
+        caretaker_int = self.resolve_caretaker_id(
+            ev.get("caregiver_id"), ev.get("caregiver_phone"),
+        )
+        if not caretaker_int:
+            return {"status": "error", "reason": "caretaker_not_resolved"}
+
+        content = ev.get("reasoning") or ev.get("summary") or "(sem detalhes)"
+        content_resume = self._format_resume(ev)
+        occurred = ev.get("opened_at")
+        occurred_iso = (
+            occurred.astimezone(tz.utc).isoformat()
+            if isinstance(occurred, datetime) else None
+        )
+        result = self.client.create_care_note_streaming(
+            caretaker_id=caretaker_int, patient_id=patient_int,
+            content=content, content_resume=content_resume,
+            occurred_at=occurred_iso, status="OPEN",
+        )
+        if not result or "id" not in result:
+            return {"status": "error", "reason": "remote_create_failed"}
+
+        carenote_id = int(result["id"])
+        self.db.execute(
+            """INSERT INTO aia_health_tecnosenior_sync
+                  (care_event_id, tecnosenior_carenote_id, tecnosenior_status,
+                   last_synced_at, last_response_payload)
+               VALUES (%s, %s, 'OPEN', NOW(), %s)
+               ON CONFLICT (care_event_id) DO UPDATE SET
+                  tecnosenior_carenote_id = EXCLUDED.tecnosenior_carenote_id,
+                  tecnosenior_status = 'OPEN', last_synced_at = NOW(),
+                  sync_error = NULL""",
+            (care_event_id, carenote_id, self.db.json_adapt(result)),
+        )
+        logger.info(
+            "tecnosenior_carenote_opened care_event=%s carenote_id=%s",
+            care_event_id, carenote_id,
+        )
+        return {
+            "status": "ok", "tecnosenior_carenote_id": carenote_id,
+            "tecnosenior_status": "OPEN",
+            "patient_int": patient_int, "caretaker_int": caretaker_int,
+        }
+
     def get_sync_state(self, care_event_id: str) -> dict | None:
         row = self.db.fetch_one(
             """
