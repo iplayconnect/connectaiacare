@@ -45,6 +45,69 @@ class PatientService:
         )
         return _serialize_row(row)
 
+    # ──────────────────────────────────────────────────────────────
+    # Update — campos editáveis pelo painel admin
+    # ──────────────────────────────────────────────────────────────
+    # Whitelist explícita pra evitar update de tenant_id/id/created_at
+    # via mass-assignment.
+    EDITABLE_FIELDS = {
+        "full_name", "nickname", "birth_date", "gender",
+        "photo_url", "photo_local_path",
+        "care_unit", "room_number", "care_level",
+        "conditions", "medications", "allergies", "responsible",
+        "metadata",
+        # Campos novos (migrations 053, 054)
+        "preferred_form_of_address", "is_self_reporting", "cpf",
+        # Mapping Tecnosenior — só super_admin deveria mexer em
+        # produção; por enquanto liberamos no PATCH e a UI controla.
+        "tecnosenior_patient_id",
+    }
+
+    JSONB_FIELDS = {
+        "conditions", "medications", "allergies",
+        "responsible", "metadata",
+    }
+
+    def update(
+        self, patient_id: str, fields: dict[str, object],
+    ) -> dict | None:
+        """UPDATE explícito por id. Filtra fields whitelist + serializa
+        JSONB. Retorna o paciente atualizado ou None se não existir.
+
+        Aceita CPF com ou sem máscara — normaliza pra dígitos.
+        """
+        sets: list[str] = []
+        params: list[object] = []
+        import json as _json
+        import re as _re
+
+        for k, v in (fields or {}).items():
+            if k not in self.EDITABLE_FIELDS:
+                continue
+            if k == "cpf" and v is not None:
+                # Remove caracteres não-dígitos (Matheus aceita do lado dele,
+                # nós já guardamos limpo pra match consistente)
+                v = _re.sub(r"\D", "", str(v))
+                if not v:
+                    v = None
+            if k in self.JSONB_FIELDS and v is not None:
+                v = self.db.json_adapt(v) if hasattr(self.db, "json_adapt") \
+                    else _json.dumps(v)
+            sets.append(f"{k} = %s")
+            params.append(v)
+
+        if not sets:
+            return self.get_by_id(patient_id)
+
+        sets.append("updated_at = NOW()")
+        params.append(patient_id)
+        sql = (
+            f"UPDATE aia_health_patients SET {', '.join(sets)} "
+            f"WHERE id = %s RETURNING *"
+        )
+        row = self.db.fetch_one(sql, tuple(params))
+        return _serialize_row(row)
+
     def list_all(self, tenant_id: str) -> list[dict]:
         rows = self.db.fetch_all(
             "SELECT * FROM aia_health_patients WHERE tenant_id = %s AND active = TRUE ORDER BY full_name",

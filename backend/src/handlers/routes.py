@@ -68,6 +68,42 @@ def get_patient(patient_id: str):
     return jsonify({"patient": patient, "reports": reports})
 
 
+@bp.patch("/api/patients/<patient_id>")
+def update_patient(patient_id: str):
+    """Update parcial de campos editáveis do paciente.
+
+    Body: { full_name?, nickname?, cpf?, birth_date?, gender?,
+            care_unit?, room_number?, care_level?,
+            conditions?, medications?, allergies?, responsible?,
+            preferred_form_of_address?, is_self_reporting?,
+            tecnosenior_patient_id?, photo_url?, ... }
+
+    CPF é normalizado pra dígitos (sem máscara).
+    """
+    from src.handlers.auth_routes import require_role
+
+    @require_role("super_admin", "admin_tenant", "medico", "enfermeiro")
+    def _impl():
+        body = request.get_json(silent=True) or {}
+        if not isinstance(body, dict) or not body:
+            return jsonify({
+                "status": "error", "reason": "empty_body",
+            }), 400
+        try:
+            updated = get_patient_service().update(patient_id, body)
+        except Exception as exc:
+            logger.exception("patient_update_failed")
+            return jsonify({
+                "status": "error", "reason": "update_failed",
+                "detail": str(exc),
+            }), 400
+        if not updated:
+            return jsonify({"status": "error", "reason": "not_found"}), 404
+        return jsonify({"status": "ok", "patient": updated})
+
+    return _impl()
+
+
 @bp.get("/api/reports")
 def list_reports():
     """Lista relatos com filtros opcionais.

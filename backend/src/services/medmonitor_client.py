@@ -146,12 +146,42 @@ class MedMonitorClient:
         return self._request("GET", f"/caretakers/{caretaker_id}/")
 
     def find_caretaker_by_phone(self, phone: str) -> dict | None:
-        """Busca o PRIMEIRO caretaker cujo phone bate com o normalizado.
+        """Busca caretaker testando 3 variantes do phone — Tecnosenior
+        guarda formatos diferentes dependendo do cadastro.
 
-        Retorna dict {id, person, nature} ou None.
+        Variantes testadas, em ordem:
+          1. Phone como veio (ex: '51999524816')
+          2. Com prefixo 55 (ex: '5551999524816')
+          3. Com + e 55 (ex: '+5551999524816')
         """
-        results = self.list_caretakers(phone=phone)
-        return results[0] if results else None
+        return self._find_with_phone_variants(
+            "/caretakers/", phone,
+        )
+
+    def _find_with_phone_variants(self, path: str, phone: str) -> dict | None:
+        """Helper genérico — tenta variantes pra paciente/caretaker."""
+        digits = re.sub(r"\D", "", phone or "")
+        if not digits:
+            return None
+        variants = [digits]
+        if digits.startswith("55"):
+            variants.append(digits[2:])
+            variants.append("+" + digits)
+        else:
+            variants.append("55" + digits)
+            variants.append("+55" + digits)
+        for v in variants:
+            try:
+                results = self._request("GET", path, params={"phone": v})
+                if isinstance(results, list) and results:
+                    logger.debug(
+                        "phone_match_via_variant path=%s variant=%s",
+                        path, v,
+                    )
+                    return results[0]
+            except Exception:
+                continue
+        return None
 
     def find_caretaker_by_cpf(self, cpf: str) -> dict | None:
         """Lookup por CPF — Matheus subiu em 2026-04-29. Aceita CPF
@@ -165,10 +195,9 @@ class MedMonitorClient:
         return None
 
     def find_patient_by_phone(self, phone: str) -> dict | None:
-        """Busca paciente por telefone normalizado (TotalCare aceita
-        +5551... ou variações). Retorna dict ou None."""
-        results = self.list_patients(phone=phone)
-        return results[0] if results else None
+        """Busca paciente por phone testando variantes — Tecnosenior
+        guarda em formatos diferentes."""
+        return self._find_with_phone_variants("/patients/", phone)
 
     def find_patient_by_cpf(self, cpf: str) -> dict | None:
         """Lookup por CPF (após Matheus subir suporte 2026-04-29)."""
