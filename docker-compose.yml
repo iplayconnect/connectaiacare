@@ -153,7 +153,11 @@ services:
       # IP público pro SDP (Docker bridge NAT). 72.60.242.245 = host VPS.
       VOIP_PUBLIC_IP: ${VOIP_PUBLIC_IP:-72.60.242.245}
       XAI_API_KEY: ${XAI_API_KEY:-}
-      SOFIA_GROK_VOICE_MODEL: grok-voice-think-fast-1.0
+      # Modelo trocado de grok-voice-think-fast-1.0 (29/04) pra
+      # grok-voice-fast-1.0 (sem think). O modo think causava
+      # "response.done vazio" — Sofia ficava muda no meio da conversa.
+      # Sem think = comportamento mais determinístico.
+      SOFIA_GROK_VOICE_MODEL: ${SOFIA_GROK_VOICE_MODEL:-grok-voice-fast-1.0}
       SOFIA_GROK_VOICE: ara
       # VAD threshold do Grok Server VAD. Default original do Grok era
       # 0.5/700ms. Reduzido pra 500ms (29/04) pra reduzir lag percebido

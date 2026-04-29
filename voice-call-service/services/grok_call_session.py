@@ -69,6 +69,13 @@ class GrokCallSession:
         self.on_user_interrupt = on_user_interrupt or (lambda: None)
         self.on_call_metric = on_call_metric or (lambda _: None)
         self._sofia_speaking = False  # True quando estamos enviando audio da Sofia
+        # Recovery automático de "response.done vazio" — Grok às vezes
+        # emite response.done sem nenhum output_audio.delta no meio da
+        # conversa, deixando a Sofia "muda". Detectamos e disparamos
+        # response.create explícito pra retomar o turno.
+        self._current_response_has_audio = False
+        self._empty_response_retry_attempts = 0
+        self._max_empty_response_retries = 2  # por turno
 
         self.session_id: str | None = None
         self._ws: websockets.WebSocketClientProtocol | None = None
@@ -380,11 +387,18 @@ class GrokCallSession:
                 self._sofia_speaking = False
             return
 
+        # Início de novo turno da Sofia — reseta tracking de áudio.
+        if etype == "response.created":
+            self._current_response_has_audio = False
+            return
+
         # Áudio out (chegou da Grok) — manda pro callback (camada SIP injeta)
         if etype in ("response.output_audio.delta", "response.audio.delta"):
             delta_b64 = msg.get("delta")
             if delta_b64:
                 self._sofia_speaking = True  # Sofia está produzindo áudio
+                self._current_response_has_audio = True  # turno produziu áudio
+                self._empty_response_retry_attempts = 0  # reset budget
                 try:
                     pcm = base64.b64decode(delta_b64)
                     await self.on_audio_chunk_24k(pcm)
@@ -396,8 +410,41 @@ class GrokCallSession:
         if etype in ("response.output_audio.done", "response.audio.done",
                      "response.done"):
             self._sofia_speaking = False
+            # Recovery: response.done sem nenhum output_audio.delta = Grok
+            # ficou "muda" silenciosamente. Disparamos response.create
+            # explícito pra forçar Sofia a falar. Limite de retries por
+            # turno pra evitar loop infinito.
+            if (
+                etype == "response.done"
+                and not self._current_response_has_audio
+                and self._empty_response_retry_attempts
+                    < self._max_empty_response_retries
+            ):
+                self._empty_response_retry_attempts += 1
+                logger.warning(
+                    "empty_response_detected session_id=%s — issuing "
+                    "response.create retry %d/%d",
+                    self.session_id,
+                    self._empty_response_retry_attempts,
+                    self._max_empty_response_retries,
+                )
+                try:
+                    if self._ws:
+                        await self._ws.send(
+                            json.dumps({"type": "response.create"})
+                        )
+                except Exception as exc:
+                    logger.warning("recovery_response_create_failed: %s", exc)
+            elif (
+                etype == "response.done"
+                and not self._current_response_has_audio
+            ):
+                logger.error(
+                    "empty_response_max_retries_reached session_id=%s — "
+                    "giving up this turn",
+                    self.session_id,
+                )
             # Não retornamos aqui — outros handlers podem precisar do evento
-            # (ex: response.done usado em outro lugar)
 
         # Transcript Sofia (output)
         if etype in (
