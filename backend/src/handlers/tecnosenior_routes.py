@@ -88,6 +88,107 @@ def resolve_patient():
     })
 
 
+@bp.post("/api/integrations/tecnosenior/open-carenote")
+@require_role("super_admin", "admin_tenant")
+def open_carenote():
+    """Cria CareNote OPEN (cenário 2 — streaming).
+
+    Body: { care_event_id }
+    """
+    body = request.get_json(silent=True) or {}
+    care_event_id = body.get("care_event_id")
+    if not care_event_id:
+        return jsonify({"status": "error", "reason": "care_event_id_required"}), 400
+    svc = get_tecnosenior_sync()
+    result = svc.open_carenote_for_streaming(care_event_id)
+    return jsonify({**result, "sync_state": svc.get_sync_state(care_event_id)})
+
+
+@bp.post("/api/integrations/tecnosenior/add-addendum")
+@require_role("super_admin", "admin_tenant")
+def add_addendum():
+    """Adiciona addendum a uma CareNote OPEN.
+
+    Body: { care_event_id, content, content_resume, occurred_at?, closes? }
+    closes=true → manda status=CLOSED no addendum (fecha CareNote pai).
+    """
+    body = request.get_json(silent=True) or {}
+    care_event_id = body.get("care_event_id")
+    content = body.get("content")
+    content_resume = body.get("content_resume")
+    if not all([care_event_id, content, content_resume]):
+        return jsonify({
+            "status": "error",
+            "reason": "missing_fields",
+            "required": ["care_event_id", "content", "content_resume"],
+        }), 400
+    svc = get_tecnosenior_sync()
+    result = svc.add_addendum_to_existing(
+        care_event_id=care_event_id,
+        content=content,
+        content_resume=content_resume,
+        occurred_at=body.get("occurred_at"),
+        closes_note=bool(body.get("closes", False)),
+    )
+    return jsonify(result)
+
+
+@bp.post("/api/integrations/tecnosenior/test-streaming")
+@require_role("super_admin", "admin_tenant")
+def test_streaming():
+    """Smoke test do cenário 2 completo num único request:
+
+    1. Abre CareNote OPEN pro care_event
+    2. Manda N addendums sequenciais (cada um com pequeno delay)
+    3. Fecha com último addendum status=CLOSED
+
+    Body: { care_event_id, addendums: [{content, content_resume}], close: true }
+
+    Útil pra validar com Matheus que múltiplos addendums aparecem
+    no painel deles.
+    """
+    body = request.get_json(silent=True) or {}
+    care_event_id = body.get("care_event_id")
+    addendums = body.get("addendums") or []
+    close = body.get("close", True)
+    if not care_event_id:
+        return jsonify({"status": "error", "reason": "care_event_id_required"}), 400
+    if not addendums or not isinstance(addendums, list):
+        return jsonify({
+            "status": "error", "reason": "addendums_required_list",
+        }), 400
+
+    svc = get_tecnosenior_sync()
+    out: dict = {"steps": []}
+
+    open_res = svc.open_carenote_for_streaming(care_event_id)
+    out["steps"].append({"action": "open", **open_res})
+    if open_res.get("status") not in ("ok", "already_synced"):
+        return jsonify(out), 400
+
+    from datetime import datetime, timedelta, timezone as tz
+    base_time = datetime.now(tz.utc)
+    last_idx = len(addendums) - 1
+    for i, add in enumerate(addendums):
+        # occurred_at incrementa N segundos pra ordem visual no painel
+        occurred = (base_time + timedelta(seconds=(i + 1) * 30)).isoformat()
+        is_last_and_close = (i == last_idx) and close
+        add_res = svc.add_addendum_to_existing(
+            care_event_id=care_event_id,
+            content=add.get("content", ""),
+            content_resume=add.get("content_resume", ""),
+            occurred_at=occurred,
+            closes_note=is_last_and_close,
+        )
+        out["steps"].append({"action": f"addendum_{i+1}", **add_res})
+        if add_res.get("status") != "ok":
+            return jsonify(out), 400
+
+    out["status"] = "ok"
+    out["sync_state"] = svc.get_sync_state(care_event_id)
+    return jsonify(out)
+
+
 @bp.post("/api/integrations/tecnosenior/resolve-caretaker")
 @require_role("super_admin", "admin_tenant")
 def resolve_caretaker():
