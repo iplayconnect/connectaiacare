@@ -193,30 +193,30 @@ class SipLayer:
             on_call_state=on_call_state,
         )
         prm = pj.CallOpParam(True)
-        # Caller ID override — só no INVITE, não no REGISTER. nVoip
-        # rejeita REGISTER com idUri != user técnico, mas valida o DID
-        # como CID no INVITE outbound.
+        # Caller ID override — apenas via P-Asserted-Identity + Remote-
+        # Party-ID. NÃO mexe no From (pjsua gera ele do idUri da conta;
+        # adicionar From extra dispara 400 Bad From Header).
+        # nVoip / SBCs comerciais geralmente leem PAI pra validar a
+        # identidade declarada quando ela é diferente do auth user.
         if Config.SIP_CALLER_ID and Config.SIP_CALLER_ID != Config.SIP_USER:
-            from_header = (
-                f'"ConnectaIA Care" '
-                f'<sip:{Config.SIP_CALLER_ID}@{Config.SIP_DOMAIN}>'
-            )
             try:
-                hdr = pj.SipHeader()
-                hdr.hName = "From"
-                hdr.hValue = from_header
-                prm.txOption.headers.append(hdr)
-                # P-Asserted-Identity também — alguns SBCs (incluindo
-                # nVoip provavelmente) usam pra validar a "real identity"
-                # do chamador além do From.
                 pai = pj.SipHeader()
                 pai.hName = "P-Asserted-Identity"
                 pai.hValue = (
                     f"<sip:{Config.SIP_CALLER_ID}@{Config.SIP_DOMAIN}>"
                 )
                 prm.txOption.headers.append(pai)
+                # Remote-Party-ID (RFC 5379) — alguns SBCs preferem RPID.
+                rpid = pj.SipHeader()
+                rpid.hName = "Remote-Party-ID"
+                rpid.hValue = (
+                    f'"ConnectaIA Care" '
+                    f'<sip:{Config.SIP_CALLER_ID}@{Config.SIP_DOMAIN}>'
+                    f';party=calling;screen=yes;privacy=off'
+                )
+                prm.txOption.headers.append(rpid)
             except Exception as exc:
-                logger.warning("caller_id_header_override_failed: %s", exc)
+                logger.warning("caller_id_header_failed: %s", exc)
         call.makeCall(dest_uri, prm)
         ctx = CallContext(call_id=call_id, pj_call=call)
         self._calls[call_id] = ctx
