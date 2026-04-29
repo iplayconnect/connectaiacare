@@ -95,13 +95,13 @@ class SipLayer:
                 except Exception as exc:
                     logger.warning("set_null_dev_failed: %s", exc)
 
-                # Conta — Caller ID (From) pode ser diferente do SIP_USER.
-                # nVoip exige que From seja o Número Virtual (DID) alocado.
-                # Auth ainda é pelo SIP_USER técnico.
-                caller_id = Config.SIP_CALLER_ID or Config.SIP_USER
+                # Conta — REGISTER e auth SEMPRE com SIP_USER técnico
+                # (nVoip dá 403 Forbidden se idUri = DID diferente).
+                # Caller ID (From) será aplicado por chamada via header
+                # override no INVITE (ver dial()).
                 acc_cfg = pj.AccountConfig()
                 acc_cfg.idUri = (
-                    f'"ConnectaIA Care" <sip:{caller_id}@{Config.SIP_DOMAIN}>'
+                    f'"ConnectaIA Care" <sip:{Config.SIP_USER}@{Config.SIP_DOMAIN}>'
                 )
                 acc_cfg.regConfig.registrarUri = f"sip:{Config.SIP_DOMAIN}"
                 cred = pj.AuthCredInfo(
@@ -137,7 +137,9 @@ class SipLayer:
                 logger.info(
                     "sip_initialized user=%s caller_id=%s domain=%s "
                     "public_ip=%s rtp_range=%d-%d",
-                    Config.SIP_USER, caller_id, Config.SIP_DOMAIN,
+                    Config.SIP_USER,
+                    Config.SIP_CALLER_ID or "(=user)",
+                    Config.SIP_DOMAIN,
                     Config.PUBLIC_IP or "(auto)",
                     Config.RTP_PORT_MIN, Config.RTP_PORT_MAX,
                 )
@@ -184,7 +186,6 @@ class SipLayer:
         dest_uri = self._normalize_dest(destination)
         call_id = f"call-{len(self._calls) + 1}-{int(_time.time())}"
 
-        # TODO_SMOKE: validar que MyCall recebe corretamente os frames de áudio
         call = _MyCall(
             account=self._account,
             call_id_local=call_id,
@@ -192,10 +193,38 @@ class SipLayer:
             on_call_state=on_call_state,
         )
         prm = pj.CallOpParam(True)
+        # Caller ID override — só no INVITE, não no REGISTER. nVoip
+        # rejeita REGISTER com idUri != user técnico, mas valida o DID
+        # como CID no INVITE outbound.
+        if Config.SIP_CALLER_ID and Config.SIP_CALLER_ID != Config.SIP_USER:
+            from_header = (
+                f'"ConnectaIA Care" '
+                f'<sip:{Config.SIP_CALLER_ID}@{Config.SIP_DOMAIN}>'
+            )
+            try:
+                hdr = pj.SipHeader()
+                hdr.hName = "From"
+                hdr.hValue = from_header
+                prm.txOption.headers.append(hdr)
+                # P-Asserted-Identity também — alguns SBCs (incluindo
+                # nVoip provavelmente) usam pra validar a "real identity"
+                # do chamador além do From.
+                pai = pj.SipHeader()
+                pai.hName = "P-Asserted-Identity"
+                pai.hValue = (
+                    f"<sip:{Config.SIP_CALLER_ID}@{Config.SIP_DOMAIN}>"
+                )
+                prm.txOption.headers.append(pai)
+            except Exception as exc:
+                logger.warning("caller_id_header_override_failed: %s", exc)
         call.makeCall(dest_uri, prm)
         ctx = CallContext(call_id=call_id, pj_call=call)
         self._calls[call_id] = ctx
-        logger.info("sip_dialing call_id=%s dest=%s", call_id, dest_uri)
+        logger.info(
+            "sip_dialing call_id=%s dest=%s caller_id=%s",
+            call_id, dest_uri,
+            Config.SIP_CALLER_ID or Config.SIP_USER,
+        )
         return call_id
 
     def register_current_thread(self, label: str = "external") -> None:
