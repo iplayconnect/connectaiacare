@@ -79,16 +79,26 @@ class SipLayer:
                 ep.libCreate()
                 ep.libInit(ep_cfg)
 
-                # Transport UDP. NÃO setamos publicAddress aqui — em
-                # Docker bridge, anunciar IP público no SDP quebra
-                # ambas as direções RTP (RX 0pkts + TX peer=-). Em vez
-                # disso confiamos no Contact rewrite via REGISTER
-                # response (acc_cfg.natConfig abaixo) pra que o pjsua
-                # auto-detecte o endereço externo observado pelo
-                # registrar Flux.
+                # Transport UDP — PORTA FIXA + publicAddress.
+                # Histórico: tp_cfg.port=0 (ephemeral) fazia o pjsua
+                # anunciar Contact com porta INTERNA do container (ex:
+                # 39109), que não está mapeada externamente. Cada
+                # rebuild abria nova porta, gerando "ghost registrations"
+                # no Flux (4+ contatos simultâneos da mesma linha).
+                # Flux mandava INVITE pras portas mortas e dava timeout.
+                #
+                # Fix (29/04): porta fixa 5060 dentro do container
+                # (Docker compose mapeia 5061:5060/udp), publicAddress
+                # com PUBLIC_IP:5061 pra Contact ficar
+                # 72.60.242.245:5061 — endereço externo válido. Mesmo
+                # entre rebuilds o Contact é estável → Flux só tem 1
+                # registro ativo, INVITE inbound chega no container.
                 tp_cfg = pj.TransportConfig()
-                tp_cfg.port = 0  # bind ephemeral local pra signaling
-                tp_cfg.portRange = Config.RTP_PORT_MAX - Config.RTP_PORT_MIN
+                tp_cfg.port = Config.SIP_LISTEN_PORT  # 5060 (fixo)
+                if Config.PUBLIC_IP:
+                    tp_cfg.publicAddress = (
+                        f"{Config.PUBLIC_IP}:{Config.SIP_PUBLIC_PORT}"
+                    )
                 self._transport = ep.transportCreate(
                     pj.PJSIP_TRANSPORT_UDP, tp_cfg
                 )
@@ -167,13 +177,32 @@ class SipLayer:
                 return False
 
     def shutdown(self):
-        """Drena chamadas e fecha endpoint."""
+        """Drena chamadas, faz un-register e fecha endpoint.
+
+        Un-register explícito é crítico: sem isso, o Flux mantém o
+        REGISTER ativo até expirar (Expires=300), e o próximo
+        container que subir gera um segundo registro paralelo
+        (`ghost`). Vários ghosts simultâneos = INVITE roteado pra
+        contato morto = "linha não atende".
+        """
         with self._lock:
             if not self._initialized:
                 return
             try:
                 for ctx in list(self._calls.values()):
                     ctx.hangup()
+                # Un-register síncrono. setRegistration(False) envia
+                # REGISTER com Expires:0 e aguarda 200 OK antes de
+                # destruir a lib.
+                if self._account:
+                    try:
+                        self._account.setRegistration(False)
+                        # Pequeno delay pra REGISTER unregister sair
+                        # antes do libDestroy interromper o I/O.
+                        import time as _t
+                        _t.sleep(0.5)
+                    except Exception:
+                        logger.exception("sip_unregister_failed")
                 if self._endpoint:
                     self._endpoint.libDestroy()
             except Exception:
