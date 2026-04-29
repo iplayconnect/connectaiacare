@@ -1174,6 +1174,11 @@ export const api = {
   listPatients: () => request<{ patients: Patient[] }>("/api/patients"),
   getPatient: (id: string) =>
     request<{ patient: Patient; reports: Report[] }>(`/api/patients/${id}`),
+  patientUpdate: (id: string, body: Record<string, unknown>) =>
+    request<{ status: "ok"; patient: Patient }>(
+      `/api/patients/${id}`,
+      { method: "PATCH", body: JSON.stringify(body) },
+    ),
   listReports: (limit = 50) =>
     request<{ reports: Report[] }>(`/api/reports?limit=${limit}`),
   getReport: (id: string) => request<{ report: Report }>(`/api/reports/${id}`),
