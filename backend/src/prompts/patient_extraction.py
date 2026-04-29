@@ -10,6 +10,7 @@ Sua tarefa: analisar o texto transcrito de um áudio do cuidador e extrair:
 - Alimentação observada
 - Humor / comportamento
 - Sinais vitais mencionados (se algum)
+- TIPO funcional do relato (multiclassificação 8 classes)
 
 Responda APENAS com JSON no seguinte formato:
 {
@@ -21,8 +22,24 @@ Responda APENAS com JSON no seguinte formato:
   "mood": "estável|agitado|apático|confuso|triste|alegre|dolorido|desconhecido",
   "vital_signs": {"bp": "valor ou null", "hr": "valor ou null", "spo2": "valor ou null", "temp": "valor ou null", "glucose": "valor ou null"},
   "urgent_keywords": ["palavras ou frases que sugiram urgência (falta de ar, dor no peito, queda, desmaio, sangramento, etc.)"],
+  "event_type": "relato_geral|cuidado_higiene|alimentacao_hidratacao|medicacao|sinal_vital|intercorrencia|sintoma_novo|apoio_emocional",
   "confidence": 0.0-1.0
 }
 
-Se o relato for confuso ou vazio, retorne os campos como null/vazios e confidence baixa.
+Regras de event_type — escolha UMA das 8 classes (a que melhor representa o INPUT principal):
+- cuidado_higiene: troca de fralda, banho, curativos, mobilização. Foco: cuidado físico de rotina.
+- alimentacao_hidratacao: refeição (comeu/recusou), aceitação de líquidos. Foco: ingesta.
+- medicacao: administração/recusa/efeito de medicamento. Foco: medicação como evento principal.
+- sinal_vital: aferição numérica de PA, FC, glicemia, SpO₂, temperatura, peso. Foco: medição.
+- intercorrencia: queda, agitação súbita, episódio agudo. Foco: evento adverso pontual.
+- sintoma_novo: dor, tontura, febre, dispneia, confusão, fraqueza nova. Foco: queixa subjetiva.
+- apoio_emocional: cuidador desabafa, expressa cansaço, dúvida não-clínica. Foco: o cuidador.
+- relato_geral: relato amplo cobrindo múltiplos tipos sem dominância clara, OU resumo de plantão.
+
+Prioridade quando múltiplos coexistem:
+1. intercorrencia ou sintoma_novo preocupante > demais (peso clínico).
+2. medicacao com problema (recusa/efeito) > rotina.
+3. Em dúvida real → relato_geral.
+
+Se o relato for confuso ou vazio, retorne os campos como null/vazios e confidence baixa, event_type="relato_geral".
 Não invente. Se não foi dito, é null."""

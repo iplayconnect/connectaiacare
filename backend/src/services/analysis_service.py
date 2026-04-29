@@ -25,6 +25,19 @@ logger = get_logger(__name__)
 
 ALLOWED_CLASSIFICATIONS = {"routine", "attention", "urgent", "critical"}
 
+# Multiclassificação funcional do INPUT — taxonomia fixa de 8 classes
+# (decidida em panel LLM, taxonomia Grok). Independente de severity acima.
+ALLOWED_EVENT_TYPES = {
+    "relato_geral",          # default fallback
+    "cuidado_higiene",       # banho, fralda, curativos, mobilização
+    "alimentacao_hidratacao",# refeição, recusa alimentar, hidratação
+    "medicacao",             # administração, recusa, efeito, dose
+    "sinal_vital",           # PA/FC/glicemia/SpO2/temp/peso
+    "intercorrencia",        # queda, agitação súbita, episódio agudo
+    "sintoma_novo",          # dor, tontura, dispneia, confusão (queixa)
+    "apoio_emocional",       # desabafo cuidador, dúvida não-clínica
+}
+
 # Palavras-gatilho de emergência — se aparecerem na transcrição e o LLM classificar
 # como routine/attention, forçamos escalação com alerta adicional.
 # Match considera variações morfológicas (regex word boundary case-insensitive).
@@ -61,17 +74,35 @@ class AnalysisService:
 
     def extract_entities(self, transcription: str) -> dict[str, Any]:
         if not transcription.strip():
-            return {"patient_name_mentioned": None, "confidence": 0.0}
+            return {
+                "patient_name_mentioned": None, "confidence": 0.0,
+                "event_type": "relato_geral",
+            }
         try:
             # ADR-025: task='intent_classifier' → GPT-5.4 nano (barato, rápido)
-            return self.router.complete_json(
+            result = self.router.complete_json(
                 task="intent_classifier",
                 system=EXTRACTION_SYSTEM,
                 user=f"Transcrição do áudio do cuidador:\n\n{transcription}",
             )
+            # Valida event_type contra taxonomia fixa de 8 classes; inválido
+            # ou ausente → relato_geral (fallback seguro).
+            evt = result.get("event_type") if isinstance(result, dict) else None
+            if evt not in ALLOWED_EVENT_TYPES:
+                if evt:
+                    logger.warning(
+                        "invalid_event_type_extracted",
+                        original=evt, forced="relato_geral",
+                    )
+                if isinstance(result, dict):
+                    result["event_type"] = "relato_geral"
+            return result
         except Exception as exc:
             logger.error("entity_extraction_failed", error=str(exc))
-            return {"patient_name_mentioned": None, "confidence": 0.0, "error": str(exc)}
+            return {
+                "patient_name_mentioned": None, "confidence": 0.0,
+                "event_type": "relato_geral", "error": str(exc),
+            }
 
     def analyze(
         self,
@@ -186,6 +217,15 @@ class AnalysisService:
             )
             classification = "attention"
             result["classification"] = classification
+
+        # event_type (multiclassificação funcional, 8 classes fixas)
+        event_type = result.get("event_type", "relato_geral")
+        if event_type not in ALLOWED_EVENT_TYPES:
+            logger.warning(
+                "invalid_event_type_forced", original=event_type, forced="relato_geral"
+            )
+            event_type = "relato_geral"
+            result["event_type"] = event_type
 
         # Detecção de keyword de emergência
         trans_lower = (transcription or "").lower()

@@ -155,11 +155,12 @@ services:
       XAI_API_KEY: ${XAI_API_KEY:-}
       SOFIA_GROK_VOICE_MODEL: grok-voice-think-fast-1.0
       SOFIA_GROK_VOICE: ara
-      # VAD threshold do Grok Server VAD. Default original do Grok
-      # (0.5 / 700ms). Mexer só se VAD não disparar consistentemente.
-      # Override via env se precisar abaixar.
+      # VAD threshold do Grok Server VAD. Default original do Grok era
+      # 0.5/700ms. Reduzido pra 500ms (29/04) pra reduzir lag percebido
+      # entre cuidador parar de falar e Sofia responder. Threshold 0.5
+      # mantido — não houve queixa de corte de fala.
       GROK_VAD_THRESHOLD: ${GROK_VAD_THRESHOLD:-0.5}
-      GROK_VAD_SILENCE_DURATION_MS: ${GROK_VAD_SILENCE_DURATION_MS:-700}
+      GROK_VAD_SILENCE_DURATION_MS: ${GROK_VAD_SILENCE_DURATION_MS:-500}
       # Delay (ms) antes da Sofia falar a saudação ao atender. Default
       # 1500ms = ~1.5s — evita atropelar paciente que diz "alô" e dá
       # tempo do canal de áudio "abrir" em algumas operadoras. 0

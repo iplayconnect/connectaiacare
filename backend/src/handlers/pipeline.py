@@ -540,10 +540,17 @@ class EldercarePipeline:
         # Tags derivadas do relato (input pro pattern detection)
         event_tags = self._derive_tags(transcription, entities)
 
+        # event_type: multiclassificação funcional (8 classes fixas).
+        # Vem do clinical_analysis (LLM) via entities.event_type. Fallback
+        # pro primeiro tag heurístico se LLM não classificou.
+        event_type = (entities or {}).get("event_type") if isinstance(entities, dict) else None
+        if not event_type:
+            event_type = event_tags[0] if event_tags else "relato_geral"
+
         # Abre evento
         event = self.events.open(
             tenant_id=tenant, patient_id=patient_id, caregiver_phone=phone,
-            event_type=event_tags[0] if event_tags else None,
+            event_type=event_type,
             event_tags=event_tags, initial_report_id=str(report_id),
             initial_transcript=transcription,
         )
