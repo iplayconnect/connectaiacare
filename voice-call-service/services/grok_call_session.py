@@ -520,23 +520,31 @@ class GrokCallSession:
         # Sem isso, paciente fica falando por cima da Sofia que continua
         # rodando audio bufferizado.
         if etype == "input_audio_buffer.speech_started":
-            if self._sofia_speaking:
-                logger.info(
-                    "user_interrupted session_id=%s — draining + cancelling",
-                    self.session_id,
-                )
-                # Drain SIP buffer (cross-thread: sync call ok)
-                try:
-                    self.on_user_interrupt()
-                except Exception as exc:
-                    logger.warning("on_user_interrupt_failed: %s", exc)
-                # Cancela geração da Grok
-                try:
-                    if self._ws:
-                        await self._ws.send(json.dumps({"type": "response.cancel"}))
-                except Exception as exc:
-                    logger.warning("response_cancel_failed: %s", exc)
-                self._sofia_speaking = False
+            # Interrupt agressivo: SEMPRE drena buffer e cancela response
+            # quando user começa a falar — independente do flag
+            # _sofia_speaking. Antes condicionava em _sofia_speaking, mas
+            # o flag fica False quando Sofia está PROCESSANDO/THINKING
+            # (pré-áudio). Resultado: usuário pedia "para" e Sofia
+            # continuava no fluxo. Agora qualquer fala do user mata o
+            # turn em curso da Sofia.
+            logger.info(
+                "user_speech_started session_id=%s sofia_speaking=%s — "
+                "draining + cancelling",
+                self.session_id, self._sofia_speaking,
+            )
+            try:
+                self.on_user_interrupt()
+            except Exception as exc:
+                logger.warning("on_user_interrupt_failed: %s", exc)
+            try:
+                if self._ws:
+                    await self._ws.send(json.dumps({"type": "response.cancel"}))
+            except Exception as exc:
+                logger.warning("response_cancel_failed: %s", exc)
+            self._sofia_speaking = False
+            # Reset flags de retry — novo turno do usuário começa fresh
+            self._empty_response_retry_attempts = 0
+            self._current_response_has_audio = False
             return
 
         # Início de novo turno da Sofia — reseta tracking de áudio.

@@ -239,7 +239,18 @@ def build_persona_prompt(persona_ctx: dict) -> str:
     base = (
         "Você é a Sofia, assistente da ConnectaIACare. Tom natural, caloroso, "
         "frases curtas. Não diagnostica nem prescreve — apoia profissionais "
-        "e cuidadores."
+        "e cuidadores.\n\n"
+        "REGRAS DE VOZ — NUNCA QUEBRE:\n"
+        "- NUNCA fale em voz alta IDs UUID (ex: c036086a-b4f3-4d8b-baac-...).\n"
+        "- NUNCA fale identificadores numéricos longos do sistema, "
+        "  códigos internos, hashes ou tokens.\n"
+        "- Use SEMPRE o nome humano do paciente / cuidador / unidade. "
+        "  Se a tool retornar id e nome, fale só o nome.\n"
+        "- Quando precisar confirmar identidade do paciente, use "
+        "  nome + nickname + quarto (se houver), nunca o id.\n"
+        "- Se houver ambiguidade entre dois pacientes com mesmo nome, "
+        "  diferencie por características externas (idade, quarto, "
+        "  unidade, condição), nunca por id."
     )
 
     role_line = {
@@ -706,26 +717,41 @@ def _tool_list_medication_schedules(
 def _tool_get_patient_vitals(
     *, persona_ctx: dict, patient_id: str | None = None, days: int = 7, **_: Any,
 ) -> dict:
+    """Sinais vitais do paciente nos últimos N dias.
+    Schema: aia_health_vital_signs com vital_type categórico
+    (PA, FC, SpO2, glicemia, temp, peso) + value_numeric +
+    value_secondary (PA diastólica) + unit + status.
+    """
     pid = patient_id or persona_ctx.get("patient_id")
     if not pid:
         return {"ok": False, "error": "no_patient"}
     days = max(1, min(int(days or 7), 90))
-    with _cursor(commit=False) as cur:
-        cur.execute(
-            """SELECT measured_at, bp_systolic, bp_diastolic, heart_rate,
-                      respiratory_rate, oxygen_saturation, temperature_c,
-                      blood_glucose, notes
-               FROM aia_health_vital_measurements
-               WHERE patient_id = %s
-                 AND measured_at > NOW() - INTERVAL '%s days'
-               ORDER BY measured_at DESC LIMIT 30""",
-            (pid, days),
-        )
-        rows = [dict(r) for r in cur.fetchall()]
+    rows = _fetch_all(
+        """SELECT vital_type, value_numeric, value_secondary, unit,
+                  status, measured_at, notes
+           FROM aia_health_vital_signs
+           WHERE patient_id = %s
+             AND measured_at > NOW() - (%s || ' days')::interval
+           ORDER BY measured_at DESC
+           LIMIT 50""",
+        (pid, str(days)),
+    )
     for r in rows:
-        if r.get("measured_at"):
-            r["measured_at"] = r["measured_at"].isoformat()
-    return {"ok": True, "patient_id": str(pid), "days": days, "count": len(rows), "vitals": rows}
+        v = r.get("measured_at")
+        if v and hasattr(v, "isoformat"):
+            r["measured_at"] = v.isoformat()
+        # numeric → float pra Sofia narrar mais fácil
+        for k in ("value_numeric", "value_secondary"):
+            val = r.get(k)
+            if val is not None:
+                try:
+                    r[k] = float(val)
+                except Exception:
+                    pass
+    return {
+        "ok": True, "patient_id": str(pid), "days": days,
+        "count": len(rows), "vitals": rows,
+    }
 
 
 def _tool_schedule_teleconsulta(
