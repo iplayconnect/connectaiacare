@@ -502,18 +502,79 @@ def _tool_search_patients(
     if len(q) < 2:
         return {"ok": False, "error": "query_too_short"}
     limit = max(1, min(int(limit or 5), 25))
+
+    # Acento-insensitive: Whisper transcreve com acento ("Antônia"),
+    # DB armazena sem acento ("Antonia"). ILIKE é acento sensitive
+    # no Postgres default. Strip acentos da query (e da coluna via
+    # unaccent extension se disponível, senão lower simples).
+    import unicodedata
+    def _strip_accents(s: str) -> str:
+        return "".join(
+            c for c in unicodedata.normalize("NFD", s)
+            if unicodedata.category(c) != "Mn"
+        )
+    q = _strip_accents(q)
+    # Limpeza/expansão da query — Sofia frequentemente passa frases
+    # contendo idade, quarto, palavras irrelevantes (ex: "Antonia
+    # Ferreira Lima 92", "quarto 08", "Sr Armindo, idoso"). Extraímos:
+    #   - room_number: dígitos isolados ou após "quarto"
+    #   - clean_name: query sem dígitos, palavras tipo "quarto/anos/idade",
+    #     pronome de tratamento (Sr/Sra/Dona)
+    import re
+    q_norm = q.lower().strip()
+    room_match = re.search(r"\bquarto\s+(\d+\w*)", q_norm) or re.search(r"\b(\d{1,4})\b", q_norm)
+    room_number = room_match.group(1) if room_match else None
+    clean_name = re.sub(
+        r"\b(quarto|anos?|idoso|idosa|sr|sra|sra\.|sr\.|dona|seu|paciente|idade|de)\b",
+        " ", q_norm,
+    )
+    clean_name = re.sub(r"\d+", " ", clean_name)         # remove números
+    clean_name = re.sub(r"\s+", " ", clean_name).strip() # normaliza spaces
+    if not clean_name:
+        clean_name = q  # fallback
+
+    # Pega primeiro nome relevante (1ª palavra ≥3 chars)
+    first_token = next(
+        (w for w in clean_name.split() if len(w) >= 3),
+        clean_name,
+    )
+
     rows = _fetch_all(
         """
-        SELECT id::text AS id, full_name, nickname, room_number, care_unit
+        SELECT DISTINCT id::text AS id, full_name, nickname, room_number, care_unit,
+               GREATEST(
+                   COALESCE(similarity(full_name, %s), 0),
+                   COALESCE(similarity(coalesce(nickname,''), %s), 0)
+               ) AS score
         FROM aia_health_patients
         WHERE active = TRUE
-          AND (full_name ILIKE %s OR nickname ILIKE %s)
-        ORDER BY similarity(full_name, %s) DESC NULLS LAST, full_name
+          AND (
+              full_name ILIKE %s
+              OR nickname ILIKE %s
+              OR full_name ILIKE %s
+              OR nickname ILIKE %s
+              OR room_number = %s
+              OR care_unit ILIKE %s
+          )
+        ORDER BY score DESC NULLS LAST, full_name
         LIMIT %s
         """,
-        (f"%{q}%", f"%{q}%", q, limit),
+        (
+            clean_name, clean_name,
+            f"%{clean_name}%", f"%{clean_name}%",  # busca clean
+            f"%{first_token}%", f"%{first_token}%",  # fallback primeiro token
+            room_number,
+            f"%{clean_name}%",
+            limit,
+        ),
     )
-    return {"ok": True, "count": len(rows), "patients": rows}
+    # Remove score do output (campo interno)
+    for r in rows:
+        r.pop("score", None)
+    return {
+        "ok": True, "count": len(rows), "patients": rows,
+        "_debug": {"clean_name": clean_name, "first_token": first_token, "room_number": room_number},
+    }
 
 
 def _tool_read_care_event_history(
