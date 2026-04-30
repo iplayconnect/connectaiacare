@@ -509,3 +509,51 @@ def execute_pending_timeouts() -> int:
              AND severity != 'critical'"""
     )
     return executed
+
+
+# ─────────────────────── Helper enfileirar revisão direta ──────────────────────
+
+def enqueue_action_for_review(
+    *,
+    tenant_id: str,
+    patient_id: str | None,
+    action_type: str,
+    severity: str,
+    payload: dict,
+    summary: str | None = None,
+) -> dict:
+    """Wrapper simples pra enfileirar item de revisão sem passar pelo
+    route_action completo. Útil quando o pipeline já decidiu que é
+    revisão (ex: classification_failed) e não precisa do raciocínio
+    de roteamento.
+    """
+    if severity not in {"routine", "attention", "urgent", "critical"}:
+        severity = "attention"
+    summary_final = summary or (
+        f"Ação '{action_type}' enfileirada pra revisão "
+        f"({payload.get('failure_reason') or 'human_review_required'})"
+    )
+    queue_row = get_postgres().insert_returning(
+        """INSERT INTO aia_health_action_review_queue
+            (tenant_id, patient_id, action_type, severity, summary, details)
+        VALUES (%s, %s, %s, %s, %s, %s)
+        RETURNING id""",
+        (
+            tenant_id, patient_id, action_type, severity,
+            summary_final, json.dumps(payload or {}),
+        ),
+    )
+    queue_id = queue_row["id"] if queue_row else None
+    audit_log(
+        action="guardrail.action.queued_direct",
+        tenant_id=tenant_id,
+        resource_type="patient",
+        resource_id=str(patient_id) if patient_id else None,
+        payload={
+            "queue_id": str(queue_id) if queue_id else None,
+            "action_type": action_type,
+            "severity": severity,
+            "summary": summary_final[:200],
+        },
+    )
+    return {"queue_id": str(queue_id) if queue_id else None}
