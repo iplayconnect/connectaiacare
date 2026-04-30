@@ -52,6 +52,23 @@ export const CLASSIFICATION_COLORS: Record<string, string> = {
   critical: "badge-critical",
 };
 
+/**
+ * Formata valor numérico (string ou number) removendo zeros decimais
+ * desnecessários. Ex: "500.0000" → "500", "1.2500" → "1,25", "2.5" → "2,5".
+ *
+ * Usa vírgula como separador decimal (padrão BR). Mantém só dígitos
+ * significativos. Trata null/undefined/NaN devolvendo "?".
+ */
+export function formatNumber(
+  value: string | number | null | undefined,
+): string {
+  if (value === null || value === undefined || value === "") return "?";
+  const n = typeof value === "string" ? parseFloat(value) : value;
+  if (!Number.isFinite(n)) return "?";
+  // toString() de Number já remove zeros à direita: 500.0000 → 500
+  return n.toString().replace(".", ",");
+}
+
 export function classificationTone(classification?: string | null): string {
   switch (classification) {
     case "critical":

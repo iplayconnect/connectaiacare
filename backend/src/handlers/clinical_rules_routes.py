@@ -701,7 +701,11 @@ def approve_pending_review(slug: str, row_id: str):
         f"RETURNING {meta['id_column']}"
     )
     params = extra_params + notes_params + (row_id,)
-    row = get_postgres().fetch_one(sql, params)
+    # IMPORTANTE: usar insert_returning (commit=True) ao invés de
+    # fetch_one (commit=False). UPDATE com RETURNING via fetch_one
+    # rollbacka no fim do contexto — bug histórico que mantinha rows
+    # como auto_pending mesmo após "aprovar" (Henrique 29/04).
+    row = get_postgres().insert_returning(sql, params)
     if not row:
         return jsonify({
             "status": "error",
@@ -739,7 +743,8 @@ def reject_pending_review(slug: str, row_id: str):
             "status": "error", "reason": "rejection_reason_required",
         }), 400
 
-    row = get_postgres().fetch_one(
+    # insert_returning faz commit (fetch_one rollbacka — ver fix em approve)
+    row = get_postgres().insert_returning(
         f"UPDATE {meta['table']} SET active = FALSE "
         f"WHERE {meta['id_column']} = %s AND review_status = 'auto_pending' "
         f"RETURNING {meta['id_column']}",
