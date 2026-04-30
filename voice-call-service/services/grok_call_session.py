@@ -628,6 +628,22 @@ def _build_tools_for_call(
         },
         {
             "type": "function",
+            "name": "read_care_event_history",
+            "description": "Lista os ÚLTIMOS RELATOS/eventos clínicos de um paciente. USE quando perguntarem 'como ele tem evoluído', 'quais os últimos relatos', 'situação recente'. Retorna eventos com classification, summary, event_type, opened_at.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "patient_id": {"type": "string"},
+                    "limit": {
+                        "type": "integer",
+                        "description": "Quantos relatos retornar. Padrão 10. Max 50.",
+                    },
+                },
+                "required": ["patient_id"],
+            },
+        },
+        {
+            "type": "function",
             "name": "list_medication_schedules",
             "description": "Lista medicações ativas do paciente (nome, dose, horários, with_food, warnings). Use quando alguém perguntar 'que remédios ele toma?'.",
             "parameters": {

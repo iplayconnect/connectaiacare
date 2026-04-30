@@ -326,6 +326,7 @@ def update_user_memory_force(user_id: str | None) -> None:
 _LOCAL_TOOLS = {
     "search_patients": "_tool_search_patients",
     "get_patient_summary": "_tool_get_patient_summary",
+    "read_care_event_history": "_tool_read_care_event_history",
     "create_care_event": "_tool_create_care_event",
     "schedule_teleconsulta": "_tool_schedule_teleconsulta",
     "list_medication_schedules": "_tool_list_medication_schedules",
@@ -513,6 +514,44 @@ def _tool_search_patients(
         (f"%{q}%", f"%{q}%", q, limit),
     )
     return {"ok": True, "count": len(rows), "patients": rows}
+
+
+def _tool_read_care_event_history(
+    *, persona_ctx: dict, patient_id: str | None = None,
+    limit: int = 10, **_: Any,
+) -> dict:
+    """Lista últimos N relatos/eventos de um paciente.
+    Usado pela Sofia quando alguém pergunta "quais foram os últimos
+    relatos sobre paciente X" ou "como ele tem evoluído".
+    """
+    persona = persona_ctx.get("persona") or ""
+    if persona not in (
+        "medico", "enfermeiro", "admin_tenant", "super_admin",
+        "familia", "cuidador_pro", "parceiro",
+    ):
+        return {"ok": False, "error": "persona_cannot_read_history"}
+    pid = patient_id or persona_ctx.get("patient_id")
+    if not pid:
+        return {"ok": False, "error": "no_patient_id"}
+    limit = max(1, min(int(limit or 10), 50))
+    rows = _fetch_all(
+        """
+        SELECT id::text AS id, classification, status, summary,
+               event_type, opened_at, resolved_at, closed_reason
+        FROM aia_health_care_events
+        WHERE patient_id = %s
+        ORDER BY opened_at DESC
+        LIMIT %s
+        """,
+        (pid, limit),
+    )
+    # Serializa timestamps
+    for r in rows:
+        for k in ("opened_at", "resolved_at"):
+            v = r.get(k)
+            if v and hasattr(v, "isoformat"):
+                r[k] = v.isoformat()
+    return {"ok": True, "count": len(rows), "events": rows}
 
 
 def _tool_get_patient_summary(*, persona_ctx: dict, patient_id: str | None = None, **_: Any) -> dict:
