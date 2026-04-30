@@ -532,7 +532,35 @@ class GrokCallSession:
     async def _execute_tool(self, call_id: str, name: str, args: dict) -> None:
         from services.persistence import execute_voice_tool
         self._tool_calls += 1
-        output = execute_voice_tool(name, args, self.persona_ctx)
+        logger.info(
+            "tool_call_received name=%s args=%s session=%s",
+            name, json.dumps(args)[:300], self.session_id,
+        )
+        try:
+            output = execute_voice_tool(name, args, self.persona_ctx)
+        except Exception as exc:
+            logger.exception("tool_execution_threw name=%s", name)
+            output = {
+                "ok": False,
+                "error": "tool_exception",
+                "detail": str(exc)[:200],
+                "_message_for_sofia": (
+                    "Tive um problema técnico tentando buscar essa "
+                    "informação agora. Posso tentar de novo ou "
+                    "você prefere que eu use outra abordagem?"
+                ),
+            }
+        logger.info(
+            "tool_call_output name=%s ok=%s preview=%s",
+            name,
+            (output or {}).get("ok") if isinstance(output, dict) else None,
+            json.dumps(output)[:300] if output else None,
+        )
+        # Reset tracking de áudio antes do próximo response — recovery
+        # cobre o caso de Grok não responder após function_call_output
+        # (sintoma observado: response.create não dispara response.created
+        # nem audio.delta após algumas tool calls).
+        self._current_response_has_audio = False
         await self._ws.send(json.dumps({
             "type": "conversation.item.create",
             "item": {
