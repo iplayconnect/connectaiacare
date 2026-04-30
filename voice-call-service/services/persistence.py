@@ -502,6 +502,18 @@ def _tool_search_patients(
     if len(q) < 2:
         return {"ok": False, "error": "query_too_short"}
     limit = max(1, min(int(limit or 5), 25))
+
+    # Acento-insensitive: Whisper transcreve com acento ("Antônia"),
+    # DB armazena sem acento ("Antonia"). ILIKE é acento sensitive
+    # no Postgres default. Strip acentos da query (e da coluna via
+    # unaccent extension se disponível, senão lower simples).
+    import unicodedata
+    def _strip_accents(s: str) -> str:
+        return "".join(
+            c for c in unicodedata.normalize("NFD", s)
+            if unicodedata.category(c) != "Mn"
+        )
+    q = _strip_accents(q)
     # Limpeza/expansão da query — Sofia frequentemente passa frases
     # contendo idade, quarto, palavras irrelevantes (ex: "Antonia
     # Ferreira Lima 92", "quarto 08", "Sr Armindo, idoso"). Extraímos:
