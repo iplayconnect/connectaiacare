@@ -536,8 +536,16 @@ class GrokCallSession:
             "tool_call_received name=%s args=%s session=%s",
             name, json.dumps(args)[:300], self.session_id,
         )
+        # IMPORTANTE: execute_voice_tool é função SÍNCRONA (DB queries
+        # via psycopg2 sync, HTTP via httpx sync). Chamar direto de
+        # coroutine bloqueia o asyncio loop inteiro — Grok WS para
+        # de receber pings e response.create não funciona, deixando
+        # Sofia "muda" após cada tool call. Fix: rodar em thread
+        # separada via asyncio.to_thread pra liberar o loop.
         try:
-            output = execute_voice_tool(name, args, self.persona_ctx)
+            output = await asyncio.to_thread(
+                execute_voice_tool, name, args, self.persona_ctx,
+            )
         except Exception as exc:
             logger.exception("tool_execution_threw name=%s", name)
             output = {
