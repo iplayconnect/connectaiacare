@@ -55,9 +55,27 @@ def load_corpus(path: str) -> list[dict]:
     return items
 
 
-def run_analyzer(transcript: str) -> dict:
-    """Chama o analyzer real (extract_entities). Retorna dict com event_type."""
+def run_analyzer(transcript: str, *, mode: str = "tier1") -> dict:
+    """Chama o classificador real. Retorna dict com event_type.
+
+    mode='tier1': só extract_entities (T1 puro, rápido — qualidade do
+        classificador isolado).
+    mode='cascade': CascadeClassifier completo (T1→T2→T3 conforme
+        severity/discordância — comportamento real de produção).
+    """
     _setup_path()
+    if mode == "cascade":
+        from src.services.cascade_classifier import CascadeClassifier
+        cc = CascadeClassifier()
+        decision = cc.classify(transcript=transcript)
+        return {
+            "event_type": decision.final_event_type,
+            "_decided_by": decision.final_decided_by,
+            "_t2_triggered": decision.tier2.triggered,
+            "_t3_triggered": decision.tier3.triggered,
+            "_total_elapsed_ms": decision.total_elapsed_ms,
+        }
+    # tier1 default
     from src.services.analysis_service import get_analysis_service
     svc = get_analysis_service()
     result = svc.extract_entities(transcript)
@@ -152,26 +170,47 @@ def main():
     parser.add_argument("--corpus", default=DEFAULT_CORPUS)
     parser.add_argument("--threshold", type=float, default=F1_MACRO_THRESHOLD)
     parser.add_argument("--save", action="store_true", help="salva resultado em results/")
+    parser.add_argument(
+        "--mode", choices=["tier1", "cascade"], default="tier1",
+        help="tier1=extract_entities puro (qualidade modelo); "
+             "cascade=CascadeClassifier full (comportamento prod)",
+    )
     args = parser.parse_args()
 
     corpus = load_corpus(args.corpus)
     print(f"Loaded {len(corpus)} items from {args.corpus}", file=sys.stderr)
 
     predictions: list[dict] = []
+    cascade_stats = {"tier1_only": 0, "tier2_triggered": 0, "tier3_triggered": 0}
     started = time.time()
     for i, item in enumerate(corpus, 1):
         try:
-            result = run_analyzer(item["transcript"])
+            result = run_analyzer(item["transcript"], mode=args.mode)
             predicted = result.get("event_type")
+            if args.mode == "cascade":
+                if result.get("_t3_triggered"):
+                    cascade_stats["tier3_triggered"] += 1
+                elif result.get("_t2_triggered"):
+                    cascade_stats["tier2_triggered"] += 1
+                else:
+                    cascade_stats["tier1_only"] += 1
         except Exception as exc:
             print(f"  [{i}/{len(corpus)}] {item['id']} ERROR: {exc}", file=sys.stderr)
             predicted = None
+            result = {}
         else:
             ok = "✓" if predicted == item["expected_event_type"] else "✗"
+            extra = ""
+            if args.mode == "cascade":
+                extra = (
+                    f" [decided_by={result.get('_decided_by')} "
+                    f"t2={result.get('_t2_triggered')} "
+                    f"t3={result.get('_t3_triggered')}]"
+                )
             print(
                 f"  [{i}/{len(corpus)}] {ok} {item['id']}: "
                 f"expected={item['expected_event_type']} "
-                f"predicted={predicted}",
+                f"predicted={predicted}{extra}",
                 file=sys.stderr,
             )
 
@@ -180,12 +219,29 @@ def main():
             "expected": item["expected_event_type"],
             "predicted": predicted,
             "difficulty": item.get("difficulty"),
+            "decided_by": result.get("_decided_by") if args.mode == "cascade" else None,
+            "t2_triggered": bool(result.get("_t2_triggered")) if args.mode == "cascade" else None,
+            "t3_triggered": bool(result.get("_t3_triggered")) if args.mode == "cascade" else None,
         })
 
     elapsed = time.time() - started
     metrics = compute_metrics(predictions)
+    if args.mode == "cascade":
+        metrics["cascade_stats"] = cascade_stats
 
     print(render_markdown(metrics, predictions, elapsed))
+    if args.mode == "cascade":
+        total = sum(cascade_stats.values())
+        if total > 0:
+            print(
+                f"\n## Cascade tier breakdown\n"
+                f"- T1 only (rotina/attention): {cascade_stats['tier1_only']} "
+                f"({100*cascade_stats['tier1_only']/total:.1f}%)\n"
+                f"- T2 triggered (urgent/critical): {cascade_stats['tier2_triggered']} "
+                f"({100*cascade_stats['tier2_triggered']/total:.1f}%)\n"
+                f"- T3 judge invoked (disagreement): {cascade_stats['tier3_triggered']} "
+                f"({100*cascade_stats['tier3_triggered']/total:.1f}%)"
+            )
 
     if args.save:
         results_dir = Path(args.corpus).resolve().parent.parent / "results"

@@ -23,6 +23,7 @@ from src.handlers.profiles_routes import bp as profiles_bp
 from src.handlers.routes import bp as api_bp
 from src.handlers.shifts_routes import bp as shifts_bp
 from src.handlers.sofia_routes import bp as sofia_bp
+from src.handlers.synthetic_tests_routes import bp as synthetic_tests_bp
 from src.handlers.tecnosenior_routes import bp as tecnosenior_bp
 from src.handlers.teleconsulta_routes import bp as teleconsulta_bp
 from src.handlers.users_routes import bp as users_bp
@@ -83,6 +84,7 @@ def create_app() -> Flask:
     app.register_blueprint(safety_bp)
     app.register_blueprint(proactive_caller_bp)
     app.register_blueprint(shifts_bp)
+    app.register_blueprint(synthetic_tests_bp)
     app.register_blueprint(tecnosenior_bp)
 
     # JWT middleware: protege /api/* exceto rotas públicas (auth, webhook,

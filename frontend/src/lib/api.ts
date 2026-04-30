@@ -1589,6 +1589,10 @@ export const api = {
       `/api/proactive-caller/patient/${patientId}/settings`,
       { method: "PATCH", body: JSON.stringify(payload) },
     ),
+
+  // ─── Testes sintéticos (admin) ───
+  request: <T = unknown>(path: string, init?: RequestInit) =>
+    request<T>(path, init),
 };
 
 // ============================================================
