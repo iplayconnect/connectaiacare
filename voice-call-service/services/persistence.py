@@ -536,8 +536,9 @@ def _tool_read_care_event_history(
     limit = max(1, min(int(limit or 10), 50))
     rows = _fetch_all(
         """
-        SELECT id::text AS id, classification, status, summary,
-               event_type, opened_at, resolved_at, closed_reason
+        SELECT id::text AS id, current_classification AS classification,
+               status, summary, event_type,
+               opened_at, resolved_at, closed_reason
         FROM aia_health_care_events
         WHERE patient_id = %s
         ORDER BY opened_at DESC
