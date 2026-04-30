@@ -178,6 +178,11 @@ class GrokCallSession:
                 extra_headers=[("Authorization", f"Bearer {Config.XAI_API_KEY}")],
                 **connect_kwargs,
             )
+        try:
+            from services.metrics import metrics as _m
+            _m.grok_ws_connected.inc()
+        except Exception:
+            pass
 
         # session.update — mesma config validada com browser
         first_name = (
@@ -353,6 +358,11 @@ class GrokCallSession:
         if self._ws:
             try:
                 await self._ws.close()
+            except Exception:
+                pass
+            try:
+                from services.metrics import metrics as _m
+                _m.grok_ws_connected.dec()
             except Exception:
                 pass
 
@@ -542,6 +552,11 @@ class GrokCallSession:
             except Exception as exc:
                 logger.warning("on_user_interrupt_failed: %s", exc)
             try:
+                from services.metrics import metrics as _m
+                _m.interrupts.inc()
+            except Exception:
+                pass
+            try:
                 if self._ws:
                     await self._ws.send(json.dumps({"type": "response.cancel"}))
             except Exception as exc:
@@ -715,6 +730,10 @@ class GrokCallSession:
 
     async def _execute_tool(self, call_id: str, name: str, args: dict) -> None:
         from services.persistence import execute_voice_tool
+        try:
+            from services.metrics import metrics as _m
+        except Exception:
+            _m = None
         self._tool_calls += 1
         logger.info(
             "tool_call_received name=%s args=%s session=%s",
@@ -726,6 +745,8 @@ class GrokCallSession:
         # de receber pings e response.create não funciona, deixando
         # Sofia "muda" após cada tool call. Fix: rodar em thread
         # separada via asyncio.to_thread pra liberar o loop.
+        import time as _time
+        _start = _time.monotonic()
         try:
             # Timeout 8s — acima disso WS Grok perde keepalive (default
             # ping interval do servidor) e mata sessão. Tool DB normal
@@ -765,6 +786,19 @@ class GrokCallSession:
             (output or {}).get("ok") if isinstance(output, dict) else None,
             json.dumps(output)[:300] if output else None,
         )
+        # Métricas: latência + counter por (name, ok)
+        if _m is not None:
+            _ok = bool(isinstance(output, dict) and output.get("ok") is True)
+            try:
+                _m.tool_latency.labels(name=name).observe(_time.monotonic() - _start)
+                _m.tool_executions.labels(name=name, ok=str(_ok).lower()).inc()
+                if name == "dial_phone":
+                    sc = (args or {}).get("scenario_code") or "unknown"
+                    _m.calls_origin_total.labels(
+                        scenario_code=sc, ok=str(_ok).lower(),
+                    ).inc()
+            except Exception:
+                pass
         # Marca: tool válida (ok=True) ocorreu neste turno → Sofia pode
         # narrar dados clínicos no transcript que vai pro active_context.
         # Se ok=False (timeout, erro, handler missing), NÃO marca —

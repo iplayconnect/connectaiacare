@@ -30,6 +30,7 @@ from flask import Blueprint, jsonify, request
 from config import Config
 from services.audio_bridge import upsample_8k_to_24k, downsample_24k_to_8k
 from services.grok_call_session import GrokCallSession
+from services.metrics import metrics
 from services.sip_layer import SipLayer, _ensure_call_class
 
 logger = logging.getLogger("dial_route")
@@ -168,6 +169,8 @@ def dial():
             # Paciente atendeu — Sofia pode falar agora
             asyncio.run_coroutine_threadsafe(grok.start_kickoff(), loop)
         elif state in ("DISCONNECTED", "DISCONNCTD"):
+            metrics.active_calls.labels(direction="outbound").dec()
+            metrics.calls_ended.labels(direction="outbound", state=state).inc()
             # Marca razão do disconnect pra UI ler depois (active-calls)
             ctx = _active_calls.get(call_id)
             if ctx:
@@ -200,6 +203,8 @@ def dial():
 
     bridge_state["sip_call_id"] = sip_call_id
     _active_calls[sip_call_id] = bridge_state
+    metrics.calls_started.labels(direction="outbound").inc()
+    metrics.active_calls.labels(direction="outbound").inc()
     return jsonify({"status": "ok", "call_id": sip_call_id})
 
 
