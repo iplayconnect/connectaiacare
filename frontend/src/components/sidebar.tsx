@@ -115,6 +115,13 @@ const NAV_ITEMS: NavItem[] = [
     group: "admin",
   },
   {
+    href: "/admin/system/tenants",
+    label: "Tenants (Sistema)",
+    icon: Activity,
+    roles: ["super_admin"],
+    group: "admin",
+  },
+  {
     href: "/admin/plantoes",
     label: "Plantões",
     icon: CalendarClock,
