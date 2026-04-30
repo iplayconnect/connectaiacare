@@ -324,6 +324,7 @@ def update_user_memory_force(user_id: str | None) -> None:
 
 # Tools com handler local (DB direto)
 _LOCAL_TOOLS = {
+    "search_patients": "_tool_search_patients",
     "get_patient_summary": "_tool_get_patient_summary",
     "create_care_event": "_tool_create_care_event",
     "schedule_teleconsulta": "_tool_schedule_teleconsulta",
@@ -482,6 +483,36 @@ def _execute_remote_tool(name: str, args: dict, persona_ctx: dict) -> dict:
     except Exception as exc:
         logger.exception("voice_tool_remote_failed name=%s", name)
         return {"ok": False, "error": str(exc)}
+
+
+def _tool_search_patients(
+    *, persona_ctx: dict, query: str = "", limit: int = 5, **_: Any,
+) -> dict:
+    """Busca paciente por nome (fuzzy match com pg_trgm). Usado quando
+    interlocutor menciona paciente pelo nome durante ligação mas o
+    patient_id não está no contexto.
+    """
+    persona = persona_ctx.get("persona") or ""
+    if persona not in (
+        "medico", "enfermeiro", "admin_tenant", "super_admin", "cuidador_pro",
+    ):
+        return {"ok": False, "error": "persona_cannot_search"}
+    q = (query or "").strip()
+    if len(q) < 2:
+        return {"ok": False, "error": "query_too_short"}
+    limit = max(1, min(int(limit or 5), 25))
+    rows = _fetch_all(
+        """
+        SELECT id::text AS id, full_name, nickname, room_number, care_unit
+        FROM aia_health_patients
+        WHERE active = TRUE
+          AND (full_name ILIKE %s OR nickname ILIKE %s)
+        ORDER BY similarity(full_name, %s) DESC NULLS LAST, full_name
+        LIMIT %s
+        """,
+        (f"%{q}%", f"%{q}%", q, limit),
+    )
+    return {"ok": True, "count": len(rows), "patients": rows}
 
 
 def _tool_get_patient_summary(*, persona_ctx: dict, patient_id: str | None = None, **_: Any) -> dict:

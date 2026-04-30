@@ -564,8 +564,27 @@ def _build_tools_for_call(
     base = [
         {
             "type": "function",
+            "name": "search_patients",
+            "description": "Busca paciente por nome ou apelido (fuzzy match). USE quando interlocutor mencionar paciente pelo NOME mas patient_id não estiver no contexto. Retorna lista de candidatos com id, full_name, nickname, room_number — peça confirmação ao usuário e use o id retornado nas próximas tools (get_patient_summary, etc).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Nome ou parte do nome do paciente como o usuário falou. Ex: 'Armindo', 'Dona Carmen', 'Antonia Ferreira'.",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Padrão 5. Máximo 25.",
+                    },
+                },
+                "required": ["query"],
+            },
+        },
+        {
+            "type": "function",
             "name": "get_patient_summary",
-            "description": "Resumo do paciente (condições, meds, alergias, último relato, vitais recentes). Use ao iniciar a ligação se patient_id estiver no contexto.",
+            "description": "Resumo do paciente (condições, meds, alergias, último relato, vitais recentes). Use ao iniciar a ligação se patient_id estiver no contexto. Se só tem o NOME, use search_patients antes pra obter o id.",
             "parameters": {
                 "type": "object",
                 "properties": {"patient_id": {"type": "string"}},
