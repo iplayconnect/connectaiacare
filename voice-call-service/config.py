@@ -63,6 +63,13 @@ class Config:
     # em vez de DB direto — opcional, primeira versão usa DB direto) ───
     SOFIA_SERVICE_URL = os.getenv("SOFIA_SERVICE_URL", "http://sofia-service:5031")
     BACKEND_API_URL = os.getenv("BACKEND_API_URL", "http://api:5055")
+    # Loopback pra Sofia originar nova chamada via tool dial_phone.
+    # Default localhost:HTTP_PORT — em prod o container chama si mesmo
+    # via 127.0.0.1 (sem passar por DNS/Docker network).
+    VOICE_CALL_INTERNAL_URL = os.getenv(
+        "VOICE_CALL_INTERNAL_URL",
+        f"http://127.0.0.1:{HTTP_PORT}",
+    )
 
     # ─── Tenant default + audio specs ───
     DEFAULT_TENANT = os.getenv("VOICE_DEFAULT_TENANT", "connectaiacare_demo")

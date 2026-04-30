@@ -918,6 +918,51 @@ def _build_tools_for_call(
         },
         {
             "type": "function",
+            "name": "get_patient_responsible_phone",
+            "description": "Lista os contatos responsáveis do paciente (família, enfermeira dedicada) com telefones já em E.164 BR. USE ANTES de dial_phone pra escolher pra quem ligar. Retorna {contacts: [{kind, name, relationship, phone_e164, level}]}.",
+            "parameters": {
+                "type": "object",
+                "properties": {"patient_id": {"type": "string"}},
+            },
+        },
+        {
+            "type": "function",
+            "name": "dial_phone",
+            "description": "Origina uma NOVA chamada outbound em paralelo (ex: avisar família sobre evento clínico) usando um scenario_code do banco que define persona/voz/prompt. Use APENAS quando: (a) há motivo clínico real (intercorrência, queda, mudança importante), (b) você confirmou o número via get_patient_responsible_phone, (c) o usuário com você foi informado. Passa por Safety Guardrail. Não pode discar pra você mesma (loop).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "destination": {
+                        "type": "string",
+                        "description": "Telefone E.164 BR (com 55) ou DDD+número — função normaliza.",
+                    },
+                    "scenario_code": {
+                        "type": "string",
+                        "description": "Código do scenario na tabela aia_health_call_scenarios. Ex: 'alerta_familia_evento_clinico'.",
+                    },
+                    "patient_id": {
+                        "type": "string",
+                        "description": "Opcional. Se omitido usa o do contexto atual.",
+                    },
+                    "full_name": {
+                        "type": "string",
+                        "description": "Nome de quem deve atender (pra Sofia cumprimentar).",
+                    },
+                    "severity": {
+                        "type": "string",
+                        "enum": ["attention", "urgent", "critical"],
+                        "description": "Severidade pro Safety Guardrail. Default urgent.",
+                    },
+                    "extra_context": {
+                        "type": "object",
+                        "description": "Contexto adicional injetado no scenario (ex: descrição do evento).",
+                    },
+                },
+                "required": ["destination", "scenario_code"],
+            },
+        },
+        {
+            "type": "function",
             "name": "escalate_to_attendant",
             "description": "Aciona equipe humana responsável (atendente Isabel se B2C, cuidador interno se B2B) discando o ramal vinculado ao paciente. Use quando: queixa clínica significativa, padrão preocupante (várias quedas, dor persistente), pedido explícito do usuário, situação fora da sua capacidade. Severity: 'critical' = emergência (dor torácica), 'urgent' = preocupação real, 'attention' = vale revisão. Passa por Safety Guardrail.",
             "parameters": {
