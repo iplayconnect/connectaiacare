@@ -131,7 +131,8 @@ class ShiftResolverService:
         no fallback que cuidador da manhã está cobrindo a tarde, por
         exemplo.
         """
-        row = self.postgres.fetch_one(
+        # insert_returning (commit=True). fetch_one rollbacka.
+        row = self.postgres.insert_returning(
             """
             INSERT INTO aia_health_shift_overrides (
                 tenant_id, caregiver_id, shift_name,
