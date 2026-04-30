@@ -237,6 +237,98 @@ def suspend_tenant(tenant_id: str):
     return jsonify({"status": "ok", "tenant": _serialize_tenant(row)})
 
 
+@bp.get("/api/system/dashboard")
+@require_role("super_admin")
+def system_dashboard():
+    """Sprint C — visão cross-tenant pra super_admin.
+
+    Agrega contagens + atividade recente de TODOS os tenants. Inclui:
+    - totais globais (tenants ativos/suspensos, pacientes, usuários, eventos)
+    - série diária (últimos 7d) de eventos por classification
+    - top 5 tenants por evento aberto
+    - distribuição de classification across all tenants
+
+    Performance: usa um único pass com aggregations agrupadas. Em
+    base de produção (>50 tenants, >5k pacientes) caches via redis
+    de 30s seriam recomendados — não fazemos aqui pra não acoplar.
+    """
+    db = get_postgres()
+
+    # Totais globais
+    totals = db.fetch_one(
+        """SELECT
+            (SELECT COUNT(*) FROM aia_health_tenants) AS tenants_total,
+            (SELECT COUNT(*) FROM aia_health_tenants
+             WHERE active = TRUE AND suspended = FALSE) AS tenants_active,
+            (SELECT COUNT(*) FROM aia_health_tenants
+             WHERE suspended = TRUE) AS tenants_suspended,
+            (SELECT COUNT(*) FROM aia_health_patients
+             WHERE active = TRUE) AS patients_total,
+            (SELECT COUNT(*) FROM aia_health_users
+             WHERE active = TRUE) AS users_total,
+            (SELECT COUNT(*) FROM aia_health_caregivers
+             WHERE active = TRUE) AS caregivers_total,
+            (SELECT COUNT(*) FROM aia_health_care_events
+             WHERE created_at >= NOW() - INTERVAL '24 hours')
+                AS care_events_24h,
+            (SELECT COUNT(*) FROM aia_health_care_events
+             WHERE status NOT IN ('resolved','expired'))
+                AS care_events_open
+        """,
+    ) or {}
+
+    # Série diária últimos 7 dias por classification
+    series = db.fetch_all(
+        """SELECT DATE_TRUNC('day', created_at)::date AS day,
+                  classification,
+                  COUNT(*) AS n
+           FROM aia_health_care_events
+           WHERE created_at >= NOW() - INTERVAL '7 days'
+           GROUP BY 1, 2
+           ORDER BY 1 ASC, 2 ASC""",
+    )
+    for r in series:
+        v = r.get("day")
+        if v and hasattr(v, "isoformat"):
+            r["day"] = v.isoformat()
+        r["n"] = int(r.get("n") or 0)
+
+    # Top tenants por eventos abertos
+    top_open = db.fetch_all(
+        """SELECT t.id AS tenant_id, t.name AS tenant_name,
+                  COUNT(e.id) AS open_count
+           FROM aia_health_tenants t
+           LEFT JOIN aia_health_care_events e
+             ON e.tenant_id = t.id
+            AND e.status NOT IN ('resolved','expired')
+           GROUP BY t.id, t.name
+           ORDER BY open_count DESC, t.name ASC
+           LIMIT 5""",
+    )
+    for r in top_open:
+        r["open_count"] = int(r.get("open_count") or 0)
+
+    # Distribuição de classification global (últimos 30d pra ter
+    # base estável; 24h pode ter pouca amostra)
+    classification = db.fetch_all(
+        """SELECT classification, COUNT(*) AS n
+           FROM aia_health_care_events
+           WHERE created_at >= NOW() - INTERVAL '30 days'
+           GROUP BY classification
+           ORDER BY n DESC""",
+    )
+    for r in classification:
+        r["n"] = int(r.get("n") or 0)
+
+    return jsonify({
+        "status": "ok",
+        "totals": dict(totals),
+        "series_7d": series,
+        "top_open_tenants": top_open,
+        "classification_30d": classification,
+    })
+
+
 @bp.get("/api/system/tenants/<tenant_id>/health")
 @require_role("super_admin")
 def tenant_health(tenant_id: str):
