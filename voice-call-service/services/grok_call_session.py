@@ -553,9 +553,26 @@ class GrokCallSession:
         # Sofia "muda" após cada tool call. Fix: rodar em thread
         # separada via asyncio.to_thread pra liberar o loop.
         try:
-            output = await asyncio.to_thread(
-                execute_voice_tool, name, args, self.persona_ctx,
+            # Timeout 8s — acima disso WS Grok perde keepalive (default
+            # ping interval do servidor) e mata sessão. Tool DB normal
+            # demora <50ms; HTTP remote raramente >2s. Se tool travar,
+            # cortamos e retornamos erro pro modelo continuar conversa.
+            output = await asyncio.wait_for(
+                asyncio.to_thread(
+                    execute_voice_tool, name, args, self.persona_ctx,
+                ),
+                timeout=8.0,
             )
+        except asyncio.TimeoutError:
+            logger.error("tool_timeout name=%s after 8s", name)
+            output = {
+                "ok": False,
+                "error": "tool_timeout",
+                "_message_for_sofia": (
+                    "Tive uma demora técnica buscando essa informação. "
+                    "Pode confirmar de novo o que precisa que eu tento outra forma?"
+                ),
+            }
         except Exception as exc:
             logger.exception("tool_execution_threw name=%s", name)
             output = {

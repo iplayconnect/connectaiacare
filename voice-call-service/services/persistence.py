@@ -25,7 +25,12 @@ _pool: ThreadedConnectionPool | None = None
 def _get_pool() -> ThreadedConnectionPool:
     global _pool
     if _pool is None:
-        _pool = ThreadedConnectionPool(1, 4, Config.DATABASE_URL)
+        # min=2, max=15 (era 1/4). Cada chamada inbound pode disparar
+        # 2-3 tools concorrentes (search + summary + history) e o
+        # pool antigo (max=4) entrava em starvation, com getconn
+        # bloqueando indefinidamente — WS Grok morria por keepalive
+        # timeout depois de 2min de bloqueio.
+        _pool = ThreadedConnectionPool(2, 15, Config.DATABASE_URL)
         psycopg2.extras.register_uuid()
     return _pool
 
