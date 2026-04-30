@@ -465,35 +465,36 @@ class SipLayer:
         return m.group(1) if m else "unknown"
 
     def install_gc_thread_guard(self) -> None:
-        """Instala callback que registra a thread atual no pjlib ANTES
-        de cada GC sweep. Resolve o cenário crítico onde Python GC roda
-        em thread Werkzeug/aleatória e libera objetos pjsua2 (pj.ByteVector,
-        pj.MediaFormatAudio, pj.CallOpParam) cujo destrutor toca pjlib
-        e dispara assertion fatal.
+        """DESABILITADO em 2026-04-30.
 
-        Idempotente: chame uma vez no boot, depois do sip.initialize().
+        Histórico: foi adicionado pra resolver crash em destrutor de
+        objetos pjsua2 (ByteVector, MediaFormatAudio, CallOpParam) quando
+        Python GC rodava em thread aleatória.
+
+        Problema descoberto agora: chamar libRegisterThread em cada GC
+        sweep SOBRESCREVE o owner do group lock do pjsua atualmente
+        possuído por outra thread. Isso causa SIGABRT em
+        grp_lock_set_owner_thread quando uma worker pjsua tenta liberar
+        o lock e descobre que owner foi mudado pelo GC callback.
+
+        Ligações INBOUND eram especialmente afetadas porque o ciclo
+        onIncomingCall → answer → onCallMediaState dispara muitos
+        callbacks pjsua em sequência rápida, aumentando probabilidade
+        de GC rodar entre eles.
+
+        Outbound funcionava porque o ciclo é mais espaçado e a thread
+        Flask que dispara dial() já tem libRegisterThread fixo —
+        mesmo se GC corrompesse, a próxima libRegisterThread
+        restaurava o owner.
+
+        Mantida como NO-OP por compatibilidade com chamadores. Se
+        crash de destrutor reaparecer, fix correto é evitar criar
+        objetos pjsua2 fora da thread do endpoint, não ficar
+        registrando GC threads.
         """
-        import gc
-
         if getattr(self, "_gc_guard_installed", False):
             return
-
-        sip_self = self  # closure
-
-        def _gc_register_thread(phase: str, info: dict) -> None:
-            # Roda em ambas as fases (start + stop). Custo é desprezível
-            # comparado ao crash. Idempotente do lado do pjlib.
-            if phase != "start":
-                return
-            try:
-                if sip_self._initialized and sip_self._endpoint:
-                    sip_self._endpoint.libRegisterThread(
-                        f"gc-{threading.get_ident()}"
-                    )
-            except Exception:
-                pass  # silenciosamente — nunca propague erro de GC
-
-        gc.callbacks.append(_gc_register_thread)
+        logger.info("gc_thread_guard_disabled — see comment in sip_layer.py")
         self._gc_guard_installed = True
         logger.info("gc_thread_guard_installed")
 
