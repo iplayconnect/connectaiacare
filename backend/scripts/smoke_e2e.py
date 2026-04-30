@@ -157,15 +157,19 @@ def f4_whatsapp_audio_pipeline() -> Flow:
         cascade_runs >= 0,
         f"Cascade audit operacional ({cascade_runs} runs/7d)",
     )
-    # Reports recentes têm transcript + classification
+    # Reports recentes c/ transcript vazio EXCLUINDO áudios curtos
+    # (<5s) que são caso edge legítimo: cuidador grava sem falar,
+    # Deepgram retorna vazio, pipeline pede regravar — comportamento
+    # correto, não vira care_event.
     bad_reports = db_count(
         "SELECT * FROM aia_health_reports "
         "WHERE created_at >= NOW() - INTERVAL '7 days' "
-        "AND (transcription IS NULL OR transcription = '')"
+        "AND (transcription IS NULL OR transcription = '') "
+        "AND COALESCE(audio_duration_seconds, 0) >= 5"
     )
     f.assert_(
         bad_reports == 0,
-        f"Reports c/ transcript válido (sem vazios em 7d: {bad_reports})",
+        f"Reports c/ transcript vazio em áudio ≥5s (real bug): {bad_reports}",
     )
     return f
 
