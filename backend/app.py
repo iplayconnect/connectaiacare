@@ -4,6 +4,7 @@ from flask_cors import CORS
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from config.settings import settings
+from src.handlers.admin_health_routes import bp as admin_health_bp
 from src.handlers.alerts_routes import bp as alerts_bp
 from src.handlers.communications_routes import bp as communications_bp
 from src.handlers.safety_routes import bp as safety_bp
@@ -82,6 +83,7 @@ def create_app() -> Flask:
     app.register_blueprint(alerts_bp, url_prefix="/api")
     app.register_blueprint(communications_bp)
     app.register_blueprint(safety_bp)
+    app.register_blueprint(admin_health_bp)
     app.register_blueprint(proactive_caller_bp)
     app.register_blueprint(shifts_bp)
     app.register_blueprint(synthetic_tests_bp)
