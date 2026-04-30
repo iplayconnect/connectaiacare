@@ -76,9 +76,9 @@
 
 - id: medicacao_003
   transcript: "Dei a varfarina ao Sr. Antônio e ele começou a sangrar pela gengiva, parece bastante. Está pálido."
-  expected_event_type: medicacao
+  expected_event_type: intercorrencia
   expected_classification: critical
-  rationale: "Sangramento ativo em paciente em anticoagulante = emergência."
+  rationale: "Sangramento ativo em paciente anticoagulado é EVENTO AGUDO. Hierarquia: intercorrencia > medicacao quando há evento adverso ativo. Origem (varfarina) fica nas tags."
   difficulty: easy
 
 # ──────────────────────────── SINAL_VITAL ────────────────────────────
@@ -142,9 +142,9 @@
 
 - id: sintoma_novo_003
   transcript: "Sr. Antônio está com dor forte no peito que irradia pro braço esquerdo há 20 minutos, suando frio e com falta de ar."
-  expected_event_type: sintoma_novo
+  expected_event_type: intercorrencia
   expected_classification: critical
-  rationale: "Síndrome coronariana aguda clássica — emergência cardiovascular."
+  rationale: "Síndrome coronariana aguda. Hierarquia: intercorrencia > sintoma_novo quando há evento agudo iminente com risco imediato. Sintomas individuais ficam nas tags."
   difficulty: easy
 
 # ──────────────────────────── APOIO_EMOCIONAL ────────────────────────────
