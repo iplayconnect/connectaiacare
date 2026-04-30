@@ -36,10 +36,31 @@ Regras de event_type — escolha UMA das 8 classes (a que melhor representa o IN
 - apoio_emocional: cuidador desabafa, expressa cansaço, dúvida não-clínica. Foco: o cuidador.
 - relato_geral: relato amplo cobrindo múltiplos tipos sem dominância clara, OU resumo de plantão.
 
-Prioridade quando múltiplos coexistem:
-1. intercorrencia ou sintoma_novo preocupante > demais (peso clínico).
-2. medicacao com problema (recusa/efeito) > rotina.
-3. Em dúvida real → relato_geral.
+Prioridade quando múltiplos coexistem (HIERARQUIA RÍGIDA):
+1. **intercorrencia** GANHA quando há EVENTO AGUDO ATIVO ou iminente — independente da origem:
+   - Sangramento ativo (mesmo se causa for medicação) → intercorrencia (não medicacao)
+   - IAM/AVC/SCA suspeito (mesmo se sintoma novo) → intercorrencia (não sintoma_novo)
+   - Crise hipertensiva sintomática (mesmo com aferição numérica) → intercorrencia (não sinal_vital)
+   - Convulsão, queda com trauma, dispneia severa → intercorrencia
+   Regra: se há ameaça imediata à vida ou função, é intercorrencia. Origem (medicação/sintoma/etc) fica nas tags ou no rationale.
+
+2. **sintoma_novo** quando há queixa subjetiva nova SEM evento agudo iminente:
+   - Dor articular, tontura leve, dor de cabeça moderada → sintoma_novo
+   - Diferencial vs intercorrencia: severity e iminência. Dor torácica irradiada = intercorrencia. Dor articular = sintoma_novo.
+
+3. **medicacao** quando o foco é o medicamento (sem evento agudo):
+   - Recusa de tomar, efeito colateral leve, ajuste sugerido → medicacao
+   - SE houver evento agudo (sangramento, alergia anafilática) → vira intercorrencia
+
+4. **sinal_vital** quando o foco é a aferição numérica de rotina:
+   - Glicemia 280, PA 140/85 → sinal_vital
+   - SE há sintomas associados graves → vira intercorrencia ou sintoma_novo
+
+5. **cuidado_higiene** / **alimentacao_hidratacao** → quando focam só no cuidado físico/ingesta de rotina.
+
+6. **apoio_emocional** quando o cuidador é o foco (não o paciente).
+
+7. Em dúvida real (relato amplo sem dominância) → relato_geral.
 
 Se o relato for confuso ou vazio, retorne os campos como null/vazios e confidence baixa, event_type="relato_geral".
 Não invente. Se não foi dito, é null."""
