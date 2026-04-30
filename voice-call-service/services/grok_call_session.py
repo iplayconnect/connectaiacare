@@ -75,7 +75,7 @@ class GrokCallSession:
         # response.create explícito pra retomar o turno.
         self._current_response_has_audio = False
         self._empty_response_retry_attempts = 0
-        self._max_empty_response_retries = 2  # por turno
+        self._max_empty_response_retries = 4  # aumentado 2→4 — Grok às vezes silencia após tools
 
         self.session_id: str | None = None
         self._ws: websockets.WebSocketClientProtocol | None = None
@@ -446,9 +446,19 @@ class GrokCallSession:
                 )
                 try:
                     if self._ws:
-                        await self._ws.send(
-                            json.dumps({"type": "response.create"})
-                        )
+                        # Recovery com instructions forçando narração
+                        await self._ws.send(json.dumps({
+                            "type": "response.create",
+                            "response": {
+                                "modalities": ["audio", "text"],
+                                "instructions": (
+                                    "Você ficou em silêncio no turno anterior. "
+                                    "Responda AGORA ao usuário em português "
+                                    "usando o contexto disponível. Não fique "
+                                    "muda — fale alguma coisa útil agora."
+                                ),
+                            },
+                        }))
                 except Exception as exc:
                     logger.warning("recovery_response_create_failed: %s", exc)
             elif (
@@ -577,7 +587,23 @@ class GrokCallSession:
                 "output": json.dumps(output),
             },
         }))
-        await self._ws.send(json.dumps({"type": "response.create"}))
+        # response.create COM instructions explícitas. Sem isso Grok
+        # frequentemente emite response.done vazio após tools (modelo
+        # decide silêncio "estratégico"). Forçar instructions obriga
+        # narração — o motivo do tool foi RESPONDER ao usuário.
+        await self._ws.send(json.dumps({
+            "type": "response.create",
+            "response": {
+                "modalities": ["audio", "text"],
+                "instructions": (
+                    "Use o resultado da última ferramenta pra responder ao "
+                    "usuário em português, de forma clara, direta e natural. "
+                    "Se a ferramenta retornou dados, NARRE eles ao usuário. "
+                    "Não fique em silêncio. Não diga 'um momento' sem entregar "
+                    "a resposta — entregue agora."
+                ),
+            },
+        }))
 
 
 def _build_tools_for_call(
