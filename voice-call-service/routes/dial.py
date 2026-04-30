@@ -122,7 +122,38 @@ def dial():
     except Exception as exc:
         logger.exception("grok_start_failed")
         loop.call_soon_threadsafe(loop.stop)
-        return jsonify({"status": "error", "reason": "grok_start_failed", "detail": str(exc)}), 500
+        # Classifica erro pra UI mostrar mensagem útil ao usuário.
+        # 429/quota_exhausted = créditos xAI esgotados; rede/timeout =
+        # transitório; outros = upstream desconhecido.
+        msg = str(exc).lower()
+        if "429" in msg or "quota" in msg or "credits" in msg or "rate" in msg:
+            reason = "voice_provider_quota_exhausted"
+            user_message = (
+                "Sistema de voz temporariamente indisponível por limite "
+                "de uso. A equipe foi notificada — tente novamente em "
+                "alguns minutos."
+            )
+            http_status = 503
+        elif "timeout" in msg or "timed out" in msg:
+            reason = "voice_provider_timeout"
+            user_message = (
+                "Sistema de voz demorou mais que o esperado pra "
+                "responder. Por favor, tente novamente."
+            )
+            http_status = 504
+        else:
+            reason = "grok_start_failed"
+            user_message = (
+                "Não foi possível iniciar a chamada agora. Por favor, "
+                "tente novamente em instantes."
+            )
+            http_status = 503
+        return jsonify({
+            "status": "error",
+            "reason": reason,
+            "user_message": user_message,
+            "detail": str(exc)[:300],
+        }), http_status
 
     def _on_audio_in_from_sip(pcm16_8k: bytes):
         """Paciente falou no telefone — manda pra Sofia (Grok)."""

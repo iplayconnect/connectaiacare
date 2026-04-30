@@ -445,10 +445,36 @@ def dial():
         }), 503
 
     if resp.status_code >= 400:
+        # Tenta extrair JSON estruturado do voice-call (com user_message
+        # e reason específicos como voice_provider_quota_exhausted).
+        # Audit log marca quota exhausted como severity crítica pra
+        # super_admin saber rapidamente.
+        try:
+            upstream = resp.json() or {}
+        except Exception:
+            upstream = {}
+        upstream_reason = upstream.get("reason") or f"upstream_{resp.status_code}"
+        if upstream_reason == "voice_provider_quota_exhausted":
+            audit_log(action="voice.provider.quota_exhausted", payload={
+                "backend": VOICE_BACKEND,
+                "destination_masked": (destination or "")[:4] + "****",
+                "scenario_code": scenario.get("code") if scenario else None,
+                "detail": upstream.get("detail", "")[:200],
+            })
+            logger.error(
+                "voice_provider_quota_exhausted_alert backend=%s",
+                VOICE_BACKEND,
+            )
         return jsonify({
-            "status": "error", "reason": f"upstream_{resp.status_code}",
-            "detail": resp.text[:300], "backend": VOICE_BACKEND,
-        }), 502
+            "status": "error",
+            "reason": upstream_reason,
+            "user_message": upstream.get("user_message") or (
+                "Não foi possível completar a chamada. Por favor, "
+                "tente novamente em instantes."
+            ),
+            "detail": upstream.get("detail") or resp.text[:300],
+            "backend": VOICE_BACKEND,
+        }), resp.status_code if resp.status_code in (503, 504) else 502
 
     out = resp.json() or {}
     audit_log(action="communication.dial", payload={

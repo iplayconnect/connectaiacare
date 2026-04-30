@@ -180,7 +180,16 @@ def install_inbound_handler() -> None:
             persona_ctx["full_name"],
         )
 
-        # Loop asyncio dedicado pra essa chamada
+        # Loop asyncio dedicado pra essa chamada.
+        # IMPORTANTE: NÃO registrar essa thread no pjlib via
+        # libRegisterThread. Histórico (29/04): SIGABRT em
+        # grp_lock_set_owner_thread durante call.answer() — registrar
+        # thread externa cria descriptor que sobrescreve o owner do
+        # group lock; quando a thread INTERNA do pjsua (que processou
+        # onIncomingCall) tenta operar o lock, owner mismatch → assert.
+        # As operações que o asyncio loop faz (push_audio_8k,
+        # drain_outbound_audio) NÃO tocam pjlib — só manipulam buffers
+        # bytearray thread-safe. libRegisterThread era desnecessário.
         loop = asyncio.new_event_loop()
         bridge_state = {
             "sip_call_id": call_id, "loop": loop,
@@ -190,10 +199,6 @@ def install_inbound_handler() -> None:
 
         def _run_loop():
             asyncio.set_event_loop(loop)
-            try:
-                sip.register_current_thread(f"grok-inbound-{call_id}")
-            except Exception as exc:
-                logger.warning("inbound_loop_register_failed: %s", exc)
             loop.run_forever()
 
         threading.Thread(
