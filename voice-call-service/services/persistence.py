@@ -544,22 +544,25 @@ def _tool_search_patients(
         clean_name,
     )
 
+    # unaccent() na coluna E na query (extensão `unaccent` já instalada).
+    # Garante match acento-insensitive: query "celio" bate com "Célio",
+    # query "Antônia" bate com "Antonia", etc. Em ambas as direções.
     rows = _fetch_all(
         """
         SELECT DISTINCT id::text AS id, full_name, nickname, room_number, care_unit,
                GREATEST(
-                   COALESCE(similarity(full_name, %s), 0),
-                   COALESCE(similarity(coalesce(nickname,''), %s), 0)
+                   COALESCE(similarity(unaccent(full_name), unaccent(%s)), 0),
+                   COALESCE(similarity(unaccent(coalesce(nickname,'')), unaccent(%s)), 0)
                ) AS score
         FROM aia_health_patients
         WHERE active = TRUE
           AND (
-              full_name ILIKE %s
-              OR nickname ILIKE %s
-              OR full_name ILIKE %s
-              OR nickname ILIKE %s
+              unaccent(full_name) ILIKE unaccent(%s)
+              OR unaccent(coalesce(nickname,'')) ILIKE unaccent(%s)
+              OR unaccent(full_name) ILIKE unaccent(%s)
+              OR unaccent(coalesce(nickname,'')) ILIKE unaccent(%s)
               OR room_number = %s
-              OR care_unit ILIKE %s
+              OR unaccent(coalesce(care_unit,'')) ILIKE unaccent(%s)
           )
         ORDER BY score DESC NULLS LAST, full_name
         LIMIT %s
