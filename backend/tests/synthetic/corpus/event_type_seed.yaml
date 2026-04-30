@@ -1,0 +1,192 @@
+# Corpus SEED de testes sintéticos — multiclassificação event_type.
+# 24 itens (3 por classe × 8 classes). Use pra validar formato +
+# infraestrutura. Versão completa (240 itens) gerada via DeepSeek
+# após este seed estar verde.
+#
+# Cada item carrega:
+#   - id: identificador estável (slug + numero)
+#   - transcript: texto como sairia do Whisper/Deepgram
+#   - expected_event_type: 1 das 8 classes (ground truth)
+#   - expected_classification: severity esperada (routine/attention/urgent/critical)
+#   - rationale: por que rotulamos assim (auditável por humano)
+#   - difficulty: easy | medium | hard (pra weighting de métricas)
+#
+# Distribuição alvo (no corpus completo):
+#   - 60% routine, 25% attention, 12% urgent, 3% critical
+#   - 30% easy, 50% medium, 20% hard
+
+# ──────────────────────────── CUIDADO_HIGIENE ────────────────────────────
+- id: cuidado_higiene_001
+  transcript: "Acabei de trocar a fralda da Dona Maria, ela está limpa e seca, sem irritação na pele."
+  expected_event_type: cuidado_higiene
+  expected_classification: routine
+  rationale: "Troca de fralda de rotina, sem alteração clínica."
+  difficulty: easy
+
+- id: cuidado_higiene_002
+  transcript: "Dei o banho no Sr. José hoje cedo, ele cooperou bem, hidratei a pele toda. Notei uma pequena vermelhidão no cóccix, vou ficar de olho."
+  expected_event_type: cuidado_higiene
+  expected_classification: attention
+  rationale: "Cuidado de higiene + sinal de alerta dermatológico inicial (possível LPP grau I)."
+  difficulty: medium
+
+- id: cuidado_higiene_003
+  transcript: "Troquei o curativo da úlcera no calcanhar da Dona Antônia, está com secreção amarelada e cheiro ruim, parece infectado."
+  expected_event_type: cuidado_higiene
+  expected_classification: urgent
+  rationale: "Cuidado de higiene mas com sinal claro de infecção — exige avaliação médica."
+  difficulty: medium
+
+# ──────────────────────────── ALIMENTACAO_HIDRATACAO ────────────────────────────
+- id: alimentacao_001
+  transcript: "Dona Carmen comeu bem o almoço hoje, aceitou todo o prato e tomou bastante água."
+  expected_event_type: alimentacao_hidratacao
+  expected_classification: routine
+  rationale: "Refeição com boa aceitação, hidratação adequada."
+  difficulty: easy
+
+- id: alimentacao_002
+  transcript: "Sr. Antônio recusou o jantar hoje, comeu só meia colher de sopa e disse que não estava com fome."
+  expected_event_type: alimentacao_hidratacao
+  expected_classification: attention
+  rationale: "Recusa parcial alimentar — merece acompanhamento mas não é urgência."
+  difficulty: easy
+
+- id: alimentacao_003
+  transcript: "A Dona Luci está há dois dias quase sem comer e bebendo muito pouca água, está mais apática que o normal."
+  expected_event_type: alimentacao_hidratacao
+  expected_classification: urgent
+  rationale: "Recusa alimentar prolongada + apatia + risco de desidratação em idosa = urgente."
+  difficulty: medium
+
+# ──────────────────────────── MEDICACAO ────────────────────────────
+- id: medicacao_001
+  transcript: "Administrei o losartana de 50 miligramas das 8 horas do Sr. José, ele tomou sem problemas."
+  expected_event_type: medicacao
+  expected_classification: routine
+  rationale: "Administração de rotina conforme prescrição."
+  difficulty: easy
+
+- id: medicacao_002
+  transcript: "A Dona Maria recusou tomar o omeprazol hoje, disse que não quer mais. Já é a terceira vez na semana."
+  expected_event_type: medicacao
+  expected_classification: attention
+  rationale: "Recusa repetida de medicamento — adesão comprometida, precisa avaliação."
+  difficulty: medium
+
+- id: medicacao_003
+  transcript: "Dei a varfarina ao Sr. Antônio e ele começou a sangrar pela gengiva, parece bastante. Está pálido."
+  expected_event_type: medicacao
+  expected_classification: critical
+  rationale: "Sangramento ativo em paciente em anticoagulante = emergência."
+  difficulty: easy
+
+# ──────────────────────────── SINAL_VITAL ────────────────────────────
+- id: sinal_vital_001
+  transcript: "Aferei a pressão da Dona Carmen, deu 120 por 80, frequência 75 batimentos. Tudo dentro do normal."
+  expected_event_type: sinal_vital
+  expected_classification: routine
+  rationale: "Aferição numérica de rotina, valores normais."
+  difficulty: easy
+
+- id: sinal_vital_002
+  transcript: "Glicemia capilar do Sr. José deu 280 agora antes do jantar. Ele é diabético em uso de metformina."
+  expected_event_type: sinal_vital
+  expected_classification: attention
+  rationale: "Glicemia elevada em diabético — requer ajuste mas não é emergência imediata."
+  difficulty: medium
+
+- id: sinal_vital_003
+  transcript: "Pressão da Dona Maria está 200 por 110, ela está com dor de cabeça forte e vendo embaçado."
+  expected_event_type: sinal_vital
+  expected_classification: critical
+  rationale: "Crise hipertensiva com sintomas neurológicos — emergência."
+  difficulty: easy
+
+# ──────────────────────────── INTERCORRENCIA ────────────────────────────
+- id: intercorrencia_001
+  transcript: "A Dona Antônia bateu o pé na quina da cama, está com um pequeno hematoma mas anda normalmente, sem dor forte."
+  expected_event_type: intercorrencia
+  expected_classification: attention
+  rationale: "Trauma leve, sem comprometimento funcional aparente."
+  difficulty: medium
+
+- id: intercorrencia_002
+  transcript: "Sr. Antônio caiu da cama agora, disse que está bem mas eu vi a queda, ele tem osteoporose. Está se queixando de dor no quadril."
+  expected_event_type: intercorrencia
+  expected_classification: urgent
+  rationale: "Queda + osteoporose + dor no quadril = alta suspeita de fratura."
+  difficulty: easy
+
+- id: intercorrencia_003
+  transcript: "Dona Carmen teve uma crise convulsiva agora, durou uns 2 minutos, ainda está confusa e sonolenta. Mordeu a língua."
+  expected_event_type: intercorrencia
+  expected_classification: critical
+  rationale: "Convulsão com pós-ictal evidente — emergência neurológica."
+  difficulty: easy
+
+# ──────────────────────────── SINTOMA_NOVO ────────────────────────────
+- id: sintoma_novo_001
+  transcript: "Sr. José está reclamando de uma dor leve no joelho hoje, disse que sente quando levanta. Não tem inchaço."
+  expected_event_type: sintoma_novo
+  expected_classification: routine
+  rationale: "Queixa de dor leve articular, sem sinais inflamatórios."
+  difficulty: medium
+
+- id: sintoma_novo_002
+  transcript: "A Dona Maria começou a tossir bastante hoje, tosse seca, sem febre. Ela é hipertensa em uso de captopril."
+  expected_event_type: sintoma_novo
+  expected_classification: attention
+  rationale: "Tosse seca em paciente em iECA — possível efeito adverso, vale revisão."
+  difficulty: hard
+
+- id: sintoma_novo_003
+  transcript: "Sr. Antônio está com dor forte no peito que irradia pro braço esquerdo há 20 minutos, suando frio e com falta de ar."
+  expected_event_type: sintoma_novo
+  expected_classification: critical
+  rationale: "Síndrome coronariana aguda clássica — emergência cardiovascular."
+  difficulty: easy
+
+# ──────────────────────────── APOIO_EMOCIONAL ────────────────────────────
+- id: apoio_emocional_001
+  transcript: "Sofia, sou eu, a Roberta, hoje foi um dia bem cansativo aqui no plantão, queria desabafar. A família tem cobrado muito."
+  expected_event_type: apoio_emocional
+  expected_classification: routine
+  rationale: "Cuidador buscando apoio emocional — sem questão clínica do paciente."
+  difficulty: easy
+
+- id: apoio_emocional_002
+  transcript: "Sofia, eu não sei mais o que fazer com a Dona Maria, ela está muito agitada à noite e eu já não estou dormindo direito."
+  expected_event_type: apoio_emocional
+  expected_classification: attention
+  rationale: "Cuidador relata exaustão + dificuldade de manejo, precisa apoio + possível ajuste de plano."
+  difficulty: medium
+
+- id: apoio_emocional_003
+  transcript: "Estou pensando em pedir demissão, não aguento mais essa rotina, me sinto muito sozinha aqui de noite."
+  expected_event_type: apoio_emocional
+  expected_classification: urgent
+  rationale: "Sinal de burnout severo do cuidador — risco operacional pra o paciente também, precisa intervenção."
+  difficulty: medium
+
+# ──────────────────────────── RELATO_GERAL ────────────────────────────
+- id: relato_geral_001
+  transcript: "Boa noite Sofia, plantão tranquilo hoje. Dona Antônia almoçou bem, tomou as medicações no horário, dormiu a tarde toda. Sinais vitais estáveis."
+  expected_event_type: relato_geral
+  expected_classification: routine
+  rationale: "Relato amplo cobrindo múltiplos tipos sem dominância — descrição de plantão."
+  difficulty: easy
+
+- id: relato_geral_002
+  transcript: "Hoje foi um dia normal, fiz a higiene, dei as medicações, ela comeu bem. Só achei que ela está um pouco mais quieta que o costume."
+  expected_event_type: relato_geral
+  expected_classification: attention
+  rationale: "Resumo de plantão + sinal sutil de mudança comportamental — vale atenção."
+  difficulty: hard
+
+- id: relato_geral_003
+  transcript: "Plantão da tarde encerrado. Sr. José teve uma tarde difícil — recusou o lanche, pressão um pouco alta, e relata cansaço. Não há sintoma específico que se destaque."
+  expected_event_type: relato_geral
+  expected_classification: urgent
+  rationale: "Múltiplos sinais subclínicos somados — vale escalação mesmo sem dominância clara de um tipo."
+  difficulty: hard
