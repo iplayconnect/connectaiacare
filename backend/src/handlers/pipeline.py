@@ -540,51 +540,57 @@ class EldercarePipeline:
         # Tags derivadas do relato (input pro pattern detection)
         event_tags = self._derive_tags(transcription, entities)
 
-        # event_type: multiclassificação funcional (8 classes fixas).
-        # FAIL-LOUD: se LLM falhou (classification_failed=True), NÃO
-        # default 'relato_geral' silenciosamente — escala pra revisão
-        # humana antes de prosseguir. Discoberto via testes sintéticos
-        # 2026-04-30 que emergências viravam rotineiras com fallback.
-        classification_failed = bool(
-            isinstance(entities, dict)
-            and entities.get("classification_failed")
+        # ─── Cascade classifier: T1 → T2 → T3 (Judge) ───
+        # T1 (DeepSeek V4-Flash) sempre roda. Se severity≥urgent ou T1
+        # falhar, dispara T2 (DeepSeek V4-Pro). Se T1≠T2, juiz Tier 3
+        # (Claude Haiku) decide + notifica responsável. Audit completo
+        # em aia_health_classification_cascade.
+        from src.services.cascade_classifier import CascadeClassifier
+        from src.services.responsible_notifier import notify_responsible
+        cascade = CascadeClassifier()
+        decision = cascade.classify(
+            transcript=transcription,
+            patient_id=patient_id,
+            report_id=str(report_id),
+            tenant_id=tenant,
+            patient_context={
+                "patient_id": patient_id,
+                "patient_name": patient.get("full_name") if patient else None,
+            },
         )
-        event_type = (entities or {}).get("event_type") if isinstance(entities, dict) else None
+        event_type = decision.final_event_type
+        logger.info(
+            "cascade_classified",
+            report_id=str(report_id),
+            decided_by=decision.final_decided_by,
+            event_type=event_type,
+            classification=decision.final_classification,
+            tier1_model=decision.tier1.model,
+            tier2_triggered=decision.tier2.triggered,
+            tier3_triggered=decision.tier3.triggered,
+            elapsed_ms=decision.total_elapsed_ms,
+        )
 
-        if classification_failed:
-            # Enfileira pra revisão humana e segue criando o evento com
-            # event_type=null + flag classification_failed (visível no
-            # painel admin) pra que time clínico classifique manualmente.
+        # Notifica responsável quando cascade decide (sempre que T3 é
+        # invocado OU quando severity=critical mesmo com agreement T1+T2).
+        if decision.notify_responsible and patient and patient_id:
             try:
-                from src.services.safety_guardrail import enqueue_action_for_review
-                enqueue_action_for_review(
+                notification_result = notify_responsible(
                     tenant_id=tenant,
                     patient_id=patient_id,
-                    action_type="classify_event_type",
-                    severity="attention",  # default — humano avalia
-                    payload={
-                        "report_id": str(report_id),
-                        "transcript": transcription[:500],
-                        "failure_reason": entities.get(
-                            "classification_failure_reason", "unknown",
-                        ),
-                        "caregiver_phone": phone,
-                        "expected_action": "Classificar event_type manualmente",
-                    },
+                    patient_name=patient.get("nickname") or patient.get("full_name"),
+                    event_type=event_type,
+                    classification=decision.final_classification,
+                    summary=transcription[:300],
+                    reason=decision.notification_reason or "judge_invoked",
                 )
-                logger.warning(
-                    "classification_failed_enqueued_for_review",
-                    report_id=str(report_id),
-                    reason=entities.get("classification_failure_reason"),
+                logger.info(
+                    "responsible_notification_dispatched",
+                    sent=notification_result.get("sent"),
+                    channel=notification_result.get("channel"),
                 )
             except Exception as exc:
-                logger.exception("enqueue_review_failed: %s", exc)
-
-        if not event_type:
-            # Sem classification_failed → tenta tag heurístico, último
-            # recurso 'relato_geral' (sinaliza visualmente como classificação
-            # imprecisa pro time clínico).
-            event_type = event_tags[0] if event_tags else "relato_geral"
+                logger.exception("responsible_notification_error: %s", exc)
 
         # Abre evento
         event = self.events.open(

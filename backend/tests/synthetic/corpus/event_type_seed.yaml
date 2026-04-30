@@ -98,9 +98,9 @@
 
 - id: sinal_vital_003
   transcript: "Pressão da Dona Maria está 200 por 110, ela está com dor de cabeça forte e vendo embaçado."
-  expected_event_type: sinal_vital
+  expected_event_type: intercorrencia
   expected_classification: critical
-  rationale: "Crise hipertensiva com sintomas neurológicos — emergência."
+  rationale: "Crise hipertensiva sintomática (PA + cefaleia + alteração visual) é evento agudo. Hierarquia: intercorrencia > sinal_vital quando há sintomas associados graves. Aferição numérica fica em vital_signs."
   difficulty: easy
 
 # ──────────────────────────── INTERCORRENCIA ────────────────────────────
