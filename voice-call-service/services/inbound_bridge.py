@@ -228,15 +228,24 @@ def install_inbound_handler() -> None:
         )
         bridge_state["grok"] = grok
 
-        # Inicia Grok + dispara saudação (não esperamos CONFIRMED como
-        # outbound — a chamada já está atendida quando o handler roda)
-        fut_start = asyncio.run_coroutine_threadsafe(grok.start(), loop)
-        try:
-            fut_start.result(timeout=15)
-            asyncio.run_coroutine_threadsafe(grok.start_kickoff(), loop)
-        except Exception:
-            logger.exception("inbound_grok_start_failed")
-            return None, None
+        # IMPORTANTE: NÃO bloquear esta thread esperando grok.start().
+        # Esta thread É a worker interna do pjsua que processou
+        # onIncomingCall. Bloquear aqui (fut.result(timeout=15)) trava
+        # ela enquanto pjsua precisa dela pra outros callbacks da
+        # mesma chamada (ex: onCallMediaState após SDP) — quando
+        # pjsua tenta operar group lock dessa chamada de outra
+        # worker, owner mismatch → SIGABRT em
+        # grp_lock_set_owner_thread (lock.c:270).
+        # Fix: schedular start+kickoff async sem aguardar. Erros
+        # vão ser logados mas a thread retorna imediatamente.
+        async def _start_then_kickoff():
+            try:
+                await grok.start()
+                await grok.start_kickoff()
+            except Exception as exc:
+                logger.exception("inbound_grok_start_failed: %s", exc)
+
+        asyncio.run_coroutine_threadsafe(_start_then_kickoff(), loop)
 
         def _on_audio_in_from_sip(pcm16_8k: bytes):
             if not pcm16_8k:
