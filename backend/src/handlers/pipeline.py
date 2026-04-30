@@ -541,10 +541,49 @@ class EldercarePipeline:
         event_tags = self._derive_tags(transcription, entities)
 
         # event_type: multiclassificação funcional (8 classes fixas).
-        # Vem do clinical_analysis (LLM) via entities.event_type. Fallback
-        # pro primeiro tag heurístico se LLM não classificou.
+        # FAIL-LOUD: se LLM falhou (classification_failed=True), NÃO
+        # default 'relato_geral' silenciosamente — escala pra revisão
+        # humana antes de prosseguir. Discoberto via testes sintéticos
+        # 2026-04-30 que emergências viravam rotineiras com fallback.
+        classification_failed = bool(
+            isinstance(entities, dict)
+            and entities.get("classification_failed")
+        )
         event_type = (entities or {}).get("event_type") if isinstance(entities, dict) else None
+
+        if classification_failed:
+            # Enfileira pra revisão humana e segue criando o evento com
+            # event_type=null + flag classification_failed (visível no
+            # painel admin) pra que time clínico classifique manualmente.
+            try:
+                from src.services.safety_guardrail import enqueue_action_for_review
+                enqueue_action_for_review(
+                    tenant_id=tenant,
+                    patient_id=patient_id,
+                    action_type="classify_event_type",
+                    severity="attention",  # default — humano avalia
+                    payload={
+                        "report_id": str(report_id),
+                        "transcript": transcription[:500],
+                        "failure_reason": entities.get(
+                            "classification_failure_reason", "unknown",
+                        ),
+                        "caregiver_phone": phone,
+                        "expected_action": "Classificar event_type manualmente",
+                    },
+                )
+                logger.warning(
+                    "classification_failed_enqueued_for_review",
+                    report_id=str(report_id),
+                    reason=entities.get("classification_failure_reason"),
+                )
+            except Exception as exc:
+                logger.exception("enqueue_review_failed: %s", exc)
+
         if not event_type:
+            # Sem classification_failed → tenta tag heurístico, último
+            # recurso 'relato_geral' (sinaliza visualmente como classificação
+            # imprecisa pro time clínico).
             event_type = event_tags[0] if event_tags else "relato_geral"
 
         # Abre evento

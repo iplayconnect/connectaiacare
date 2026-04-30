@@ -73,35 +73,51 @@ class AnalysisService:
         self.reports = get_report_service()
 
     def extract_entities(self, transcription: str) -> dict[str, Any]:
+        """Extrai entidades + multiclassifica event_type via LLM router.
+
+        FAIL-LOUD policy (2026-04-30): se LLM falhar OU retornar event_type
+        inválido, NÃO mascarar com 'relato_geral' silenciosamente. Setar
+        classification_failed=True pro pipeline escalar pra revisão humana.
+        Default 'relato_geral' antes deste fix fazia emergência (queda,
+        IAM, convulsão) virar relato rotineiro — discoberto via testes
+        sintéticos.
+        """
         if not transcription.strip():
             return {
                 "patient_name_mentioned": None, "confidence": 0.0,
-                "event_type": "relato_geral",
+                "event_type": None,
+                "classification_failed": True,
+                "classification_failure_reason": "empty_transcript",
             }
         try:
-            # ADR-025: task='intent_classifier' → GPT-5.4 nano (barato, rápido)
             result = self.router.complete_json(
                 task="intent_classifier",
                 system=EXTRACTION_SYSTEM,
                 user=f"Transcrição do áudio do cuidador:\n\n{transcription}",
             )
-            # Valida event_type contra taxonomia fixa de 8 classes; inválido
-            # ou ausente → relato_geral (fallback seguro).
+            # Valida event_type contra taxonomia fixa de 8 classes.
             evt = result.get("event_type") if isinstance(result, dict) else None
             if evt not in ALLOWED_EVENT_TYPES:
-                if evt:
-                    logger.warning(
-                        "invalid_event_type_extracted",
-                        original=evt, forced="relato_geral",
-                    )
+                logger.warning(
+                    "invalid_event_type_extracted",
+                    original=evt,
+                )
                 if isinstance(result, dict):
-                    result["event_type"] = "relato_geral"
+                    # Marca falha em vez de forçar relato_geral. Pipeline
+                    # decide escalação (fila revisão humana ou cascade T2).
+                    result["event_type"] = None
+                    result["classification_failed"] = True
+                    result["classification_failure_reason"] = (
+                        f"invalid_event_type:{evt}" if evt else "missing_event_type"
+                    )
             return result
         except Exception as exc:
             logger.error("entity_extraction_failed", error=str(exc))
             return {
                 "patient_name_mentioned": None, "confidence": 0.0,
-                "event_type": "relato_geral", "error": str(exc),
+                "event_type": None,
+                "classification_failed": True,
+                "classification_failure_reason": f"llm_error:{str(exc)[:200]}",
             }
 
     def analyze(
