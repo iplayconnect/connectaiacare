@@ -777,7 +777,9 @@ def mark_rename_drug_covered(principle: str):
     body = request.get_json(silent=True) or {}
     user_ctx = getattr(g, "user", None) or {}
 
-    row = get_postgres().fetch_one(
+    # insert_returning (commit=True). fetch_one rollbacka — ver fix
+    # de approve_pending_review.
+    row = get_postgres().insert_returning(
         """UPDATE aia_health_rename_drugs
            SET motor_coverage = 'covered',
                last_reviewed_at = NOW(),

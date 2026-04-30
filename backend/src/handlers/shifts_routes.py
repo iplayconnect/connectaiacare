@@ -74,7 +74,8 @@ def create_shift():
         return jsonify({"status": "error", "reason": "invalid_weekdays"}), 400
 
     db = get_postgres()
-    row = db.fetch_one(
+    # insert_returning (commit=True). fetch_one rollbacka.
+    row = db.insert_returning(
         """INSERT INTO aia_health_shift_schedules (
               tenant_id, caregiver_id, shift_name,
               starts_at, ends_at, weekdays, notes

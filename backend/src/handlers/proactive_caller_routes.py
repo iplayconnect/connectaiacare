@@ -225,7 +225,8 @@ def update_patient_settings(patient_id: str):
         return jsonify({"status": "error", "reason": "nothing_to_update"}), 400
     params.append(patient_id)
 
-    row = get_postgres().fetch_one(
+    # insert_returning (commit=True). fetch_one rollbacka.
+    row = get_postgres().insert_returning(
         f"UPDATE aia_health_patients SET {', '.join(fields)}, updated_at = NOW() "
         f"WHERE id = %s RETURNING id, sofia_proactive_calls_enabled, "
         f"preferred_call_window_start, preferred_call_window_end, "

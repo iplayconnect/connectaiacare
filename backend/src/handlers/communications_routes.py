@@ -102,7 +102,8 @@ def create_scenario():
             "fields": required,
         }), 400
 
-    row = get_postgres().fetch_one(
+    # insert_returning (commit=True). fetch_one rollbacka.
+    row = get_postgres().insert_returning(
         """INSERT INTO aia_health_call_scenarios
             (code, label, direction, persona, description, system_prompt,
              allowed_tools, post_call_actions, voice,
@@ -141,7 +142,8 @@ def update_scenario(sid: str):
     if not fields:
         return jsonify({"status": "error", "reason": "nothing_to_update"}), 400
     params.append(sid)
-    row = get_postgres().fetch_one(
+    # insert_returning (commit=True). fetch_one rollbacka.
+    row = get_postgres().insert_returning(
         f"UPDATE aia_health_call_scenarios SET {', '.join(fields)} "
         f"WHERE id = %s RETURNING *",
         tuple(params),
@@ -158,7 +160,8 @@ def update_scenario(sid: str):
 @require_role("super_admin")
 def delete_scenario(sid: str):
     """Soft delete via active=FALSE pra preservar histórico."""
-    row = get_postgres().fetch_one(
+    # insert_returning (commit=True). fetch_one rollbacka.
+    row = get_postgres().insert_returning(
         "UPDATE aia_health_call_scenarios SET active = FALSE "
         "WHERE id = %s RETURNING id", (sid,),
     )
@@ -230,7 +233,8 @@ def create_scenario_version(sid: str):
     user_ctx = getattr(g, "user", None) or {}
     user_id = user_ctx.get("sub")
 
-    row = db.fetch_one(
+    # insert_returning (commit=True). fetch_one rollbacka.
+    row = db.insert_returning(
         """INSERT INTO aia_health_call_scenarios_versions
             (scenario_id, version_number, label, description, system_prompt,
              voice, allowed_tools, post_call_actions, pre_call_context_sql,
@@ -297,8 +301,8 @@ def promote_scenario_version(sid: str, vid: str):
                WHERE scenario_id = %s AND status = 'published' AND id <> %s""",
             (sid, vid),
         )
-        # Promove esta
-        row = db.fetch_one(
+        # Promove esta — insert_returning (commit=True). fetch_one rollbacka.
+        row = db.insert_returning(
             """UPDATE aia_health_call_scenarios_versions
                SET status = 'published', published_at = NOW(),
                    published_by_user_id = %s
@@ -324,7 +328,8 @@ def promote_scenario_version(sid: str, vid: str):
             ),
         )
     else:
-        row = db.fetch_one(
+        # insert_returning (commit=True). fetch_one rollbacka.
+        row = db.insert_returning(
             """UPDATE aia_health_call_scenarios_versions
                SET status = %s
                WHERE id = %s
