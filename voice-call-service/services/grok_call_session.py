@@ -76,6 +76,16 @@ class GrokCallSession:
         self._current_response_has_audio = False
         self._empty_response_retry_attempts = 0
         self._max_empty_response_retries = 4  # aumentado 2→4 — Grok às vezes silencia após tools
+        # WS reconnect — preserva contexto da conversa pra reinjeção
+        # quando WS Grok cair (keepalive timeout, network blip, etc).
+        # Cada item é {role: "user"|"assistant", text: str}
+        self._conversation_history: list[dict] = []
+        self._max_history_for_replay = 10  # últimos N turnos no reconnect
+        self._reconnect_attempts = 0
+        self._max_reconnect_attempts = 3
+        self._is_reconnecting = False
+        self._instructions_cache: str | None = None  # pra re-enviar em reconnect
+        self._tools_cache: list[dict] | None = None
 
         self.session_id: str | None = None
         self._ws: websockets.WebSocketClientProtocol | None = None
@@ -195,6 +205,18 @@ class GrokCallSession:
         vad_prefix_ms = int(os.getenv("GROK_VAD_PREFIX_PADDING_MS", "300"))
         vad_silence_ms = int(os.getenv("GROK_VAD_SILENCE_DURATION_MS", "500"))
 
+        # Cache instructions + tools pra restore em reconnect futuro.
+        self._instructions_cache = instructions
+        self._tools_cache = _build_tools_for_call(
+            self.persona,
+            allowed=self.persona_ctx.get("scenario_allowed_tools") or None,
+        )
+        self._vad_config_cache = {
+            "type": "server_vad",
+            "threshold": vad_threshold,
+            "prefix_padding_ms": vad_prefix_ms,
+            "silence_duration_ms": vad_silence_ms,
+        }
         await self._ws.send(json.dumps({
             "type": "session.update",
             "session": {
@@ -203,17 +225,9 @@ class GrokCallSession:
                 "voice": Config.GROK_VOICE_NAME,
                 "input_audio_format": "pcm16",
                 "output_audio_format": "pcm16",
-                "turn_detection": {
-                    "type": "server_vad",
-                    "threshold": vad_threshold,
-                    "prefix_padding_ms": vad_prefix_ms,
-                    "silence_duration_ms": vad_silence_ms,
-                },
+                "turn_detection": self._vad_config_cache,
                 "input_audio_transcription": {"model": "whisper-1"},
-                "tools": _build_tools_for_call(
-                    self.persona,
-                    allowed=self.persona_ctx.get("scenario_allowed_tools") or None,
-                ),
+                "tools": self._tools_cache,
                 "tool_choice": "auto",
                 "temperature": 0.7,
             },
@@ -356,17 +370,139 @@ class GrokCallSession:
     # ─── Receive loop ───
 
     async def _receive_loop(self) -> None:
+        """Loop resiliente: se WS Grok fechar inesperadamente, tenta
+        reconectar com backoff e restaurar contexto da conversa.
+        Só sai de fato quando self._closed=True (encerramento legítimo)
+        ou max_reconnect_attempts excedido.
+        """
+        while not self._closed:
+            try:
+                async for raw in self._ws:
+                    try:
+                        msg = json.loads(raw)
+                    except Exception:
+                        continue
+                    await self._handle_event(msg)
+                # Saiu do for sem exception = WS fechou de forma limpa
+                if self._closed:
+                    return
+                logger.warning(
+                    "grok_ws_iter_ended_unexpectedly session=%s — reconnecting",
+                    self.session_id,
+                )
+            except asyncio.CancelledError:
+                return
+            except websockets.ConnectionClosed as exc:
+                if self._closed:
+                    logger.info("grok_ws_closed_clean code=%s", exc.code)
+                    return
+                logger.warning(
+                    "grok_ws_closed_unexpected code=%s session=%s — reconnecting",
+                    exc.code, self.session_id,
+                )
+            except Exception:
+                if self._closed:
+                    return
+                logger.exception("grok_ws_loop_error — reconnecting")
+
+            # Tenta reconectar
+            ok = await self._reconnect_grok_ws()
+            if not ok:
+                logger.error(
+                    "grok_ws_reconnect_failed_giving_up session=%s",
+                    self.session_id,
+                )
+                return
+
+    async def _reconnect_grok_ws(self) -> bool:
+        """Reconnect Grok WS com backoff exponencial. Restaura
+        instructions, tools, VAD e injeta últimos N turnos da conversa
+        como conversation.item.create pra Grok ter contexto.
+        Retorna True se conectou e restaurou; False se desistiu.
+        """
+        if self._is_reconnecting:
+            return False
+        self._is_reconnecting = True
         try:
-            async for raw in self._ws:
+            for attempt in range(1, self._max_reconnect_attempts + 1):
+                wait = min(2 ** (attempt - 1), 5)  # 1s, 2s, 4s, capped
+                logger.info(
+                    "grok_ws_reconnect_attempt %d/%d wait=%ds session=%s",
+                    attempt, self._max_reconnect_attempts, wait, self.session_id,
+                )
+                await asyncio.sleep(wait)
                 try:
-                    msg = json.loads(raw)
-                except Exception:
+                    # Reconnect WS
+                    url = f"{Config.GROK_REALTIME_URL}?model={Config.GROK_VOICE_MODEL}"
+                    headers = {"Authorization": f"Bearer {Config.XAI_API_KEY}"}
+                    try:
+                        new_ws = await websockets.connect(
+                            url, additional_headers=headers,
+                        )
+                    except TypeError:
+                        new_ws = await websockets.connect(url, extra_headers=headers)
+
+                    # Re-config session
+                    await new_ws.send(json.dumps({
+                        "type": "session.update",
+                        "session": {
+                            "modalities": ["audio", "text"],
+                            "instructions": self._instructions_cache or "",
+                            "voice": Config.GROK_VOICE_NAME,
+                            "input_audio_format": "pcm16",
+                            "output_audio_format": "pcm16",
+                            "turn_detection": self._vad_config_cache,
+                            "input_audio_transcription": {"model": "whisper-1"},
+                            "tools": self._tools_cache or [],
+                            "tool_choice": "auto",
+                            "temperature": 0.7,
+                        },
+                    }))
+
+                    # Restore: reinjetar últimos N turnos como conversation items
+                    history = self._conversation_history[-self._max_history_for_replay:]
+                    for item in history:
+                        await new_ws.send(json.dumps({
+                            "type": "conversation.item.create",
+                            "item": {
+                                "type": "message",
+                                "role": item.get("role", "user"),
+                                "content": [{
+                                    "type": (
+                                        "input_text"
+                                        if item.get("role") == "user"
+                                        else "text"
+                                    ),
+                                    "text": item.get("text", "")[:500],
+                                }],
+                            },
+                        }))
+
+                    # Substitui WS, reset retry counters
+                    old_ws = self._ws
+                    self._ws = new_ws
+                    self._reconnect_attempts = 0
+                    self._empty_response_retry_attempts = 0
+                    if old_ws:
+                        try:
+                            await old_ws.close()
+                        except Exception:
+                            pass
+
+                    logger.info(
+                        "grok_ws_reconnected session=%s history_replayed=%d",
+                        self.session_id, len(history),
+                    )
+                    return True
+                except Exception as exc:
+                    logger.warning(
+                        "grok_ws_reconnect_attempt_failed %d: %s",
+                        attempt, str(exc)[:200],
+                    )
                     continue
-                await self._handle_event(msg)
-        except asyncio.CancelledError:
-            return
-        except websockets.ConnectionClosed as exc:
-            logger.info("grok_ws_closed code=%s", exc.code)
+            return False
+        finally:
+            self._is_reconnecting = False
 
     async def _handle_event(self, msg: dict) -> None:
         from services.persistence import append_message_voice_call
@@ -479,6 +615,10 @@ class GrokCallSession:
         ):
             text = msg.get("transcript") or ""
             if text:
+                # Track pra reconnect/replay
+                self._conversation_history.append(
+                    {"role": "assistant", "text": text},
+                )
                 # Active context cross-channel
                 try:
                     from services.persistence import append_active_context
@@ -502,6 +642,10 @@ class GrokCallSession:
         if etype == "conversation.item.input_audio_transcription.completed":
             text = msg.get("transcript") or ""
             if text:
+                # Track pra reconnect/replay
+                self._conversation_history.append(
+                    {"role": "user", "text": text},
+                )
                 # Active context cross-channel
                 try:
                     from services.persistence import append_active_context
