@@ -16,6 +16,7 @@ import {
 import { useAuth } from "@/context/auth-context";
 import { api } from "@/lib/api";
 import { hasRole } from "@/lib/permissions";
+import { formatNumber } from "@/lib/utils";
 
 // ════════════════════════════════════════════════════════════════════
 // /admin/regras-clinicas/revisao
@@ -277,7 +278,7 @@ function ReviewCard({
 
   const subtitle =
     tab === "dose_limits"
-      ? `${item.max_daily_dose_value || "?"} ${
+      ? `${formatNumber(item.max_daily_dose_value)} ${
           item.max_daily_dose_unit || ""
         } / dia · ${item.therapeutic_class || "—"}`
       : tab === "contraindications"

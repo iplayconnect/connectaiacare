@@ -19,6 +19,7 @@ import {
 import { useAuth } from "@/context/auth-context";
 import { api } from "@/lib/api";
 import { hasRole } from "@/lib/permissions";
+import { formatNumber } from "@/lib/utils";
 
 // ═══════════════════════════════════════════════════════════════════
 // /admin/regras-clinicas — CRUD do motor de cruzamentos clínicos
@@ -249,7 +250,7 @@ function DoseLimitsTab() {
                     {it.therapeutic_class || "—"}
                   </td>
                   <td className="px-3 py-2 tabular">
-                    {it.max_daily_dose_value} {it.max_daily_dose_unit}
+                    {formatNumber(it.max_daily_dose_value)} {it.max_daily_dose_unit}
                   </td>
                   <td className="px-3 py-2">
                     {it.beers_avoid && (
