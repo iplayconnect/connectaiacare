@@ -86,6 +86,11 @@ class GrokCallSession:
         self._is_reconnecting = False
         self._instructions_cache: str | None = None  # pra re-enviar em reconnect
         self._tools_cache: list[dict] | None = None
+        # Tracking pra guardrail anti-alucinação: cada response da Sofia
+        # marca se houve tool call válida (ok=True) no turno. Se Sofia
+        # narra dados clínicos específicos sem tool válida, NÃO
+        # persistimos no active_context — evita contaminação.
+        self._current_response_had_valid_tool = False
 
         self.session_id: str | None = None
         self._ws: websockets.WebSocketClientProtocol | None = None
@@ -547,9 +552,10 @@ class GrokCallSession:
             self._current_response_has_audio = False
             return
 
-        # Início de novo turno da Sofia — reseta tracking de áudio.
+        # Início de novo turno da Sofia — reseta tracking de áudio + tool.
         if etype == "response.created":
             self._current_response_has_audio = False
+            self._current_response_had_valid_tool = False
             return
 
         # Áudio out (chegou da Grok) — manda pro callback (camada SIP injeta)
@@ -623,27 +629,43 @@ class GrokCallSession:
         ):
             text = msg.get("transcript") or ""
             if text:
-                # Track pra reconnect/replay
+                # Track pra reconnect/replay (sempre — replay é
+                # contexto da própria sessão atual)
                 self._conversation_history.append(
                     {"role": "assistant", "text": text},
                 )
-                # Active context cross-channel
-                try:
-                    from services.persistence import append_active_context
-                    append_active_context(
-                        persona_ctx=self.persona_ctx,
-                        patient_id=self.persona_ctx.get("patient_id"),
-                        role="assistant", content=text, channel="voice_call",
+                # Guardrail anti-alucinação: detecta se Sofia narrou dado
+                # clínico específico SEM tool válida no turno. Se sim,
+                # NÃO persistimos no active_context cross-channel — pra
+                # evitar que próximas ligações herdem alucinação.
+                clinical_pattern = _is_clinical_narration(text)
+                should_persist = True
+                if clinical_pattern and not self._current_response_had_valid_tool:
+                    logger.warning(
+                        "alucination_suspected_skip_persist session=%s "
+                        "pattern=%s text_preview=%s",
+                        self.session_id, clinical_pattern, text[:200],
                     )
-                except Exception:
-                    pass
-                append_message_voice_call(
-                    session_id=self.session_id,
-                    tenant_id=self.tenant_id,
-                    role="assistant",
-                    content=text,
-                    model=Config.GROK_VOICE_MODEL,
-                )
+                    should_persist = False
+
+                if should_persist:
+                    # Active context cross-channel
+                    try:
+                        from services.persistence import append_active_context
+                        append_active_context(
+                            persona_ctx=self.persona_ctx,
+                            patient_id=self.persona_ctx.get("patient_id"),
+                            role="assistant", content=text, channel="voice_call",
+                        )
+                    except Exception:
+                        pass
+                    append_message_voice_call(
+                        session_id=self.session_id,
+                        tenant_id=self.tenant_id,
+                        role="assistant",
+                        content=text,
+                        model=Config.GROK_VOICE_MODEL,
+                    )
             return
 
         # Transcript usuário (STT do Grok/Whisper)
@@ -743,6 +765,12 @@ class GrokCallSession:
             (output or {}).get("ok") if isinstance(output, dict) else None,
             json.dumps(output)[:300] if output else None,
         )
+        # Marca: tool válida (ok=True) ocorreu neste turno → Sofia pode
+        # narrar dados clínicos no transcript que vai pro active_context.
+        # Se ok=False (timeout, erro, handler missing), NÃO marca —
+        # transcripts seguintes NÃO devem ser persistidos como verdade.
+        if isinstance(output, dict) and output.get("ok") is True:
+            self._current_response_had_valid_tool = True
         # Reset tracking de áudio antes do próximo response — recovery
         # cobre o caso de Grok não responder após function_call_output
         # (sintoma observado: response.create não dispara response.created
@@ -967,3 +995,36 @@ def _build_tools_for_call(
         # Tools no allowed que não temos definidas aqui são ignoradas
         # silenciosamente (admin pode adicionar depois).
     return base
+
+
+# ────────────────────────── Guardrail anti-alucinação ──────────────────────────
+
+# Padrões de "narrativa clínica específica" — quando Sofia diz isso SEM
+# tool válida no turno, é forte sinal de alucinação. Conservador:
+# preferimos descartar persistência em FP (Sofia repetindo fato genérico
+# em outras ocasiões) do que contaminar contexto.
+import re as _re
+
+_CLINICAL_PATTERNS = [
+    (_re.compile(r"\b\d{1,3}\s*anos\b", _re.IGNORECASE), "idade"),
+    (_re.compile(r"\bpressão\s+(\d{2,3})\s*(por|/|x)\s*\d{2,3}\b", _re.IGNORECASE), "PA"),
+    (_re.compile(r"\bglicemia\s+\d{2,3}\b", _re.IGNORECASE), "glicemia"),
+    (_re.compile(r"\b(losartana|metformina|sinvastatina|varfarina|gliclazida|enalapril|captopril|omeprazol|amlodipino|atenolol|hidroclorotiazida|aspirina|paracetamol|dipirona|cumadin)\b", _re.IGNORECASE), "medicação"),
+    (_re.compile(r"\b(hipertens[ãa]o|diabetes|insufici[êe]ncia|alzheimer|parkinson|dpoc)\b", _re.IGNORECASE), "condição"),
+    (_re.compile(r"\b\d+\s*mg\b", _re.IGNORECASE), "dose"),
+    (_re.compile(r"\b(alergia|alérgic[ao])\s+(a|à)\b", _re.IGNORECASE), "alergia"),
+]
+
+
+def _is_clinical_narration(text: str) -> str | None:
+    """Retorna nome do pattern detectado, ou None se transcript não
+    parece narrativa clínica específica (frases tipo 'oi, tudo bem'
+    passam livre, frases com 'idade X' ou 'medicação Y' ativam o
+    guardrail).
+    """
+    if not text or len(text) < 10:
+        return None
+    for pat, label in _CLINICAL_PATTERNS:
+        if pat.search(text):
+            return label
+    return None
