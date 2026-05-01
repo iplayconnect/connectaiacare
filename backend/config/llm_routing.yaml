@@ -182,10 +182,11 @@ tasks:
     criticality: high
 
   sofia_chat_tool_decision:
-    description: "Sofia decide se deve chamar tool antes de responder texto livre. Saída JSON {tool_name?, args?, response_text?}."
-    primary: anthropic/claude-3-5-haiku-20241022
+    description: "Sofia decide se chama tool antes de texto livre. Saída JSON {action: text|tool, tool_name?, args?, text_after|text}. DeepSeek primary porque Haiku 3.5 foi descontinuado e tool-decision precisa de baixa latência + bom JSON."
+    primary: deepseek/deepseek-chat
     fallbacks:
-      - deepseek/deepseek-chat
+      - google/gemini-2.5-flash
+      - openai/gpt-5.4-mini
     temperature: 0.0
     max_tokens: 1024
     response_format: json_object
