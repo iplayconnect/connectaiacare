@@ -1,5 +1,10 @@
 # Super Sofia · Arquitetura de plataforma conversacional escalável
 
+> ⚠️ **Atualizado em 2026-05-01 com 3 decisões do Alexandre:**
+> 1. Hospital piloto pode pedir número Zap próprio em <3 meses → multi-instance vai pra Phase A (infra preparada, mas começa com 1 instância ativa).
+> 2. **Política white-label**: nome "Sofia" é fixo da plataforma. Não transferimos pra concorrente comercial (caso Tecnosenior — declinado). White-label completo só sob NDA + contrato uso interno.
+> 3. Volume target 6 meses: **10k msgs/dia** → webhook async + worker pool 5-10 + cost tracking obrigatórios desde Phase A.
+
 > Design definitivo. Pensa a Sofia como **agente multi-canal,
 > multi-tenant, multi-profile** capaz de operar em escala (centenas
 > de tenants, milhões de mensagens/mês) sem perda de coerência clínica
@@ -456,11 +461,45 @@ cria 2 eventos. Idempotency key = hash de
 
 ### 7.1 — Evolution multi-instance pool
 
-Hoje 1 instância (`v6`). Plano:
+Hoje 1 instância (`v6`). Hospital piloto pode pedir número
+próprio em <3 meses → infra preparada desde Phase A:
+
 - Cada tenant pode ter sua própria instância (campo
-  `whatsapp_evolution_instance` já existe)
-- Pool de adapters carrega config por tenant
-- Send: `EvolutionPool.get(tenant_id).send_text(phone, text)`
+  `whatsapp_evolution_instance` já existe em `aia_health_tenants`).
+- Pool de adapters carrega config por tenant.
+- Send: `EvolutionPool.get(tenant_id).send_text(phone, text)`.
+- Webhook: `/webhook/whatsapp/<instance_name>` permite cada
+  instância postar no seu próprio path → tenant resolve direto
+  (cache Redis 5min).
+- **Adicionar instância nova é mudança de config + provisionamento
+  Evolution, não código** — escala operacional.
+
+### 7.5 — Política comercial white-label (constraint arquitetural)
+
+Decisões fixas que alimentam o design:
+
+1. **Nome "Sofia" é fixo da plataforma ConnectaIACare** em todos
+   os tenants. NÃO transferimos pra concorrente comercial.
+2. **Customização permitida** (sem ferir):
+   - Greeting: `"Olá, aqui é a Sofia da ConnectaIACare,
+     atendendo pelo Hospital XYZ"` (Hospital aparece, Sofia mantém
+     autoria).
+   - Footer/assinatura institucional pode mencionar o tenant.
+   - Logo do tenant em portal/email/notificações de plataforma.
+   - Cores/tema do tenant (campos `primary_color`, `accent_color`
+     já existem em `aia_health_tenants`).
+3. **White-label completo** (Sofia → outro nome/marca) **só sob**:
+   - Cliente uso interno **sem revenda comercial**.
+   - Contrato com cláusula de não-concorrência + NDA.
+   - Decisão caso a caso (super_admin manual).
+4. **Casos fechados**:
+   - **Tecnosenior**: declinado. Vai ser concorrente. Sem branding,
+     sem white-label, sem nada.
+5. **Implicação técnica**: campo `aia_health_tenants.ai_name`
+   default = `"Sofia"`. Override permitido apenas com flag
+   `tenant.metadata.white_label_approved = true` (precisa
+   super_admin marcar manualmente). Sem flag, prompt da Sofia
+   força nome `"Sofia"` independente do `ai_name` do tenant.
 
 ### 7.2 — Outbound queue + retry
 
@@ -790,7 +829,17 @@ desviar tráfego gradualmente.
 
 ---
 
-## 13. Decisões abertas (Alexandre confirma cada uma)
+## 13. Decisões — fechadas e abertas
+
+### 13.1 — Decisões fechadas (sign-off Alexandre 2026-05-01)
+
+| # | Decisão | Resolvido |
+|---|---|---|
+| **A** | Multi-instance Evolution | **Phase A — infra preparada, mas só 1 instância ativa hoje. Hospital piloto pode pedir número próprio em <3 meses → adicionar = config + provisionamento, não código.** |
+| **B** | White-label / branding Sofia | **Nome "Sofia" é fixo da plataforma. Não transferimos pra concorrente comercial. Customização permitida (greeting com tenant, footer, cores). White-label completo só sob NDA + uso interno (decisão caso a caso). Tecnosenior declinado.** Detalhes em §7.5. |
+| **C** | Volume target 6 meses | **10k msgs/dia** → webhook async, worker pool 5-10, cost tracking obrigatórios desde Phase A. Headroom 3x = 30k/dia capacidade dimensionada. |
+
+### 13.2 — Decisões abertas (Alexandre confirma)
 
 | # | Decisão | Recomendação | Por quê |
 |---|---|---|---|
