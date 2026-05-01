@@ -21,3 +21,6 @@ numpy>=1.26.0
 # Utilitários
 python-dotenv==1.0.1
 structlog==24.4.0
+
+# Métricas Prometheus (/metrics endpoint)
+prometheus-client==0.21.0

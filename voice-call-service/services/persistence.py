@@ -375,6 +375,8 @@ _LOCAL_TOOLS = {
     "schedule_teleconsulta": "_tool_schedule_teleconsulta",
     "list_medication_schedules": "_tool_list_medication_schedules",
     "get_patient_vitals": "_tool_get_patient_vitals",
+    "get_patient_responsible_phone": "_tool_get_patient_responsible_phone",
+    "dial_phone": "_tool_dial_phone",
 }
 
 # Tools que delegamos via HTTP pro sofia-service (motor de cruzamentos
@@ -392,6 +394,7 @@ _REMOTE_TOOLS = {
 _LOCAL_TOOLS_REQUIRING_REVIEW = {
     "create_care_event",
     "schedule_teleconsulta",
+    "dial_phone",  # ligar é ação externa observável → guardrail decide
 }
 
 # Locais que recebem disclaimer mesmo sem guardrail
@@ -415,6 +418,11 @@ def _classification_to_severity(args: dict) -> str:
     }.get(cls, "attention")
 
 
+def _severity_for_dial(args: dict) -> str:
+    """dial_phone passa severity explícita ou inferida do scenario."""
+    return (args.get("severity") or "urgent").lower()
+
+
 def _call_safety_guardrail_voice(
     name: str, args: dict, persona_ctx: dict
 ) -> dict:
@@ -427,6 +435,9 @@ def _call_safety_guardrail_voice(
             action_type = "register_history"
         elif name == "schedule_teleconsulta":
             severity = "attention"
+            action_type = "invoke_attendant"
+        elif name == "dial_phone":
+            severity = _severity_for_dial(args)
             action_type = "invoke_attendant"
         else:
             severity = "attention"
@@ -798,3 +809,189 @@ def _tool_schedule_teleconsulta(
     if not row:
         return {"ok": False, "error": "create_failed"}
     return {"ok": True, "teleconsulta_id": str(row["id"])}
+
+
+# ───── Discagem ativa (Sofia → terceiro) ─────
+
+
+def _normalize_phone_e164(raw: str | None) -> str | None:
+    """Aceita formatos brasileiros comuns ('51 99948-2737', '+55 51…',
+    '(51) 9 9948-2737') e devolve só dígitos sem o '+'.
+    Não inventa DDI: se vier sem 55 e for 10/11 dígitos, prepende 55.
+    """
+    if not raw:
+        return None
+    digits = "".join(c for c in str(raw) if c.isdigit())
+    if not digits:
+        return None
+    # 10 (fixo c/ DDD) ou 11 (móvel c/ DDD) → prepende 55
+    if len(digits) in (10, 11):
+        digits = "55" + digits
+    return digits
+
+
+def _tool_get_patient_responsible_phone(
+    *, persona_ctx: dict, patient_id: str | None = None, **_: Any,
+) -> dict:
+    """Lista contatos responsáveis pelo paciente (família + nurse_override)
+    com telefones normalizados pra E.164 BR. Sofia usa antes de dial_phone
+    pra escolher quem ligar.
+
+    Schema responsible: {nurse_override?:{name,phone}, family:[{name,
+    relationship,phone,level}]} + legado {name,phone,relationship}.
+    """
+    pid = patient_id or persona_ctx.get("patient_id")
+    if not pid:
+        return {"ok": False, "error": "no_patient"}
+    row = _fetch_one(
+        "SELECT id, full_name, responsible FROM aia_health_patients "
+        "WHERE id = %s",
+        (pid,),
+    )
+    if not row:
+        return {"ok": False, "error": "patient_not_found"}
+    resp = row.get("responsible") or {}
+    if isinstance(resp, str):
+        try:
+            resp = json.loads(resp)
+        except Exception:
+            resp = {}
+
+    contacts: list[dict] = []
+    nurse = resp.get("nurse_override") if isinstance(resp, dict) else None
+    if isinstance(nurse, dict) and nurse.get("phone"):
+        contacts.append({
+            "kind": "nurse_override",
+            "name": nurse.get("name"),
+            "phone_e164": _normalize_phone_e164(nurse.get("phone")),
+            "level": 0,
+        })
+    family = resp.get("family") if isinstance(resp, dict) else None
+    if isinstance(family, list):
+        for f in family:
+            if not isinstance(f, dict) or not f.get("phone"):
+                continue
+            contacts.append({
+                "kind": "family",
+                "name": f.get("name"),
+                "relationship": f.get("relationship"),
+                "phone_e164": _normalize_phone_e164(f.get("phone")),
+                "level": f.get("level"),
+            })
+    # Legado: {name, phone, relationship} no topo
+    if not contacts and isinstance(resp, dict) and resp.get("phone"):
+        contacts.append({
+            "kind": "family_legacy",
+            "name": resp.get("name"),
+            "relationship": resp.get("relationship"),
+            "phone_e164": _normalize_phone_e164(resp.get("phone")),
+            "level": 1,
+        })
+
+    return {
+        "ok": True,
+        "patient_id": str(pid),
+        "patient_name": row.get("full_name"),
+        "count": len(contacts),
+        "contacts": contacts,
+    }
+
+
+def _tool_dial_phone(
+    *,
+    persona_ctx: dict,
+    destination: str,
+    scenario_code: str,
+    patient_id: str | None = None,
+    full_name: str | None = None,
+    extra_context: dict | None = None,
+    severity: str | None = None,  # noqa: ARG001 — usado pelo guardrail wrapper
+    **_: Any,
+) -> dict:
+    """Sofia origina chamada outbound pra um terceiro (ex: alertar família
+    sobre evento clínico). Usa scenario_code do banco pra pegar persona +
+    system_prompt + voice. Não suporta loop (mesma chamada chamando ela
+    mesma) — destination diferente do persona_ctx['phone'] é validado.
+    """
+    dst = _normalize_phone_e164(destination)
+    if not dst:
+        return {"ok": False, "error": "destination_invalid"}
+    if dst == _normalize_phone_e164(persona_ctx.get("phone")):
+        return {"ok": False, "error": "cannot_dial_self"}
+    code = (scenario_code or "").strip()
+    if not code:
+        return {"ok": False, "error": "scenario_code_required"}
+
+    scenario = _fetch_one(
+        "SELECT id, code, label, persona, voice, system_prompt, "
+        "allowed_tools FROM aia_health_call_scenarios "
+        "WHERE code = %s AND active = TRUE LIMIT 1",
+        (code,),
+    )
+    if not scenario:
+        return {"ok": False, "error": "scenario_not_found", "code": code}
+
+    pid = patient_id or persona_ctx.get("patient_id")
+    patient_payload = None
+    if pid:
+        prow = _fetch_one(
+            """SELECT id, full_name, nickname, birth_date, conditions,
+                      allergies, care_unit, room_number
+               FROM aia_health_patients WHERE id = %s""",
+            (pid,),
+        )
+        if prow:
+            patient_payload = {
+                k: (v.isoformat() if hasattr(v, "isoformat") else v)
+                for k, v in prow.items()
+            }
+
+    payload = {
+        "destination": dst,
+        "persona": scenario["persona"],
+        "user_id": persona_ctx.get("user_id"),
+        "patient_id": str(pid) if pid else None,
+        "full_name": full_name or "amigo(a)",
+        "tenant_id": persona_ctx.get("tenant_id") or Config.DEFAULT_TENANT,
+        "scenario_id": str(scenario["id"]),
+        "scenario_code": scenario["code"],
+        "scenario_system_prompt": scenario["system_prompt"],
+        "scenario_voice": scenario["voice"],
+        "scenario_allowed_tools": scenario["allowed_tools"] or [],
+        "extra_context": {
+            **(extra_context or {}),
+            "patient": patient_payload,
+            "scenario_label": scenario.get("label"),
+            "originated_by_sofia_call": True,
+            "origin_phone": persona_ctx.get("phone"),
+        },
+    }
+
+    try:
+        import httpx
+        url = f"{Config.VOICE_CALL_INTERNAL_URL}/api/voice-call/dial"
+        r = httpx.post(url, json=payload, timeout=20.0)
+        if r.status_code != 200:
+            try:
+                detail = r.json()
+            except Exception:
+                detail = {"raw": r.text[:300]}
+            return {
+                "ok": False,
+                "error": f"dial_http_{r.status_code}",
+                "detail": detail,
+            }
+        body = r.json() or {}
+        return {
+            "ok": True,
+            "call_id": body.get("call_id"),
+            "scenario_code": code,
+            "destination": dst,
+            "_message_for_sofia": (
+                "Chamada iniciada — avise o usuário que você acionou "
+                "alguém em paralelo."
+            ),
+        }
+    except Exception as exc:
+        logger.exception("dial_phone_failed")
+        return {"ok": False, "error": "dial_unreachable", "detail": str(exc)}

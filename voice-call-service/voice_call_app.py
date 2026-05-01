@@ -14,10 +14,11 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from dotenv import load_dotenv
 load_dotenv()
 
-from flask import Flask, jsonify
+from flask import Flask, Response, jsonify
 
 from config import Config
 from services.sip_layer import SipLayer, _ensure_call_class
+from services.metrics import render_metrics
 
 logging.basicConfig(
     level=getattr(logging, Config.LOG_LEVEL.upper(), logging.INFO),
@@ -39,6 +40,28 @@ def health():
         "sip_initialized": sip._initialized,
         "missing_config": missing,
     })
+
+
+@app.get("/metrics")
+def metrics_endpoint():
+    """Exposição Prometheus — tap em chamadas ativas, latências e pool.
+
+    Atualiza gauges derivados (pool PG) on-demand pra evitar callbacks
+    do collector (psycopg2 pool não dá hook nativo).
+    """
+    try:
+        from services.persistence import _get_pool  # type: ignore
+        from services.metrics import metrics as _m
+        pool = _get_pool()
+        # ThreadedConnectionPool guarda lista interna em _used / _pool
+        used = len(getattr(pool, "_used", {}) or {})
+        maxc = getattr(pool, "maxconn", 0) or 0
+        _m.db_pool_in_use.set(used)
+        _m.db_pool_max.set(maxc)
+    except Exception:
+        pass
+    payload, ctype = render_metrics()
+    return Response(payload, mimetype=ctype)
 
 
 def _init_sip():

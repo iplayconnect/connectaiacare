@@ -13,6 +13,7 @@ import threading
 from config import Config
 from services.audio_bridge import upsample_8k_to_24k, downsample_24k_to_8k
 from services.grok_call_session import GrokCallSession
+from services.metrics import metrics
 from services.sip_layer import SipLayer
 
 logger = logging.getLogger("inbound_bridge")
@@ -196,6 +197,8 @@ def install_inbound_handler() -> None:
             "grok": None, "caller_phone": caller_phone,
         }
         _active_inbound[call_id] = bridge_state
+        metrics.calls_started.labels(direction="inbound").inc()
+        metrics.active_calls.labels(direction="inbound").inc()
 
         def _run_loop():
             asyncio.set_event_loop(loop)
@@ -258,6 +261,8 @@ def install_inbound_handler() -> None:
                 "inbound_state call_id=%s state=%s", local_id, state,
             )
             if state in ("DISCONNECTED", "DISCONNCTD"):
+                metrics.active_calls.labels(direction="inbound").dec()
+                metrics.calls_ended.labels(direction="inbound", state=state).inc()
                 # Memory writeback — extrai aprendizado da conversa
                 # pra o user continuar sendo "lembrado" no chat/whatsapp
                 # depois (cross-channel context da Sofia).

@@ -86,6 +86,11 @@ class GrokCallSession:
         self._is_reconnecting = False
         self._instructions_cache: str | None = None  # pra re-enviar em reconnect
         self._tools_cache: list[dict] | None = None
+        # Tracking pra guardrail anti-alucinação: cada response da Sofia
+        # marca se houve tool call válida (ok=True) no turno. Se Sofia
+        # narra dados clínicos específicos sem tool válida, NÃO
+        # persistimos no active_context — evita contaminação.
+        self._current_response_had_valid_tool = False
 
         self.session_id: str | None = None
         self._ws: websockets.WebSocketClientProtocol | None = None
@@ -173,6 +178,11 @@ class GrokCallSession:
                 extra_headers=[("Authorization", f"Bearer {Config.XAI_API_KEY}")],
                 **connect_kwargs,
             )
+        try:
+            from services.metrics import metrics as _m
+            _m.grok_ws_connected.inc()
+        except Exception:
+            pass
 
         # session.update — mesma config validada com browser
         first_name = (
@@ -348,6 +358,11 @@ class GrokCallSession:
         if self._ws:
             try:
                 await self._ws.close()
+            except Exception:
+                pass
+            try:
+                from services.metrics import metrics as _m
+                _m.grok_ws_connected.dec()
             except Exception:
                 pass
 
@@ -537,6 +552,11 @@ class GrokCallSession:
             except Exception as exc:
                 logger.warning("on_user_interrupt_failed: %s", exc)
             try:
+                from services.metrics import metrics as _m
+                _m.interrupts.inc()
+            except Exception:
+                pass
+            try:
                 if self._ws:
                     await self._ws.send(json.dumps({"type": "response.cancel"}))
             except Exception as exc:
@@ -547,9 +567,10 @@ class GrokCallSession:
             self._current_response_has_audio = False
             return
 
-        # Início de novo turno da Sofia — reseta tracking de áudio.
+        # Início de novo turno da Sofia — reseta tracking de áudio + tool.
         if etype == "response.created":
             self._current_response_has_audio = False
+            self._current_response_had_valid_tool = False
             return
 
         # Áudio out (chegou da Grok) — manda pro callback (camada SIP injeta)
@@ -623,27 +644,43 @@ class GrokCallSession:
         ):
             text = msg.get("transcript") or ""
             if text:
-                # Track pra reconnect/replay
+                # Track pra reconnect/replay (sempre — replay é
+                # contexto da própria sessão atual)
                 self._conversation_history.append(
                     {"role": "assistant", "text": text},
                 )
-                # Active context cross-channel
-                try:
-                    from services.persistence import append_active_context
-                    append_active_context(
-                        persona_ctx=self.persona_ctx,
-                        patient_id=self.persona_ctx.get("patient_id"),
-                        role="assistant", content=text, channel="voice_call",
+                # Guardrail anti-alucinação: detecta se Sofia narrou dado
+                # clínico específico SEM tool válida no turno. Se sim,
+                # NÃO persistimos no active_context cross-channel — pra
+                # evitar que próximas ligações herdem alucinação.
+                clinical_pattern = _is_clinical_narration(text)
+                should_persist = True
+                if clinical_pattern and not self._current_response_had_valid_tool:
+                    logger.warning(
+                        "alucination_suspected_skip_persist session=%s "
+                        "pattern=%s text_preview=%s",
+                        self.session_id, clinical_pattern, text[:200],
                     )
-                except Exception:
-                    pass
-                append_message_voice_call(
-                    session_id=self.session_id,
-                    tenant_id=self.tenant_id,
-                    role="assistant",
-                    content=text,
-                    model=Config.GROK_VOICE_MODEL,
-                )
+                    should_persist = False
+
+                if should_persist:
+                    # Active context cross-channel
+                    try:
+                        from services.persistence import append_active_context
+                        append_active_context(
+                            persona_ctx=self.persona_ctx,
+                            patient_id=self.persona_ctx.get("patient_id"),
+                            role="assistant", content=text, channel="voice_call",
+                        )
+                    except Exception:
+                        pass
+                    append_message_voice_call(
+                        session_id=self.session_id,
+                        tenant_id=self.tenant_id,
+                        role="assistant",
+                        content=text,
+                        model=Config.GROK_VOICE_MODEL,
+                    )
             return
 
         # Transcript usuário (STT do Grok/Whisper)
@@ -693,6 +730,10 @@ class GrokCallSession:
 
     async def _execute_tool(self, call_id: str, name: str, args: dict) -> None:
         from services.persistence import execute_voice_tool
+        try:
+            from services.metrics import metrics as _m
+        except Exception:
+            _m = None
         self._tool_calls += 1
         logger.info(
             "tool_call_received name=%s args=%s session=%s",
@@ -704,6 +745,8 @@ class GrokCallSession:
         # de receber pings e response.create não funciona, deixando
         # Sofia "muda" após cada tool call. Fix: rodar em thread
         # separada via asyncio.to_thread pra liberar o loop.
+        import time as _time
+        _start = _time.monotonic()
         try:
             # Timeout 8s — acima disso WS Grok perde keepalive (default
             # ping interval do servidor) e mata sessão. Tool DB normal
@@ -743,6 +786,25 @@ class GrokCallSession:
             (output or {}).get("ok") if isinstance(output, dict) else None,
             json.dumps(output)[:300] if output else None,
         )
+        # Métricas: latência + counter por (name, ok)
+        if _m is not None:
+            _ok = bool(isinstance(output, dict) and output.get("ok") is True)
+            try:
+                _m.tool_latency.labels(name=name).observe(_time.monotonic() - _start)
+                _m.tool_executions.labels(name=name, ok=str(_ok).lower()).inc()
+                if name == "dial_phone":
+                    sc = (args or {}).get("scenario_code") or "unknown"
+                    _m.calls_origin_total.labels(
+                        scenario_code=sc, ok=str(_ok).lower(),
+                    ).inc()
+            except Exception:
+                pass
+        # Marca: tool válida (ok=True) ocorreu neste turno → Sofia pode
+        # narrar dados clínicos no transcript que vai pro active_context.
+        # Se ok=False (timeout, erro, handler missing), NÃO marca —
+        # transcripts seguintes NÃO devem ser persistidos como verdade.
+        if isinstance(output, dict) and output.get("ok") is True:
+            self._current_response_had_valid_tool = True
         # Reset tracking de áudio antes do próximo response — recovery
         # cobre o caso de Grok não responder após function_call_output
         # (sintoma observado: response.create não dispara response.created
@@ -890,6 +952,51 @@ def _build_tools_for_call(
         },
         {
             "type": "function",
+            "name": "get_patient_responsible_phone",
+            "description": "Lista os contatos responsáveis do paciente (família, enfermeira dedicada) com telefones já em E.164 BR. USE ANTES de dial_phone pra escolher pra quem ligar. Retorna {contacts: [{kind, name, relationship, phone_e164, level}]}.",
+            "parameters": {
+                "type": "object",
+                "properties": {"patient_id": {"type": "string"}},
+            },
+        },
+        {
+            "type": "function",
+            "name": "dial_phone",
+            "description": "Origina uma NOVA chamada outbound em paralelo (ex: avisar família sobre evento clínico) usando um scenario_code do banco que define persona/voz/prompt. Use APENAS quando: (a) há motivo clínico real (intercorrência, queda, mudança importante), (b) você confirmou o número via get_patient_responsible_phone, (c) o usuário com você foi informado. Passa por Safety Guardrail. Não pode discar pra você mesma (loop).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "destination": {
+                        "type": "string",
+                        "description": "Telefone E.164 BR (com 55) ou DDD+número — função normaliza.",
+                    },
+                    "scenario_code": {
+                        "type": "string",
+                        "description": "Código do scenario na tabela aia_health_call_scenarios. Ex: 'alerta_familia_evento_clinico'.",
+                    },
+                    "patient_id": {
+                        "type": "string",
+                        "description": "Opcional. Se omitido usa o do contexto atual.",
+                    },
+                    "full_name": {
+                        "type": "string",
+                        "description": "Nome de quem deve atender (pra Sofia cumprimentar).",
+                    },
+                    "severity": {
+                        "type": "string",
+                        "enum": ["attention", "urgent", "critical"],
+                        "description": "Severidade pro Safety Guardrail. Default urgent.",
+                    },
+                    "extra_context": {
+                        "type": "object",
+                        "description": "Contexto adicional injetado no scenario (ex: descrição do evento).",
+                    },
+                },
+                "required": ["destination", "scenario_code"],
+            },
+        },
+        {
+            "type": "function",
             "name": "escalate_to_attendant",
             "description": "Aciona equipe humana responsável (atendente Isabel se B2C, cuidador interno se B2B) discando o ramal vinculado ao paciente. Use quando: queixa clínica significativa, padrão preocupante (várias quedas, dor persistente), pedido explícito do usuário, situação fora da sua capacidade. Severity: 'critical' = emergência (dor torácica), 'urgent' = preocupação real, 'attention' = vale revisão. Passa por Safety Guardrail.",
             "parameters": {
@@ -967,3 +1074,36 @@ def _build_tools_for_call(
         # Tools no allowed que não temos definidas aqui são ignoradas
         # silenciosamente (admin pode adicionar depois).
     return base
+
+
+# ────────────────────────── Guardrail anti-alucinação ──────────────────────────
+
+# Padrões de "narrativa clínica específica" — quando Sofia diz isso SEM
+# tool válida no turno, é forte sinal de alucinação. Conservador:
+# preferimos descartar persistência em FP (Sofia repetindo fato genérico
+# em outras ocasiões) do que contaminar contexto.
+import re as _re
+
+_CLINICAL_PATTERNS = [
+    (_re.compile(r"\b\d{1,3}\s*anos\b", _re.IGNORECASE), "idade"),
+    (_re.compile(r"\bpressão\s+(\d{2,3})\s*(por|/|x)\s*\d{2,3}\b", _re.IGNORECASE), "PA"),
+    (_re.compile(r"\bglicemia\s+\d{2,3}\b", _re.IGNORECASE), "glicemia"),
+    (_re.compile(r"\b(losartana|metformina|sinvastatina|varfarina|gliclazida|enalapril|captopril|omeprazol|amlodipino|atenolol|hidroclorotiazida|aspirina|paracetamol|dipirona|cumadin)\b", _re.IGNORECASE), "medicação"),
+    (_re.compile(r"\b(hipertens[ãa]o|diabetes|insufici[êe]ncia|alzheimer|parkinson|dpoc)\b", _re.IGNORECASE), "condição"),
+    (_re.compile(r"\b\d+\s*mg\b", _re.IGNORECASE), "dose"),
+    (_re.compile(r"\b(alergia|alérgic[ao])\s+(a|à)\b", _re.IGNORECASE), "alergia"),
+]
+
+
+def _is_clinical_narration(text: str) -> str | None:
+    """Retorna nome do pattern detectado, ou None se transcript não
+    parece narrativa clínica específica (frases tipo 'oi, tudo bem'
+    passam livre, frases com 'idade X' ou 'medicação Y' ativam o
+    guardrail).
+    """
+    if not text or len(text) < 10:
+        return None
+    for pat, label in _CLINICAL_PATTERNS:
+        if pat.search(text):
+            return label
+    return None

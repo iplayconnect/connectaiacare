@@ -101,6 +101,13 @@ const NAV_ITEMS: NavItem[] = [
     group: "admin",
   },
   {
+    href: "/admin/corpus-review",
+    label: "Revisão · Corpus",
+    icon: Sparkles,
+    roles: ["super_admin", "admin_tenant", "clinical_reviewer", "medico"],
+    group: "admin",
+  },
+  {
     href: "/admin/testes-sinteticos",
     label: "Testes Sintéticos",
     icon: Activity,
@@ -112,6 +119,13 @@ const NAV_ITEMS: NavItem[] = [
     label: "Saúde do Sistema",
     icon: Activity,
     roles: ["super_admin", "admin_tenant"],
+    group: "admin",
+  },
+  {
+    href: "/admin/system",
+    label: "Sistema · Cross-tenant",
+    icon: Activity,
+    roles: ["super_admin"],
     group: "admin",
   },
   {

@@ -12,6 +12,7 @@ import {
   Pause,
   Users,
   Activity,
+  Sparkles,
 } from "lucide-react";
 
 import { useAuth } from "@/context/auth-context";
@@ -121,12 +122,19 @@ export default function TenantsPage() {
             <RefreshCw className="h-4 w-4" />
             Atualizar
           </button>
+          <Link
+            href="/admin/system/tenants/new"
+            className="flex items-center gap-2 px-3 py-2 text-sm rounded-lg border border-accent-cyan/30 text-accent-cyan hover:bg-accent-cyan/5"
+          >
+            <Sparkles className="h-4 w-4" />
+            Onboarding wizard
+          </Link>
           <button
             onClick={() => setShowNewForm((v) => !v)}
             className="flex items-center gap-2 px-3 py-2 text-sm rounded-lg accent-gradient text-slate-900 font-medium"
           >
             <Plus className="h-4 w-4" />
-            Novo tenant
+            Novo (rápido)
           </button>
         </div>
       </header>

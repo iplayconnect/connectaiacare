@@ -479,7 +479,11 @@ function AlertRow({
 }: AlertRowProps) {
   const s = STATUS_SYSTEM[alert.classification];
   const isAck = !!alert.acknowledged_at;
-  const canCall = alert.classification === "urgent" || alert.classification === "critical";
+  // Opção 2: gate solto — Sofia pode ligar p/ família em qualquer
+  // alerta não-routine. Antes era apenas urgent|critical, mas
+  // attention também justifica contato proativo (ex: queda leve,
+  // intercorrência menor) — Sofia decide o tom no script.
+  const canCall = alert.classification !== "routine";
   const calling = alert.call_state?.status === "dialing";
 
   const timeLabel =
@@ -737,7 +741,9 @@ function AlertDrawer({ alert, onClose, onAck, onEscalate, onCall }: AlertDrawerP
   useEffect(() => setMounted(true), []);
 
   const s = STATUS_SYSTEM[alert.classification];
-  const canCall = alert.classification === "urgent" || alert.classification === "critical";
+  // Opção 2: gate solto — qualquer alerta não-routine permite Sofia
+  // ligar p/ família. Paralelo com o AlertRow.
+  const canCall = alert.classification !== "routine";
   const isAck = !!alert.acknowledged_at;
   const calling = alert.call_state?.status === "dialing";
 
