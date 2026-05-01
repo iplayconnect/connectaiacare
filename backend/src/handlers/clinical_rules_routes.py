@@ -615,8 +615,14 @@ _REVIEW_TABLES = {
 @bp.get("/api/clinical-rules/review/pending")
 @require_role("super_admin", "admin_tenant", "medico", "enfermeiro")
 def list_pending_review():
-    """Lista TODAS as regras com review_status='auto_pending' de todas
-    as tabelas do motor. Retorno organizado por tabela."""
+    """Lista regras com review_status='auto_pending' E active=TRUE.
+
+    Bug fix Henrique 2026-05-01: rejeição (active=FALSE) NÃO mudava
+    review_status (CHECK constraint não tem 'rejected' como valor
+    válido), então item rejeitado continuava aparecendo na fila. Fix:
+    adicionar AND active=TRUE no filtro — itens rejeitados saem
+    automaticamente porque reject_pending_review já faz active=FALSE.
+    """
     from src.services.postgres import get_postgres
     db = get_postgres()
     out = {}
@@ -627,6 +633,7 @@ def list_pending_review():
             f"""SELECT {meta['id_column']} AS row_id, {cols}
                 FROM {meta['table']}
                 WHERE review_status = 'auto_pending'
+                  AND active = TRUE
                 ORDER BY {meta['key_column']}"""
         )
         items = []
