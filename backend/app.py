@@ -31,6 +31,7 @@ from src.handlers.tecnosenior_routes import bp as tecnosenior_bp
 from src.handlers.teleconsulta_routes import bp as teleconsulta_bp
 from src.handlers.users_routes import bp as users_bp
 from src.handlers.voip_routes import bp as voip_bp
+from src.handlers.webhook_async_routes import bp as webhook_async_bp
 from src.handlers.weekly_report_routes import bp as weekly_report_bp
 from src.utils.logger import configure_logging, get_logger
 
@@ -92,6 +93,7 @@ def create_app() -> Flask:
     app.register_blueprint(system_tenants_bp)
     app.register_blueprint(tecnosenior_bp)
     app.register_blueprint(corpus_review_bp)
+    app.register_blueprint(webhook_async_bp)  # Phase B — webhook v2 async
 
     # JWT middleware: protege /api/* exceto rotas públicas (auth, webhook,
     # portal do paciente com PIN, onboarding B2C).
