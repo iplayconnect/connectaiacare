@@ -22,7 +22,7 @@ import { hasRole } from "@/lib/permissions";
 import { api } from "@/lib/api";
 
 // ═══════════════════════════════════════════════════════════════
-// /admin/corpus-review — revisão clínica do gold-standard.
+// /admin/governance/corpus-review — revisão clínica do gold-standard.
 // Um caso por vez, 8 botões, campo de nota opcional. Otimizada
 // pra mobile (alvo: Henrique revisar do celular no café).
 // ═══════════════════════════════════════════════════════════════
@@ -92,7 +92,7 @@ export default function CorpusReviewPage() {
   const loadStats = useCallback(async () => {
     try {
       const s = await api.request<Stats & { status: string }>(
-        "/api/admin/corpus-review/stats",
+        "/api/admin/governance/corpus-review/stats",
       );
       setStats(s);
     } catch {
@@ -110,7 +110,7 @@ export default function CorpusReviewPage() {
       try {
         const params = new URLSearchParams();
         if (skipIds.length > 0) params.set("skip_id", skipIds[skipIds.length - 1]);
-        const path = `/api/admin/corpus-review/next${
+        const path = `/api/admin/governance/corpus-review/next${
           params.toString() ? `?${params.toString()}` : ""
         }`;
         const res = await api.request<{
@@ -149,7 +149,7 @@ export default function CorpusReviewPage() {
     setSubmitting(true);
     setError(null);
     try {
-      await api.request(`/api/admin/corpus-review/${current.id}`, {
+      await api.request(`/api/admin/governance/corpus-review/${current.id}`, {
         method: "POST",
         body: JSON.stringify({
           expected_event_type: chosenEventType,

@@ -19,7 +19,7 @@ import {
 } from "@/lib/api";
 
 // ═══════════════════════════════════════════════════════════════════
-// /admin/regras-clinicas/cascadas — Visualizador read-only das
+// /admin/governance/cascades — Visualizador read-only das
 // cascatas de prescrição configuradas (dimensão 13 do motor).
 // Permissão: super_admin, admin_tenant, medico, enfermeiro.
 // ═══════════════════════════════════════════════════════════════════

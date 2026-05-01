@@ -26,7 +26,7 @@ import {
 } from "@/lib/api";
 
 // ═══════════════════════════════════════════════════════════════════
-// /admin/cenarios-sofia/versoes — Versionamento de prompts dos cenários.
+// /admin/governance/scenarios/versions — Versionamento de prompts dos cenários.
 // Editar prompt vai pra DRAFT, admin testa, promove pra TESTING e
 // depois PUBLISHED. Cada promoção arquiva a anterior. Histórico inviolável.
 // Permissão: super_admin OU admin_tenant.

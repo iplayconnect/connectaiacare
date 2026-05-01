@@ -16,7 +16,7 @@ import { hasRole } from "@/lib/permissions";
 import { api, type CallScenario } from "@/lib/api";
 
 // ═══════════════════════════════════════════════════════════════════
-// /admin/cenarios-sofia — CRUD dos playbooks de ligação Sofia.
+// /admin/governance/scenarios — CRUD dos playbooks de ligação Sofia.
 // Editar prompt, voz, tools permitidas e ações pós-call sem deploy.
 // Permissão: super_admin OU admin_tenant.
 // ═══════════════════════════════════════════════════════════════════

@@ -12,7 +12,6 @@ import {
   UsersRound,
   UserCog,
   Video,
-  ClipboardList,
   ClipboardCheck,
   Users,
   KeyRound,
@@ -23,6 +22,9 @@ import {
   GitFork,
   Volume2,
   CalendarClock,
+  Building2,
+  HeartHandshake,
+  ServerCog,
 } from "lucide-react";
 
 import { useAuth } from "@/context/auth-context";
@@ -30,24 +32,40 @@ import { hasPermission, hasRole, ROLE_LABEL } from "@/lib/permissions";
 import type { AuthUser } from "@/lib/auth";
 
 // ═══════════════════════════════════════════════════════════════
-// Sidebar fixa — navegação clínica + perfil do usuário no rodapé.
-// Items filtrados por role/permission. Estrutura preparada para
-// substituir por GET /api/ui/config dinâmico (Bloco C v2).
+// Sidebar com 4 grupos:
+//   main        — Operação (todos com permission)
+//   tenant      — Administração do tenant (admin_tenant + super_admin)
+//   governance  — Governança Clínica cross-tenant (multi-role
+//                 conforme item — clinical_reviewer, medico, etc.)
+//   system      — Sistema · Cross-tenant (SUPER_ADMIN ONLY)
+//
+// Decisão de roteamento:
+//   /admin/*               → governance e tenant misturados (legado)
+//   /admin/governance/*    → governança clínica cross-tenant (multi-role)
+//   /admin/system/*        → operações de plataforma (super_admin only)
 // ═══════════════════════════════════════════════════════════════
+
+type NavGroupId = "main" | "tenant" | "governance" | "system";
 
 type NavItem = {
   href: string;
   label: string;
   icon: React.ComponentType<{ className?: string }>;
-  /** Mostra apenas se o user tem QUALQUER UMA dessas permissions. */
   permissions?: string[];
-  /** Mostra apenas se o user tem QUALQUER UM desses roles. */
   roles?: AuthUser["role"][];
   badge?: number | string;
-  group?: "main" | "admin";
+  group?: NavGroupId;
+};
+
+const GROUP_LABELS: Record<NavGroupId, string> = {
+  main: "",
+  tenant: "Administração do tenant",
+  governance: "Governança Clínica",
+  system: "Sistema · Cross-tenant",
 };
 
 const NAV_ITEMS: NavItem[] = [
+  // ─── Operação (todos com permission) ───
   { href: "/", label: "Dashboard", icon: Activity },
   { href: "/alertas", label: "Alertas", icon: ShieldAlert, permissions: ["alerts:read"] },
   { href: "/alertas/clinicos", label: "Alertas Clínicos", icon: ShieldAlert, permissions: ["alerts:read"] },
@@ -57,140 +75,135 @@ const NAV_ITEMS: NavItem[] = [
   { href: "/sofia", label: "Sofia Chat", icon: Sparkles },
   { href: "/comunicacao", label: "Comunicação", icon: Phone },
   { href: "/equipe", label: "Equipe", icon: UserCog, permissions: ["caregivers:read"] },
-  // Admin section
+
+  // ─── Administração do tenant ───
   {
     href: "/admin/usuarios",
     label: "Usuários",
     icon: Users,
     permissions: ["users:read"],
-    group: "admin",
+    group: "tenant",
   },
   {
     href: "/admin/perfis",
     label: "Papéis & Permissões",
     icon: KeyRound,
     permissions: ["profiles:read"],
-    group: "admin",
-  },
-  {
-    href: "/admin/regras-clinicas",
-    label: "Regras Clínicas",
-    icon: Stethoscope,
-    roles: ["super_admin", "admin_tenant"],
-    group: "admin",
-  },
-  {
-    href: "/admin/regras-clinicas/cascadas",
-    label: "Cascatas",
-    icon: GitFork,
-    roles: ["super_admin", "admin_tenant", "medico", "enfermeiro"],
-    group: "admin",
-  },
-  {
-    href: "/admin/regras-clinicas/revisao",
-    label: "Revisão Clínica",
-    icon: ClipboardCheck,
-    roles: ["super_admin", "admin_tenant", "medico", "enfermeiro"],
-    group: "admin",
+    group: "tenant",
   },
   {
     href: "/admin/biometria-voz",
     label: "Biometria de Voz",
     icon: Volume2,
     roles: ["super_admin", "admin_tenant", "medico", "enfermeiro"],
-    group: "admin",
-  },
-  {
-    href: "/admin/corpus-review",
-    label: "Revisão · Corpus",
-    icon: Sparkles,
-    roles: ["super_admin", "admin_tenant", "clinical_reviewer", "medico"],
-    group: "admin",
-  },
-  {
-    href: "/admin/testes-sinteticos",
-    label: "Testes Sintéticos",
-    icon: Activity,
-    roles: ["super_admin", "admin_tenant"],
-    group: "admin",
-  },
-  {
-    href: "/admin/saude",
-    label: "Saúde do Sistema",
-    icon: Activity,
-    roles: ["super_admin", "admin_tenant"],
-    group: "admin",
-  },
-  {
-    href: "/admin/system",
-    label: "Sistema · Cross-tenant",
-    icon: Activity,
-    roles: ["super_admin"],
-    group: "admin",
-  },
-  {
-    href: "/admin/system/tenants",
-    label: "Tenants (Sistema)",
-    icon: Activity,
-    roles: ["super_admin"],
-    group: "admin",
+    group: "tenant",
   },
   {
     href: "/admin/plantoes",
     label: "Plantões",
     icon: CalendarClock,
     roles: ["super_admin", "admin_tenant", "medico", "enfermeiro"],
-    group: "admin",
-  },
-  {
-    href: "/admin/cenarios-sofia",
-    label: "Cenários Sofia",
-    icon: Phone,
-    roles: ["super_admin", "admin_tenant"],
-    group: "admin",
-  },
-  {
-    href: "/admin/cenarios-sofia/versoes",
-    label: "Versões de Prompts",
-    icon: GitBranch,
-    roles: ["super_admin", "admin_tenant"],
-    group: "admin",
+    group: "tenant",
   },
   {
     href: "/admin/seguranca/fila-revisao",
     label: "Fila de Revisão",
     icon: ShieldAlert,
     roles: ["super_admin", "admin_tenant", "medico", "enfermeiro", "cuidador_pro", "familia"],
-    group: "admin",
+    group: "tenant",
+  },
+  { href: "/configuracoes", label: "Configurações", icon: Settings, group: "tenant" },
+
+  // ─── Governança Clínica (cross-tenant, multi-role) ───
+  {
+    href: "/admin/governance/clinical-rules",
+    label: "Regras Clínicas (master)",
+    icon: Stethoscope,
+    roles: ["super_admin", "admin_tenant"],
+    group: "governance",
   },
   {
-    href: "/admin/seguranca/risk-score",
+    href: "/admin/governance/cascades",
+    label: "Cascatas",
+    icon: GitFork,
+    roles: ["super_admin", "admin_tenant", "medico", "enfermeiro"],
+    group: "governance",
+  },
+  {
+    href: "/admin/governance/review",
+    label: "Revisão Clínica",
+    icon: ClipboardCheck,
+    roles: ["super_admin", "admin_tenant", "medico", "enfermeiro"],
+    group: "governance",
+  },
+  {
+    href: "/admin/governance/corpus-review",
+    label: "Revisão · Corpus",
+    icon: HeartHandshake,
+    roles: ["super_admin", "admin_tenant", "clinical_reviewer", "medico"],
+    group: "governance",
+  },
+  {
+    href: "/admin/governance/synthetic-tests",
+    label: "Testes Sintéticos",
+    icon: Activity,
+    roles: ["super_admin", "admin_tenant"],
+    group: "governance",
+  },
+  {
+    href: "/admin/governance/scenarios",
+    label: "Cenários Sofia",
+    icon: Phone,
+    roles: ["super_admin", "admin_tenant"],
+    group: "governance",
+  },
+  {
+    href: "/admin/governance/scenarios/versions",
+    label: "Versões de Prompts",
+    icon: GitBranch,
+    roles: ["super_admin", "admin_tenant"],
+    group: "governance",
+  },
+
+  // ─── Sistema · Cross-tenant (SUPER_ADMIN ONLY) ───
+  {
+    href: "/admin/system",
+    label: "Dashboard cross-tenant",
+    icon: Activity,
+    roles: ["super_admin"],
+    group: "system",
+  },
+  {
+    href: "/admin/system/tenants",
+    label: "Tenants",
+    icon: Building2,
+    roles: ["super_admin"],
+    group: "system",
+  },
+  {
+    href: "/admin/system/health",
+    label: "Saúde da Plataforma",
+    icon: ServerCog,
+    roles: ["super_admin"],
+    group: "system",
+  },
+  {
+    href: "/admin/system/health/risk-score",
     label: "Risk Score",
     icon: Activity,
-    roles: ["super_admin", "admin_tenant", "medico", "enfermeiro"],
-    group: "admin",
+    roles: ["super_admin"],
+    group: "system",
   },
   {
-    href: "/admin/proactive-caller",
+    href: "/admin/system/operations/proactive-caller",
     label: "Proactive Caller",
     icon: PhoneOutgoing,
-    roles: ["super_admin", "admin_tenant", "medico", "enfermeiro"],
-    group: "admin",
+    roles: ["super_admin"],
+    group: "system",
   },
-  // /admin/auditoria — desabilitado até página ser criada
-  // (prefetch do Next.js gerava 404 no console)
-  // {
-  //   href: "/admin/auditoria",
-  //   label: "Auditoria",
-  //   icon: ClipboardList,
-  //   permissions: ["audit:read"],
-  //   group: "admin",
-  // },
-  // Settings (todos têm acesso ao próprio settings)
-  { href: "/configuracoes", label: "Configurações", icon: Settings, group: "admin" },
 ];
 
-function visibleItems(user: AuthUser | null, group: "main" | "admin"): NavItem[] {
+function visibleItems(user: AuthUser | null, group: NavGroupId): NavItem[] {
   return NAV_ITEMS.filter((item) => {
     const itemGroup = item.group || "main";
     if (itemGroup !== group) return false;
@@ -207,7 +220,9 @@ export function Sidebar() {
   const { user } = useAuth();
 
   const mainItems = visibleItems(user, "main");
-  const adminItems = visibleItems(user, "admin");
+  const tenantItems = visibleItems(user, "tenant");
+  const governanceItems = visibleItems(user, "governance");
+  const systemItems = visibleItems(user, "system");
 
   return (
     <aside className="fixed left-0 top-0 bottom-0 w-60 border-r border-white/[0.06] bg-[hsl(222,47%,7%)]/80 backdrop-blur-xl flex flex-col z-40">
@@ -218,10 +233,7 @@ export function Sidebar() {
       >
         <div className="relative">
           <div className="accent-gradient p-2 rounded-lg shadow-glow-cyan transition-transform group-hover:scale-105">
-            <HeartPulse
-              className="h-4 w-4 text-slate-900"
-              strokeWidth={2.5}
-            />
+            <HeartPulse className="h-4 w-4 text-slate-900" strokeWidth={2.5} />
           </div>
           <div className="absolute -inset-0.5 accent-gradient rounded-lg opacity-0 group-hover:opacity-30 blur transition-opacity" />
         </div>
@@ -239,18 +251,39 @@ export function Sidebar() {
       {/* Navigation */}
       <nav className="flex-1 py-3 px-2 overflow-y-auto">
         <NavGroup items={mainItems} pathname={pathname} />
-        {adminItems.length > 0 && (
-          <>
-            <div className="mt-5 mb-2 px-3 text-[9px] uppercase tracking-[0.18em] text-muted-foreground/60">
-              Administração
-            </div>
-            <NavGroup items={adminItems} pathname={pathname} />
-          </>
-        )}
+        <Group label={GROUP_LABELS.tenant} items={tenantItems} pathname={pathname} />
+        <Group label={GROUP_LABELS.governance} items={governanceItems} pathname={pathname} />
+        <Group label={GROUP_LABELS.system} items={systemItems} pathname={pathname} accent />
       </nav>
 
       <UserFooter />
     </aside>
+  );
+}
+
+function Group({
+  label,
+  items,
+  pathname,
+  accent = false,
+}: {
+  label: string;
+  items: NavItem[];
+  pathname: string;
+  accent?: boolean;
+}) {
+  if (items.length === 0) return null;
+  return (
+    <>
+      <div
+        className={`mt-5 mb-2 px-3 text-[9px] uppercase tracking-[0.18em] ${
+          accent ? "text-accent-cyan/70" : "text-muted-foreground/60"
+        }`}
+      >
+        {label}
+      </div>
+      <NavGroup items={items} pathname={pathname} />
+    </>
   );
 }
 
@@ -259,8 +292,7 @@ function NavGroup({ items, pathname }: { items: NavItem[]; pathname: string }) {
     <ul className="space-y-0.5">
       {items.map((item) => {
         const Icon = item.icon;
-        // Longest-prefix-wins: /alertas não fica ativo quando estamos em
-        // /alertas/clinicos (que é um item próprio).
+        // Longest-prefix-wins: /alertas não fica ativo em /alertas/clinicos
         const isPrefix =
           pathname === item.href || pathname.startsWith(item.href + "/");
         const hasMoreSpecific = items.some(

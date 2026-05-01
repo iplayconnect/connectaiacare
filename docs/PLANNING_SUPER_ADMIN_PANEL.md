@@ -5,7 +5,38 @@
 > mantendo `app.connectaia.com.br/admin/system/*` exclusivo do super_admin
 > e separando por **domínio cross-tenant**.
 >
-> Status: **planejado, não implementado**. Atualizado: 2026-05-01.
+> Status: **Fase 0 APLICADA em 2026-05-01** (separação de namespaces
+> dentro do app principal, sem subdomínio dedicado ainda). Fase 1+
+> ainda planejadas.
+
+## Estado pós-Fase 0 (aplicada)
+
+- Sidebar reorganizada em **4 grupos**: Operação, Administração do
+  tenant, Governança Clínica, Sistema · Cross-tenant.
+- Namespace `/admin/governance/*` (cross-tenant clínico, multi-role:
+  `super_admin`, `admin_tenant`, `clinical_reviewer`, `medico`,
+  `enfermeiro` conforme a página).
+- Namespace `/admin/system/*` (cross-tenant operacional, **super_admin
+  ONLY**).
+- Páginas movidas via `git mv` (histórico preservado):
+  - `corpus-review` → `governance/corpus-review`
+  - `regras-clinicas` → `governance/clinical-rules`
+  - `regras-clinicas/cascadas` → `governance/cascades`
+  - `regras-clinicas/revisao` → `governance/review`
+  - `testes-sinteticos` → `governance/synthetic-tests`
+  - `cenarios-sofia` → `governance/scenarios`
+  - `cenarios-sofia/versoes` → `governance/scenarios/versions`
+  - `saude` → `system/health`
+  - `seguranca/risk-score` → `system/health/risk-score`
+  - `proactive-caller` → `system/operations/proactive-caller`
+- **Redirects 308** em `next.config.js` cobrindo todas URLs antigas →
+  novas. Bookmarks/links externos continuam funcionando.
+
+### TODOs técnicos abertos
+
+- **Apertar permissions backend** das rotas que viraram super_admin-only
+  no frontend (`/api/admin/health` ainda aceita `admin_tenant`). Hoje
+  o gate é só visual (sidebar). Apertar quando 2º tenant entrar.
 
 ---
 

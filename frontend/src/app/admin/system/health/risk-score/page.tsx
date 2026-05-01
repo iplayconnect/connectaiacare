@@ -22,7 +22,7 @@ import { hasRole } from "@/lib/permissions";
 import { api, type PatientRiskRow, type PatientBaseline, ApiError } from "@/lib/api";
 
 // ═══════════════════════════════════════════════════════════════════
-// /admin/seguranca/risk-score — Dashboard de risco por paciente.
+// /admin/system/health/risk-score — Dashboard de risco por paciente.
 // Score 0-100 baseado em 3 sinais determinísticos (queixas 7d,
 // adesão %, eventos urgent/critical 7d). Sem ML/LLM.
 // Permissão: super_admin, admin_tenant, medico, enfermeiro.
