@@ -294,30 +294,46 @@ COMMENT ON TABLE aia_health_audit_log IS
 'Append-only. Triggers recusam UPDATE/DELETE. Particionar mensalmente quando >10M rows. LGPD: retention policy 5 anos com purge programado em job futuro.';
 
 
--- 8. TENANT CENTRAL (leads anônimos) ────────────────────────────────
--- Decisão #1 das abertas (default recomendado, autorização autônoma):
--- criar tenant connectaiacare_central pra leads anônimos. Limpa
--- métricas e audit (connectaiacare_demo continua sendo tenant
--- clínico com pacientes reais).
+-- 8. TENANT CENTRAL (ponto único de entrada pra phones não-resolvidos) ─
+-- Decisão Alexandre 2026-05-01 (Leitura A — simplificação radical):
+--
+-- TODO phone não-identificado pelo IdentityResolver cai aqui. Super
+-- Sofia faz intent_classifier dentro do central e ramifica:
+--   • interesse_servico (B2C) → onboarding sofiacuida_b2c sub-agente
+--   • interesse_servico (B2B) → fluxo comercial → capture_lead
+--   • agendar_demo            → schedule_demo
+--   • suporte_cliente         → escalate_to_human (Central 24h)
+--   • clínico                 → pergunta tenant (caso ambíguo) ou cuidador-relato
+--   • spam/abuso              → silencia + audit log
+--
+-- sofiacuida_b2c continua existindo como tenant — abriga ASSINANTES
+-- B2C JÁ CONVERTIDOS (assinatura ativa). Não recebe mais entrada
+-- direta de phone novo via webhook.
+--
+-- connectaiacare_demo continua sendo tenant clínico com pacientes
+-- reais (cuidadores de hospital piloto, etc.).
 
 INSERT INTO aia_health_tenants (
     id, name, ai_name, ai_voice, active, suspended,
     integrations_enabled, metadata
 ) VALUES (
     'connectaiacare_central',
-    'ConnectaIACare · Central',
+    'ConnectaIA Care Central',
     'Sofia',
     'ara',
     TRUE, FALSE,
     '{}'::jsonb,
     jsonb_build_object(
-        'purpose', 'central_lead_capture',
-        'description', 'Tenant técnico pra phones anônimos sem identidade resolvida. Captura leads B2B/B2C, escala pra Central 24h.',
+        'purpose', 'central_unified_entry',
+        'description', 'Ponto único de entrada pra todo phone não-identificado pelo IdentityResolver. Super Sofia classifica intent e ramifica pra B2C/B2B/suporte/clínico.',
         'central_phone', '5551997354484',
         'created_in_migration', '061_super_sofia_foundation'
     )
 )
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT (id) DO UPDATE SET
+    name = EXCLUDED.name,
+    metadata = EXCLUDED.metadata,
+    updated_at = NOW();
 
 -- Policy default pro tenant central
 INSERT INTO aia_health_tenant_policies (
@@ -330,13 +346,16 @@ INSERT INTO aia_health_tenant_policies (
     'connectaiacare_central',
     20,   -- mais restritivo (anti-spam de lead)
     100,
-    ARRAY['anonymous'],  -- só anônimo, sem clínica
+    ARRAY['anonymous'],  -- só anônimo entra; sub-agentes ramificam
     jsonb_build_object(
         'central_handoff_phone', '5551997354484',
-        'lead_email_capture_after_n_turns', 5
+        'lead_email_capture_after_n_turns', 5,
+        'unified_entry', true
     )
 )
-ON CONFLICT (tenant_id) DO NOTHING;
+ON CONFLICT (tenant_id) DO UPDATE SET
+    custom_config = EXCLUDED.custom_config,
+    updated_at = NOW();
 
 
 -- 9. TRIGGER updated_at em policies ─────────────────────────────────

@@ -1,9 +1,10 @@
 # Super Sofia · Arquitetura de plataforma conversacional escalável
 
-> ⚠️ **Atualizado em 2026-05-01 com 3 decisões do Alexandre:**
+> ⚠️ **Atualizado em 2026-05-01 com 4 decisões do Alexandre:**
 > 1. Hospital piloto pode pedir número Zap próprio em <3 meses → multi-instance vai pra Phase A (infra preparada, mas começa com 1 instância ativa).
 > 2. **Política white-label**: nome "Sofia" é fixo da plataforma. Não transferimos pra concorrente comercial (caso Tecnosenior — declinado). White-label completo só sob NDA + contrato uso interno.
 > 3. Volume target 6 meses: **10k msgs/dia** → webhook async + worker pool 5-10 + cost tracking obrigatórios desde Phase A.
+> 4. **Tenant central unificado** (Leitura A): TODO phone não-identificado entra em `connectaiacare_central` ("ConnectaIA Care Central"). Super Sofia classifica intent e ramifica pra B2C/B2B/suporte/clínico via sub-agentes. `sofiacuida_b2c` mantém só assinantes JÁ CONVERTIDOS — não recebe mais entrada direta de phone novo.
 
 > Design definitivo. Pensa a Sofia como **agente multi-canal,
 > multi-tenant, multi-profile** capaz de operar em escala (centenas
@@ -31,6 +32,50 @@
 | **Multi-canal nativo** | WhatsApp, voice, web, email são *adapters*; lógica de Sofia é canal-agnóstica |
 | **Custo rastreável por tenant** | Cada token LLM, cada minuto de voz, cada mensagem WhatsApp atribuída ao tenant correto |
 | **Degradação graciosa** | Se LLM cair, Sofia fala "tive um problema, vou passar pra humano" e escala. Nunca trava silencioso |
+
+---
+
+## 0.1. Tenant central — ponto único de entrada (Leitura A)
+
+```
+WhatsApp inbound (qualquer phone)
+   │
+   ↓
+[ IdentityResolver ]
+   │
+   ├─ phone resolvido em users/caregivers/patients ────→ tenant correspondente
+   │                                                     (fluxos clínicos/admin existentes)
+   │
+   └─ phone NÃO resolvido (anônimo) ──────────────────→ tenant `connectaiacare_central`
+                                                         "ConnectaIA Care Central"
+                                                              │
+                                                              ↓
+                                                   [ Super Sofia + IntentClassifier ]
+                                                              │
+                                       ┌──────────────────────┼──────────────────────┐
+                                       │                      │                      │
+                              interesse_servico         agendar_demo            suporte_cliente
+                                  (B2C ou B2B)               │                       │
+                                       │                     │                       │
+                          ┌────────────┴───────┐             │                       │
+                          ↓                    ↓             ↓                       ↓
+                onboarding sofiacuida_b2c   capture_lead   schedule_demo    escalate_to_human
+                (sub-agente OnboardingB2C)  (B2B funnel)   (Calendly)       (Central 24h
+                                                                            5551997354484)
+```
+
+**Mantemos `sofiacuida_b2c` como tenant** mas ele só **abriga
+assinantes JÁ CONVERTIDOS**. Onboarding B2C continua sendo um
+**sub-agente** do orquestrador no central — quando intent =
+interesse_servico + perfil B2C, dispara máquina de estados de
+onboarding que ao final cria o subscription em `sofiacuida_b2c`.
+
+**Vantagens da Leitura A**:
+- 1 ponto único de entrada lógico → debugging trivial
+- Intent classifier decide o que é, não regex em saudação ("oi"/"olá")
+- Lead B2B nunca mais cai em "envie áudio sobre paciente"
+- Funil unificado: lead → qualified → converted (cria subscription
+  ou cria tenant B2B novo)
 
 ---
 
@@ -838,12 +883,13 @@ desviar tráfego gradualmente.
 | **A** | Multi-instance Evolution | **Phase A — infra preparada, mas só 1 instância ativa hoje. Hospital piloto pode pedir número próprio em <3 meses → adicionar = config + provisionamento, não código.** |
 | **B** | White-label / branding Sofia | **Nome "Sofia" é fixo da plataforma. Não transferimos pra concorrente comercial. Customização permitida (greeting com tenant, footer, cores). White-label completo só sob NDA + uso interno (decisão caso a caso). Tecnosenior declinado.** Detalhes em §7.5. |
 | **C** | Volume target 6 meses | **10k msgs/dia** → webhook async, worker pool 5-10, cost tracking obrigatórios desde Phase A. Headroom 3x = 30k/dia capacidade dimensionada. |
+| **D** | Tenant central unificado (Leitura A) | **Todo phone não-identificado entra em `connectaiacare_central` ("ConnectaIA Care Central"). Super Sofia classifica intent e ramifica pra B2C/B2B/suporte/clínico via sub-agentes. `sofiacuida_b2c` continua existindo MAS só abriga assinantes JÁ CONVERTIDOS — não recebe mais entrada direta de phone novo via webhook.** Detalhes em §0.1. |
 
 ### 13.2 — Decisões abertas (Alexandre confirma)
 
 | # | Decisão | Recomendação | Por quê |
 |---|---|---|---|
-| 1 | Tenant central pra leads anônimos | **Criar `connectaiacare_central`** | Limpa métricas e audit. `connectaiacare_demo` continua sendo tenant clínico. |
+| ~~1~~ | ~~Tenant central pra leads anônimos~~ | **DECIDIDA → §13.1.D (Leitura A · unificado)** | Fechada 2026-05-01 |
 | 2 | Silence Sofia em handoff vs sinalizar | **Silenciar** | Evita confusão. Humano fala, Sofia volta após `resolved`. |
 | 3 | 24h real ou diferido madrugada | **24h real** (você disse Central 24h) | Compromisso operacional. |
 | 4 | Captura email no fluxo conversacional | **Sim, opt-in suave** | Reduz fricção pro humano. |
