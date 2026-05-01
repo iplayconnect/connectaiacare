@@ -66,7 +66,19 @@ signal.signal(signal.SIGINT, _on_signal)
 
 def process_entry(entry_data: dict) -> None:
     """Processa um evento da stream. Levanta exceção em falha
-    pra worker fazer nack."""
+    pra worker fazer nack.
+
+    Phase C v1 fluxo:
+        1. Tenta SuperSofiaOrchestrator (decide entre handle ou
+           passthrough)
+        2. Se passthrough → chama pipeline.handle_webhook legado
+           (preserva fluxo clínico atual)
+        3. Se handled → orchestrator já publicou resposta em
+           sofia:outbound (delivery worker manda)
+
+    Feature flag SUPER_SOFIA_ENABLED (env, default true) liga/desliga
+    Phase C. Off → 100% passthrough pra pipeline legado.
+    """
     event_type = entry_data.get("event_type")
     trace_id = entry_data.get("trace_id")
     tenant_id = entry_data.get("tenant_id")
@@ -78,30 +90,66 @@ def process_entry(entry_data: dict) -> None:
         tenant_id=tenant_id,
     )
 
-    if event_type == "whatsapp_inbound":
-        # Compat layer: passa evento original pro pipeline legado
-        original_event = entry_data.get("payload") or {}
-        result = get_pipeline().handle_webhook(original_event)
-        logger.info(
-            "sofia_inbound_processed",
-            trace_id=trace_id,
+    if event_type != "whatsapp_inbound":
+        # Eventos desconhecidos → audit + ignore
+        logger.warning(
+            "sofia_inbound_unknown_event_type",
+            event_type=event_type, trace_id=trace_id,
+        )
+        from src.services.audit_log_writer import write_audit
+        write_audit(
+            action="event_bus_unknown_event_type",
+            actor="sofia-inbound-worker",
             tenant_id=tenant_id,
-            result_status=result.get("status") if isinstance(result, dict) else None,
+            trace_id=trace_id,
+            payload={"event_type": event_type},
         )
         return
 
-    # Eventos desconhecidos → audit + ignore (não levanta)
-    logger.warning(
-        "sofia_inbound_unknown_event_type",
-        event_type=event_type, trace_id=trace_id,
-    )
-    write_audit(
-        action="event_bus_unknown_event_type",
-        actor="sofia-inbound-worker",
-        tenant_id=tenant_id,
+    super_sofia_enabled = os.getenv("SUPER_SOFIA_ENABLED", "true").lower() == "true"
+
+    if super_sofia_enabled:
+        try:
+            from src.services.super_sofia_orchestrator import get_super_sofia_orchestrator
+            result = get_super_sofia_orchestrator().process(entry_data)
+        except Exception as exc:
+            logger.exception(
+                "super_sofia_orchestrator_crashed",
+                trace_id=trace_id, error=str(exc)[:200],
+            )
+            # Failsafe: cai pro pipeline legado
+            result = {"status": "passthrough", "agent": "failsafe"}
+
+        if result.get("status") == "handled":
+            logger.info(
+                "super_sofia_handled",
+                trace_id=trace_id,
+                agent=result.get("agent"),
+                next_action=result.get("next_action"),
+                duration_ms=result.get("duration_ms"),
+                is_anonymous=result.get("is_anonymous"),
+                intent=(
+                    result.get("intent", {}).get("intent")
+                    if result.get("intent") else None
+                ),
+            )
+            return
+        # passthrough → cai no pipeline legado abaixo
+
+    # Compat layer: pipeline.handle_webhook legado
+    original_event = entry_data.get("payload") or {}
+    result = get_pipeline().handle_webhook(original_event)
+    logger.info(
+        "sofia_inbound_passthrough_legacy",
         trace_id=trace_id,
-        payload={"event_type": event_type},
+        tenant_id=tenant_id,
+        result_status=result.get("status") if isinstance(result, dict) else None,
     )
+    return
+
+    # (placeholder removido — checagem de event_type desconhecido
+    # já feita no início da função)
+    return
 
 
 def main() -> int:
