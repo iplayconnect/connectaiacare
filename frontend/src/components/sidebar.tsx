@@ -201,6 +201,27 @@ const NAV_ITEMS: NavItem[] = [
     roles: ["super_admin"],
     group: "system",
   },
+  {
+    href: "/admin/system/operations/leads",
+    label: "Leads · Funil",
+    icon: Sparkles,
+    roles: ["super_admin", "admin_tenant"],
+    group: "system",
+  },
+  {
+    href: "/admin/system/operations/handoff",
+    label: "Handoff · Atendimento Humano",
+    icon: HeartHandshake,
+    roles: ["super_admin", "admin_tenant", "medico", "enfermeiro"],
+    group: "system",
+  },
+  {
+    href: "/admin/system/conversations",
+    label: "Conversas · Replay",
+    icon: Phone,
+    roles: ["super_admin", "admin_tenant"],
+    group: "system",
+  },
 ];
 
 function visibleItems(user: AuthUser | null, group: NavGroupId): NavItem[] {
