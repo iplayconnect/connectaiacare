@@ -893,12 +893,13 @@ desviar tráfego gradualmente.
 | 2 | Silence Sofia em handoff vs sinalizar | **Silenciar** | Evita confusão. Humano fala, Sofia volta após `resolved`. |
 | 3 | 24h real ou diferido madrugada | **24h real** (você disse Central 24h) | Compromisso operacional. |
 | 4 | Captura email no fluxo conversacional | **Sim, opt-in suave** | Reduz fricção pro humano. |
-| 5 | Calendly link | **Pendente** | Você define. Pode ser link genérico inicial, depois personalizado por vendedor. |
+| ~~5~~ | ~~Calendly link~~ | **DECIDIDA → tool `schedule_demo` usa ConnectaLive (módulo próprio LiveKit já existente em ConnectaIA)** — Branding + transcrição automática nativos. Phase C investiga se módulo já está integrado em ConnectaIACare ou precisa portar. | Fechada 2026-05-01 |
 | 6 | Provedor logs estruturados | **Loki self-hosted** | Custo zero, integra Grafana. Datadog é caro pra escala. |
 | 7 | Vector store futuro (RAG semântico) | **pgvector** (já temos) | Evita 1 dep externa até precisar. |
-| 8 | Multi-region eventual | **Não agora** | Postgres single-region até 100+ tenants. |
+| ~~8.a~~ | ~~Multi-region técnico (infra DR)~~ | **Não agora** | Postgres single-region até 100+ tenants. Confusão de termos minha. |
+| 8.b | **Multi-region brasileiro (regionalização de produto)** | **Sim, via `tenant.region` + `tenant_policies.custom_config`** | Sul/Sudeste/Norte: sotaque Sofia, parceiros operacionais regionais, time atendimento humano regional, regulação estadual. Phase D inclui no schema `aia_health_tenants`. |
 | 9 | Onboarding B2B (Hospital adere a plataforma) | **Phase D** — wizard hoje cobre criação básica, ampliar pra fluxo guiado conversacional | Será feature comercial chave |
-| 10 | Provider de SMS fallback | **Twilio** ou **Meta Cloud API direto** | Avaliar custo BR. Não bloqueia MVP. |
+| 10 | **Provider WhatsApp futuro** (não SMS — texto antigo errado) | **Investigação separada Phase E** — avaliar Meta Cloud API direta (oficial), nvoip (já usado pra voz), Twilio (oficial Meta partner), Wati/Z-API (intermediários BR). Hoje: Evolution API não-oficial (suficiente pro piloto). | Não bloqueia MVP. |
 | 11 | Limite de mensagens grátis pra lead anônimo | **5 turnos antes de pedir email** | Anti-abuso, sem afastar lead real |
 | 12 | Sofia atende mesmo phone em 2 tenants | **Pergunta no primeiro turno qual tenant** | Caso raro hoje, mas resolve com clareza |
 | 13 | Conversation timeout | **Active context expira em 45min, session fecha em 2h** | Sofia "esquece" contexto pra evitar confusão |
