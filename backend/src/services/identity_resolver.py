@@ -117,26 +117,56 @@ def normalize_phone_e164_br(raw: str | None) -> str | None:
 def phone_variants_for_match(phone_e164: str) -> list[str]:
     """Variantes possíveis pra match em DBs históricos.
 
-    A base atual tem inconsistência: alguns rows têm 13 dígitos
-    (5551999482737), outros 12 (555199482737 — sem 9 do móvel),
-    Evolution as vezes manda 555196161700 (sem o 9).
+    A base atual tem inconsistência:
+    - Alguns rows com 13 dígitos canônicos: 5551999482737
+    - Alguns com 12 (sem 9 do móvel): 555199482737
+    - Alguns com 11 (sem DDI, com 9): 51999482737  ← Henrique
+    - Alguns com 10 (sem DDI, sem 9): 5199482737
+    - Evolution às vezes manda 12 (sem 9): 555196161700
 
-    Retorna conjunto de strings pra ILIKE / IN. Sempre inclui o
-    formato canônico.
+    Retorna lista pra IN. Sempre inclui o formato canônico.
     """
     variants = {phone_e164}
-    if len(phone_e164) == 13 and phone_e164.startswith("55"):
-        # 13 dígitos: 55 + DDD(2) + 9 + 8 dígitos. Variante: tira o 9.
-        ddd = phone_e164[2:4]
-        rest = phone_e164[5:]  # pula o 9
+    canonical = phone_e164
+
+    # Se canônico começa com 55 e tem 12/13 dígitos, gera versões
+    # SEM DDI (10/11 dígitos)
+    if canonical.startswith("55"):
+        if len(canonical) == 13:
+            # 55 + DDD(2) + 9 + 8 → tirar 55 → 11 dígitos
+            variants.add(canonical[2:])
+            # E sem o 9 do móvel
+            ddd = canonical[2:4]
+            rest = canonical[5:]
+            if len(rest) == 8:
+                variants.add(f"55{ddd}{rest}")  # com DDI sem 9
+                variants.add(f"{ddd}{rest}")    # sem DDI sem 9
+        elif len(canonical) == 12:
+            # 55 + DDD(2) + 8 dígitos (fixo ou móvel sem 9)
+            variants.add(canonical[2:])  # sem DDI
+            ddd = canonical[2:4]
+            rest = canonical[4:]
+            if len(rest) == 8:
+                variants.add(f"55{ddd}9{rest}")  # com DDI com 9
+                variants.add(f"{ddd}9{rest}")    # sem DDI com 9
+
+    # Se canônico tem 10/11 dígitos (sem DDI), gera versão com DDI 55
+    if len(canonical) == 11 and not canonical.startswith("55"):
+        variants.add(f"55{canonical}")
+        # E sem o 9 do móvel se aplicável
+        ddd = canonical[:2]
+        rest = canonical[3:]
         if len(rest) == 8:
             variants.add(f"55{ddd}{rest}")
-    if len(phone_e164) == 12 and phone_e164.startswith("55"):
-        # 12 dígitos: pode ser fixo ou móvel sem 9. Adiciona variante com 9.
-        ddd = phone_e164[2:4]
-        rest = phone_e164[4:]
+            variants.add(f"{ddd}{rest}")
+    if len(canonical) == 10 and not canonical.startswith("55"):
+        variants.add(f"55{canonical}")
+        ddd = canonical[:2]
+        rest = canonical[2:]
         if len(rest) == 8:
             variants.add(f"55{ddd}9{rest}")
+            variants.add(f"{ddd}9{rest}")
+
     return list(variants)
 
 
