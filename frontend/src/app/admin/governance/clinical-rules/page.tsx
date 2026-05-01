@@ -22,7 +22,7 @@ import { hasRole } from "@/lib/permissions";
 import { formatNumber } from "@/lib/utils";
 
 // ═══════════════════════════════════════════════════════════════════
-// /admin/regras-clinicas — CRUD do motor de cruzamentos clínicos
+// /admin/governance/clinical-rules — CRUD do motor de cruzamentos clínicos
 //
 // Tabs:
 //   • Visão geral (stats agregados)

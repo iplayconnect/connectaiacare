@@ -28,7 +28,7 @@ import { hasRole } from "@/lib/permissions";
 // migration 054) que destrava integrações externas (Tecnosenior etc).
 //
 // Hoje cobre os campos editáveis em produção. Faltando ainda: edição
-// de medicações ativas (vai pra /admin/regras-clinicas) e plantões
+// de medicações ativas (vai pra /admin/governance/clinical-rules) e plantões
 // (vai pra /admin/plantoes).
 // ════════════════════════════════════════════════════════════════════
 

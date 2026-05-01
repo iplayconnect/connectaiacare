@@ -23,7 +23,7 @@ import {
 } from "@/lib/api";
 
 // ═══════════════════════════════════════════════════════════════════
-// /admin/proactive-caller — Log de decisões do worker que liga
+// /admin/system/operations/proactive-caller — Log de decisões do worker que liga
 // dinamicamente baseado em risk + adesão + eventos abertos.
 // Permissão: super_admin, admin_tenant, medico, enfermeiro.
 // ═══════════════════════════════════════════════════════════════════

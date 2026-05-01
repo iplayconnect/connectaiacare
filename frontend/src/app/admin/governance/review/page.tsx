@@ -19,7 +19,7 @@ import { hasRole } from "@/lib/permissions";
 import { formatNumber } from "@/lib/utils";
 
 // ════════════════════════════════════════════════════════════════════
-// /admin/regras-clinicas/revisao
+// /admin/governance/review
 //
 // Fila unificada de regras com review_status='auto_pending' aguardando
 // curadoria clínica. Cada item vem de uma tabela do motor (dose máxima,
