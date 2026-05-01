@@ -71,6 +71,33 @@ def test_variants_no_duplicates():
     assert len(variants) == len(set(variants))
 
 
+def test_variants_include_no_ddi():
+    """Caso real: phone do Henrique (e muitos outros) está no DB
+    como '51984928518' (11 dígitos, sem DDI 55). Variants do
+    canônico 5551984928518 (13 dígitos) DEVE incluir versão sem DDI.
+    """
+    variants = phone_variants_for_match("5551984928518")
+    assert "5551984928518" in variants  # canônico 13
+    assert "51984928518" in variants    # ← caso Henrique no DB (11 sem DDI)
+    assert "555184928518" in variants   # 12 sem 9
+    assert "5184928518" in variants     # 10 sem DDI sem 9
+
+
+def test_variants_from_no_ddi_input_includes_with_ddi():
+    """Caso reverso: se phone normalizado vier sem DDI (raro),
+    variants ainda gera com DDI."""
+    variants = phone_variants_for_match("51984928518")
+    assert "51984928518" in variants
+    assert "5551984928518" in variants
+
+
+def test_variants_fixo_10_digits():
+    """Fixo BR (10 dígitos com DDD): adicionar versão com DDI."""
+    variants = phone_variants_for_match("5132456789")
+    assert "5132456789" in variants
+    assert "555132456789" in variants
+
+
 # ──────────────────────────────────────────────────────────────────
 # Primary selection
 # ──────────────────────────────────────────────────────────────────
