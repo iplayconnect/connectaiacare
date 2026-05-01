@@ -156,6 +156,41 @@ tasks:
     response_format: json_object
     criticality: medium
 
+  # ═══════════════════════════════════════════════════════════════════
+  # Phase C — Super Sofia
+  # ═══════════════════════════════════════════════════════════════════
+
+  whatsapp_intent_classifier:
+    description: "Classifica intent de phone anônimo no WhatsApp. 5 buckets: interesse_servico_b2c, interesse_servico_b2b, agendar_demo, suporte_cliente, spam_abuso, unclear. DeepSeek V4-Flash custo/latência."
+    primary: deepseek/deepseek-chat
+    fallbacks:
+      - google/gemini-2.5-flash
+    temperature: 0.1
+    max_tokens: 256
+    response_format: json_object
+    criticality: low
+
+  sofia_chat_response:
+    description: "Resposta conversacional Sofia em chat WhatsApp/web (multi-turn). Sub-agents profile-aware passam contexto + tools. Sonnet pra qualidade conversacional."
+    primary: anthropic/claude-sonnet-4-5
+    fallbacks:
+      - anthropic/claude-3-5-haiku-20241022
+      - google/gemini-2.5-flash
+    temperature: 0.4
+    max_tokens: 2048
+    response_format: text
+    criticality: high
+
+  sofia_chat_tool_decision:
+    description: "Sofia decide se deve chamar tool antes de responder texto livre. Saída JSON {tool_name?, args?, response_text?}."
+    primary: anthropic/claude-3-5-haiku-20241022
+    fallbacks:
+      - deepseek/deepseek-chat
+    temperature: 0.0
+    max_tokens: 1024
+    response_format: json_object
+    criticality: high
+
 
 # ═══════════════════════════════════════════════════════════════════
 # Configuração global
