@@ -101,6 +101,13 @@ const NAV_ITEMS: NavItem[] = [
     group: "admin",
   },
   {
+    href: "/admin/corpus-review",
+    label: "Revisão · Corpus",
+    icon: Sparkles,
+    roles: ["super_admin", "admin_tenant", "clinical_reviewer", "medico"],
+    group: "admin",
+  },
+  {
     href: "/admin/testes-sinteticos",
     label: "Testes Sintéticos",
     icon: Activity,

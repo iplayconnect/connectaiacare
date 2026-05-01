@@ -7,6 +7,7 @@ from config.settings import settings
 from src.handlers.admin_health_routes import bp as admin_health_bp
 from src.handlers.alerts_routes import bp as alerts_bp
 from src.handlers.communications_routes import bp as communications_bp
+from src.handlers.corpus_review_routes import bp as corpus_review_bp
 from src.handlers.safety_routes import bp as safety_bp
 from src.handlers.auth_routes import (
     authenticate_request,
@@ -90,6 +91,7 @@ def create_app() -> Flask:
     app.register_blueprint(synthetic_tests_bp)
     app.register_blueprint(system_tenants_bp)
     app.register_blueprint(tecnosenior_bp)
+    app.register_blueprint(corpus_review_bp)
 
     # JWT middleware: protege /api/* exceto rotas públicas (auth, webhook,
     # portal do paciente com PIN, onboarding B2C).
