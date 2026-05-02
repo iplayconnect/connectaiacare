@@ -307,6 +307,9 @@ problema volta na próxima escala.
 | 2026-05-02 | Anthropic prompt caching ativado em commercial agent | Reduzir custo LLM 50-90% no system prompt estável | cache_read >> cache_creation após 5min |
 | 2026-05-02 | api+sofia gunicorn threads 4→16; postgres pool 10→20 | I/O-bound: LLM/DB libera GIL, capacidade 4× sem dobrar RAM | RAM +120MB total, swap não deve crescer |
 | 2026-05-02 | Embedding worker SKIP LOCKED + conn-per-batch (PR #86) | Race condition entre 2 workers gunicorn dobrava custo Gemini | 0 reprocessamentos, custo plano |
+| 2026-05-02 | tool_decision: DeepSeek→Haiku 4.5 (PR #89) | DeepSeek não chamava escalate_to_human_whatsapp em pedidos explícitos | Tool calling rate >70% |
+| 2026-05-02 | tool-use NATIVO Anthropic via tools=[] (PR #90) | JSON-em-string não vinculava modelo a chamar tool | Tool calling rate ~100% (validado prod) |
+| 2026-05-02 | Handoff bypass orchestrator + chat operador (PR #91) | Operador 24/7 atende lead em tempo real após reivindicar; Sofia para de responder pra phone com handoff claimed | Lead recebe resposta do humano via WhatsApp, msgs aparecem em /handoff/[id]/chat |
 
 (adicionar entrada nova ao alterar escala)
 

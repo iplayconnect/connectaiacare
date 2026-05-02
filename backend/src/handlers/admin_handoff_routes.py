@@ -1,20 +1,25 @@
 """Admin handoff queue — fila de pedidos pra atendimento humano.
 
 Endpoints:
-    GET  /api/admin/handoff                    — lista + filtros
-    GET  /api/admin/handoff/<id>               — detalhe
-    POST /api/admin/handoff/<id>/claim         — humano reivindica
-    POST /api/admin/handoff/<id>/resolve       — humano marca resolvido
-    GET  /api/admin/handoff/stats              — agregação SLA
+    GET  /api/admin/handoff                       — lista + filtros
+    GET  /api/admin/handoff/<id>                  — detalhe
+    POST /api/admin/handoff/<id>/claim            — humano reivindica
+    POST /api/admin/handoff/<id>/resolve          — humano marca resolvido
+    GET  /api/admin/handoff/<id>/messages         — histórico chat
+    POST /api/admin/handoff/<id>/send             — operador envia msg
+    GET  /api/admin/handoff/stats                 — agregação SLA
 
-Acesso: super_admin, admin_tenant.
+Acesso: super_admin, admin_tenant, medico, enfermeiro, atendente_humano.
 """
 from __future__ import annotations
+
+import json
 
 from flask import Blueprint, g, jsonify, request
 
 from src.handlers.auth_routes import require_role
 from src.services.audit_log_writer import write_audit
+from src.services.event_bus import Streams, get_event_bus
 from src.services.postgres import get_postgres
 from src.utils.logger import get_logger
 
@@ -198,6 +203,184 @@ def resolve_handoff(handoff_id: str):
         (handoff_id,),
     )
     return jsonify({"status": "ok", "handoff": _serialize_handoff(updated)})
+
+
+@bp.get("/api/admin/handoff/<handoff_id>/messages")
+@require_role("super_admin", "admin_tenant", "medico", "enfermeiro")
+def handoff_messages(handoff_id: str):
+    """Histórico de mensagens do handoff pro chat do operador.
+
+    Retorna 2 segmentos:
+      • snapshot: conversation_log do escalate (pré-handoff)
+      • live: msgs em sofia_messages após o handoff.created_at
+        (operador + lead durante atendimento humano)
+
+    Live é fonte da verdade pra polling real-time do chat. Snapshot
+    é histórico do que Sofia conversou antes do escalate, útil pro
+    operador entender contexto.
+    """
+    db = get_postgres()
+    handoff = db.fetch_one(
+        """SELECT id, phone, tenant_id, conversation_log, created_at
+           FROM aia_health_human_handoff_queue WHERE id = %s""",
+        (handoff_id,),
+    )
+    if not handoff:
+        return jsonify({"status": "error", "reason": "not_found"}), 404
+
+    # Snapshot pré-handoff (Sofia + lead, salvo no momento do escalate)
+    snapshot = handoff.get("conversation_log") or []
+    if isinstance(snapshot, str):
+        try:
+            snapshot = json.loads(snapshot)
+        except Exception:
+            snapshot = []
+
+    # Live: msgs em sofia_messages do mesmo phone, criadas após o handoff.
+    # Filtra por sessions com phone matching (handoff_id na sofia_sessions
+    # FK pode estar nulo em sessões legadas — usar phone é mais robusto).
+    live_rows = db.fetch_all(
+        """SELECT m.id, m.role, m.content, m.created_at,
+                  m.metadata, m.tool_name
+           FROM aia_health_sofia_messages m
+           JOIN aia_health_sofia_sessions s ON s.id = m.session_id
+           WHERE s.phone = %s
+             AND m.created_at > %s
+           ORDER BY m.created_at ASC
+           LIMIT 200""",
+        (handoff["phone"], handoff["created_at"]),
+    )
+    live = []
+    for r in live_rows:
+        item = {
+            "id": int(r["id"]),
+            "role": r["role"],
+            "content": r.get("content"),
+            "created_at": r["created_at"].isoformat() if r.get("created_at") else None,
+        }
+        if r.get("metadata"):
+            md = r["metadata"]
+            if isinstance(md, str):
+                try:
+                    md = json.loads(md)
+                except Exception:
+                    md = {}
+            actor = md.get("actor") if isinstance(md, dict) else None
+            if actor:
+                item["actor"] = actor  # 'human' | 'sofia'
+        live.append(item)
+
+    return jsonify({
+        "status": "ok",
+        "handoff_id": str(handoff["id"]),
+        "phone": handoff["phone"],
+        "snapshot": snapshot,
+        "live": live,
+    })
+
+
+@bp.post("/api/admin/handoff/<handoff_id>/send")
+@require_role("super_admin", "admin_tenant", "medico", "enfermeiro")
+def handoff_send(handoff_id: str):
+    """Operador envia mensagem pro lead via WhatsApp + persiste.
+
+    Pipeline:
+      1. Valida handoff existe e está em estado 'claimed' (operador
+         tem que ter reivindicado primeiro pra evitar 2 humanos
+         atendendo o mesmo lead).
+      2. Valida que claimed_by_user_id é o user atual (anti-hijack).
+      3. Persiste msg em sofia_messages (role='assistant' +
+         metadata.actor='human' + operator_user_id).
+      4. Publica em sofia:outbound stream → delivery-worker manda via
+         Evolution.
+    """
+    body = request.get_json(silent=True) or {}
+    text = (body.get("text") or "").strip()
+    if not text:
+        return jsonify({"status": "error", "reason": "text_required"}), 400
+    if len(text) > 4000:
+        return jsonify({"status": "error", "reason": "text_too_long"}), 400
+
+    user_id = (getattr(g, "user", {}) or {}).get("sub")
+    if not user_id:
+        return jsonify({"status": "error", "reason": "no_user"}), 401
+
+    db = get_postgres()
+    handoff = db.fetch_one(
+        """SELECT id, phone, tenant_id, status, claimed_by_user_id, trace_id
+           FROM aia_health_human_handoff_queue WHERE id = %s""",
+        (handoff_id,),
+    )
+    if not handoff:
+        return jsonify({"status": "error", "reason": "not_found"}), 404
+    if handoff["status"] != "claimed":
+        return jsonify({
+            "status": "error", "reason": "handoff_not_claimed",
+            "current_status": handoff["status"],
+        }), 409
+    if str(handoff.get("claimed_by_user_id") or "") != str(user_id):
+        return jsonify({
+            "status": "error", "reason": "not_claim_owner",
+        }), 403
+
+    # Persiste msg como assistant com actor=human
+    session = db.fetch_one(
+        """SELECT id FROM aia_health_sofia_sessions
+           WHERE phone = %s
+             AND tenant_id = %s
+           ORDER BY started_at DESC LIMIT 1""",
+        (handoff["phone"], handoff["tenant_id"]),
+    )
+    session_id = session["id"] if session else None
+
+    metadata = {
+        "actor": "human",
+        "operator_user_id": str(user_id),
+        "handoff_id": str(handoff_id),
+    }
+    if session_id:
+        try:
+            db.execute(
+                """INSERT INTO aia_health_sofia_messages
+                       (session_id, tenant_id, role, content, metadata)
+                   VALUES (%s, %s, 'assistant', %s, %s::jsonb)""",
+                (session_id, handoff["tenant_id"], text, json.dumps(metadata)),
+            )
+        except Exception as exc:
+            logger.warning(
+                "handoff_send_persist_failed",
+                handoff_id=handoff_id, error=str(exc)[:200],
+            )
+
+    # Publica no outbound pra Evolution mandar
+    try:
+        get_event_bus().publish(Streams.OUTBOUND, {
+            "tenant_id": handoff["tenant_id"],
+            "trace_id": str(handoff.get("trace_id") or ""),
+            "phone": handoff["phone"],
+            "message_type": "text",
+            "text": text,
+            "metadata": {
+                "reason": "human_handoff_reply",
+                "handoff_id": str(handoff_id),
+                "operator_user_id": str(user_id),
+            },
+        })
+    except Exception as exc:
+        logger.exception(
+            "handoff_send_publish_failed",
+            handoff_id=handoff_id, error=str(exc)[:200],
+        )
+        return jsonify({"status": "error", "reason": "publish_failed"}), 500
+
+    write_audit(
+        action="handoff_message_sent",
+        actor=str(user_id),
+        resource_type="handoff",
+        resource_id=handoff_id,
+        payload={"chars": len(text)},
+    )
+    return jsonify({"status": "ok"})
 
 
 @bp.get("/api/admin/handoff/stats")
