@@ -25,4 +25,9 @@ EXPOSE 5055
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
     CMD curl -fsS http://localhost:5055/health || exit 1
 
-CMD ["gunicorn", "--bind", "0.0.0.0:5055", "--workers", "2", "--threads", "4", "--timeout", "120", "app:app"]
+# Workers vs threads (Phase D escala 2026-05-02):
+# Trabalho dominante = I/O-bound (LLM API ~2-9s, DB queries ~5-30ms).
+# Threads são "free" em RAM (~10MB/thread) e GIL libera durante I/O wait.
+# 2 workers × 16 threads = 32 conexões simultâneas em I/O. Pra subir
+# threads sem esgotar pool de Postgres, ver postgres.py maxconn.
+CMD ["gunicorn", "--bind", "0.0.0.0:5055", "--workers", "2", "--threads", "16", "--timeout", "120", "app:app"]

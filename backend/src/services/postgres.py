@@ -16,7 +16,12 @@ logger = get_logger(__name__)
 
 
 class PostgresService:
-    def __init__(self, dsn: str | None = None, minconn: int = 1, maxconn: int = 10):
+    # Pool size dimensionado pra gunicorn 2 workers × 16 threads = 32
+    # threads concorrentes por container. maxconn=20 dá margem pra
+    # ~75% das threads em I/O DB ao mesmo tempo. 2 workers × 20 = 40
+    # conexões totais ao Postgres por container. Postgres default
+    # max_connections=100, então api+sofia+frontend cabem sem estourar.
+    def __init__(self, dsn: str | None = None, minconn: int = 2, maxconn: int = 20):
         self.dsn = dsn or settings.database_url
         self._pool = ThreadedConnectionPool(minconn, maxconn, self.dsn)
         psycopg2.extras.register_uuid()

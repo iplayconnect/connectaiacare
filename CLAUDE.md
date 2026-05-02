@@ -207,10 +207,108 @@ nesta tabela junto com o PR**. Sem entrada na tabela, não foi feito.
 ### Regras pra TODO worker novo
 
 - **Multi-worker safe**: se o container roda 2+ workers gunicorn (a maioria roda), o SELECT de pendentes DEVE usar `FOR UPDATE SKIP LOCKED` em transação que cobre o UPDATE/DELETE final. Cuidado: `SELECT FOR UPDATE` + commit antes do UPDATE = lock perdido. Solução: SELECT + UPDATEs no MESMO cursor (ver `sofia-service/src/embedding_service.py::embed_pending_batch`).
-- **Connection-per-batch é OK pra batches < 30s**: pool de 8 conexões + 2 workers = 6 livres. Se o batch durar mais que isso (ex: chama LLM por row), considere claim-then-process (UPDATE pra marcar `status='claimed'` antes, processa fora da transação, UPDATE final).
+- **Connection-per-batch é OK pra batches < 30s**: pool de 20 conexões + 2 workers = ~37 livres. Se o batch durar mais que isso (ex: chama LLM por row), considere claim-then-process (UPDATE pra marcar `status='claimed'` antes, processa fora da transação, UPDATE final).
 - **Backoff exponencial em erro consecutivo**: tick mínimo 30s. Cap em 5min. Não martelar API externa em erro.
 - **Logar `<nome>_started worker_id=<id> tick=<s> batch=<n>`** no boot pra dar visibilidade no inventário acima.
 - **Best-effort**: nunca derrubar o request de turno do user por causa de falha em worker secundário.
+
+---
+
+## 3.2. Checklist de Escala (capacity awareness)
+
+> **Regra operacional — qualquer feature nova ou aumento de carga
+> previsto passa por este checklist ANTES de codar.**
+
+A plataforma atende dado clínico em tempo real. Latência alta = piora
+clínica. Custo descontrolado = inviabiliza piloto. Escala não é
+afterthought, é design constraint.
+
+### Decisão por feature: 6 perguntas obrigatórias
+
+```
+☐  Quantas requisições/segundo essa feature gera no pico esperado?
+☐  Cada request faz quantas chamadas LLM, quantas queries DB?
+☐  É bloqueante (thread fica esperando) ou async (libera thread)?
+☐  Tem cache aplicável? (prompt cache, query cache, edge cache)
+☐  Falha graciosa ou cascade? (LLM down → degrada como?)
+☐  Multi-provider fallback existe?
+```
+
+Se não souber responder em números, é um sinal — desenhe antes.
+
+### Capacidade atual (baseline 2026-05-02)
+
+| Camada | Config atual | Capacidade teórica | Gargalo |
+|---|---|---|---|
+| api gunicorn | 2 workers × 16 threads | ~32 turnos concorrentes em I/O wait | LLM latency (2-9s) |
+| sofia-service gunicorn | 2 workers × 16 threads | idem | LLM latency |
+| Postgres pool por container | minconn=2, maxconn=20 | 40 conn ativas (2w × 20) | Postgres `max_connections=100` |
+| Anthropic rate limit (tier atual) | ~50k RPM, ~1M TPM | ~830 req/s teórico, mas TPM aperta antes | provider |
+| Embedding worker | tick=60s, batch=20 | ~20/min/worker = 40/min total | Gemini quota |
+| Throughput esperado p50 | — | ~10-15k msg/dia confortável | LLM síncrono |
+
+**100k msg/dia OU 500 ligações concorrentes** exigem mudança
+arquitetural (async webhook intake, queue worker pool, multi-provider
+LLM, voice infra dedicada). Não é mais "ajuste de threads".
+
+### Prompt Caching por Provider (matriz)
+
+| Provider | Modo | Mínimo | Implementado? | Onde medir |
+|---|---|---|---|---|
+| **Anthropic** | Explícito (`cache_control: ephemeral`) | 1024 tokens (Sonnet/Haiku) / 2048 (Opus) | ✅ via `LLMRouter.complete_json(cacheable_system=...)` | `usage.cache_creation_input_tokens` / `cache_read_input_tokens` |
+| **OpenAI** | Automático (out/2024+) | 1024 tokens | ✅ stats capturados, sem ação | `usage.prompt_tokens_details.cached_tokens` |
+| **DeepSeek** | Automático (fev/2024+) | 128 tokens | ✅ stats capturados, sem ação | `usage.prompt_cache_hit_tokens` |
+| **Gemini** | Explícito (Cached Content API) | 32k Pro / 4k Flash | ⏳ Phase D — fallback secundário hoje | `usage_metadata.cached_content_token_count` |
+
+**Custo de cache hit:** Anthropic 10% / DeepSeek 10% / Gemini 25% / OpenAI 50% do input normal.
+
+**Regra:** todo prompt longo e estável (>1k tokens) DEVE separar parte
+estática (`cacheable_system`) de dinâmica (`system`). Ver
+`backend/src/services/sofia_agents/commercial.py::_cacheable_system`
+como referência.
+
+### Monitoramento de desempenho — obrigatório após mudanças de escala
+
+Sempre que mexer em workers/threads/pool/cache/scheduler, **agendar
+janela de observação** e verificar:
+
+1. **VPS RAM/Swap** (≤30 min após deploy):
+   ```bash
+   ssh root@72.60.242.245 "free -h && docker stats --no-stream --format 'table {{.Name}}\t{{.MemUsage}}\t{{.CPUPerc}}' \$(docker ps --format '{{.Names}}' | grep connectaiacare)"
+   ```
+   Alerta se: swap > 50% OU container individual > 1GB sem motivo.
+
+2. **Latência p50/p99 do turno** (1h após):
+   ```bash
+   ssh root@72.60.242.245 "docker logs --tail 1000 connectaiacare-api 2>&1 | grep llm_call_ok | python3 -c 'import sys,json,statistics;t=[int(json.loads(l[l.find(\"{\"):]).get(\"elapsed_ms\",0)) for l in sys.stdin if \"llm_call_ok\" in l];print(f\"n={len(t)} p50={statistics.median(t):.0f}ms p95={sorted(t)[int(len(t)*0.95)]:.0f}ms\" if t else \"sem dados\")'"
+   ```
+   Alerta se: p50 > 3000ms OU p95 > 8000ms.
+
+3. **Cache hit rate** (depois de 30min de tráfego):
+   ```bash
+   ssh root@72.60.242.245 "docker logs --tail 500 connectaiacare-api 2>&1 | grep llm_call_ok | grep -oE 'cache_(creation|read)_tokens=[0-9]+' | sort | uniq -c"
+   ```
+   Esperado em prod: cache_read >> cache_creation após primeiros minutos.
+
+4. **Postgres pool exhaustion**:
+   ```bash
+   ssh root@72.60.242.245 "docker compose -f /root/connectaiacare/docker-compose.yml exec -T postgres psql -U postgres -d connectaiacare -c \"SELECT COUNT(*) AS active FROM pg_stat_activity WHERE state='active';\""
+   ```
+   Alerta se: active > 60 (de max 100).
+
+**Documentar findings**: se algum alerta disparar, criar issue/seção em
+`docs/STATUS.md` com data + sintoma + ação tomada. Sem registro,
+problema volta na próxima escala.
+
+### Histórico de mudanças de capacidade
+
+| Data | Mudança | Motivo | Observação esperada |
+|---|---|---|---|
+| 2026-05-02 | Anthropic prompt caching ativado em commercial agent | Reduzir custo LLM 50-90% no system prompt estável | cache_read >> cache_creation após 5min |
+| 2026-05-02 | api+sofia gunicorn threads 4→16; postgres pool 10→20 | I/O-bound: LLM/DB libera GIL, capacidade 4× sem dobrar RAM | RAM +120MB total, swap não deve crescer |
+| 2026-05-02 | Embedding worker SKIP LOCKED + conn-per-batch (PR #86) | Race condition entre 2 workers gunicorn dobrava custo Gemini | 0 reprocessamentos, custo plano |
+
+(adicionar entrada nova ao alterar escala)
 
 ---
 
@@ -260,6 +358,7 @@ Rodar: `bash scripts/init_db.sh` (local) ou `docker compose exec ...` (VPS).
 7. Criar nova tabela sem prefixo `aia_health_`
 8. Chamar Sofia Voice sem validar destinatário (risco: ligar pro paciente/família errado)
 9. **Criar worker/scheduler/daemon novo sem antes consultar §3.1 (Inventário de Processos Background)** — redundância gera race condition + custo dobrado de API.
+10. **Adicionar feature de alto volume sem rodar o checklist de §3.2 (Escala)** — RPS, LLM calls, cache, fallback, modo de falha. Custo desconhecido = inviabilidade futura.
 
 ### SEMPRE
 1. Testar sintaxe antes de commit (`python3 -c "import ast; ast.parse(...)"`)
@@ -271,6 +370,7 @@ Rodar: `bash scripts/init_db.sh` (local) ou `docker compose exec ...` (VPS).
 7. Consultar `SECURITY.md` antes de qualquer endpoint que toque PHI
 8. Considerar LGPD Art. 11 (dados sensíveis) em qualquer feature nova
 9. **Antes de criar worker/scheduler novo**: rodar o checklist de §3.1 (5 passos: grep nome, grep tabela, grep WHERE, log da VPS, tabela do inventário). Se passar, **adicionar entrada nova na tabela do §3.1 no MESMO PR**. Sem entrada na tabela, não foi feito.
+10. **Antes de adicionar feature que mexe em volume**: rodar o checklist de §3.2 (6 perguntas: RPS, LLM/DB calls, blocking, cache, falha, fallback). Após mudança de escala (workers, pool, cache, scheduler), agendar janela de monitoramento e registrar no histórico de §3.2.
 
 ---
 
@@ -401,6 +501,7 @@ Ao iniciar nova sessão Claude Code neste projeto:
 6. Se for mexer em backend: `docker compose ps` (containers de pé?)
 7. Se for mexer em biometria: consultar `audio_preprocessing.py` + `voice_biometrics_service.py` (thresholds, cache)
 8. **Se a tarefa envolver criar worker / scheduler / daemon / loop de polling**: ler §3.1 (Inventário de Processos Background) e rodar o checklist de 5 passos antes de codar.
+9. **Se a tarefa envolver feature com volume não-trivial OU mexer em workers/pool/cache**: ler §3.2 (Checklist de Escala) e rodar as 6 perguntas; após deploy, monitorar VPS RAM/swap, latência p50/p99, cache hit rate, pool exhaustion conforme §3.2.
 
 ### Regras CRÍTICAS
 - **Fluxo**: SEMPRE Local → git commit → push → VPS git pull → rebuild

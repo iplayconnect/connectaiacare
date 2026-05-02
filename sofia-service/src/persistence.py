@@ -26,7 +26,10 @@ _pool: ThreadedConnectionPool | None = None
 def _get_pool() -> ThreadedConnectionPool:
     global _pool
     if _pool is None:
-        _pool = ThreadedConnectionPool(1, 8, DSN)
+        # Pool sized pra gunicorn 2 workers × 16 threads (Phase D escala
+        # 2026-05-02). maxconn=20 dá margem; 2 workers × 20 = 40 conn
+        # totais ao Postgres por container, dentro de max_connections=100.
+        _pool = ThreadedConnectionPool(2, 20, DSN)
         psycopg2.extras.register_uuid()
     return _pool
 
