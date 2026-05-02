@@ -82,36 +82,58 @@ def embed_text(text: str) -> list[float] | None:
 
 
 def embed_pending_batch(limit: int = BATCH_SIZE) -> int:
-    """Pega N messages sem embedding e gera. Retorna quantas processou."""
-    rows = persistence.fetch_all(
-        """SELECT id, role, content, tool_name
-           FROM aia_health_sofia_messages
-           WHERE embedding IS NULL AND content IS NOT NULL
-             AND length(content) >= 10
-           ORDER BY created_at ASC LIMIT %s""",
-        (limit,),
-    )
+    """Pega N messages sem embedding e gera. Retorna quantas processou.
+
+    Multi-worker safe via FOR UPDATE SKIP LOCKED — 2+ gunicorn workers
+    rodando este loop pegam batches DIFERENTES sem reprocessar os mesmos
+    rows. Lock fica ativo enquanto a transaction estiver aberta; por
+    isso o SELECT + todos os UPDATEs rodam no MESMO cursor (mesma
+    connection do pool). Só commita ao final do batch.
+
+    Caveat: connection é reservada por ~batch_size × latência_embed (em
+    ordem de segundos). Pool tem 8 conns, 2 workers do gunicorn → no
+    máximo 2 conns ocupadas concorrentemente, OK pro pool.
+    """
     processed = 0
-    for r in rows:
-        # Compõe texto pro embedding (inclui contexto de role)
-        prefix = f"[{r['role']}]"
-        if r.get("tool_name"):
-            prefix += f" [{r['tool_name']}]"
-        text = f"{prefix} {r['content']}"
-        vec = embed_text(text)
-        if vec is None:
-            # Marca pra evitar retry imediato (embed falhou)
-            continue
-        # PG aceita vector como string '[v1,v2,...]'
-        vec_str = "[" + ",".join(f"{v:.6f}" for v in vec) + "]"
-        persistence.execute(
-            """UPDATE aia_health_sofia_messages
-               SET embedding = %s::vector, embedding_model = %s,
-                   embedded_at = NOW()
-               WHERE id = %s""",
-            (vec_str, EMBED_MODEL, r["id"]),
+    # commit=True faz commit no final do `with`. Em exceção, persistence
+    # faz rollback automaticamente (perdendo UPDATEs já feitos no batch).
+    # Erros por-row ficam dentro do try/except interno pra não derrubar
+    # o batch inteiro.
+    with persistence.cursor(commit=True) as cur:
+        cur.execute(
+            """SELECT id, role, content, tool_name
+               FROM aia_health_sofia_messages
+               WHERE embedding IS NULL AND content IS NOT NULL
+                 AND length(content) >= 10
+               ORDER BY created_at ASC LIMIT %s
+               FOR UPDATE SKIP LOCKED""",
+            (limit,),
         )
-        processed += 1
+        rows = [dict(r) for r in cur.fetchall()]
+        for r in rows:
+            # Compõe texto pro embedding (inclui contexto de role)
+            prefix = f"[{r['role']}]"
+            if r.get("tool_name"):
+                prefix += f" [{r['tool_name']}]"
+            text = f"{prefix} {r['content']}"
+            try:
+                vec = embed_text(text)
+            except Exception as exc:
+                logger.warning("embed_row_failed id=%s err=%s", r["id"], exc)
+                continue
+            if vec is None:
+                # Marca pra evitar retry imediato (embed falhou)
+                continue
+            # PG aceita vector como string '[v1,v2,...]'
+            vec_str = "[" + ",".join(f"{v:.6f}" for v in vec) + "]"
+            cur.execute(
+                """UPDATE aia_health_sofia_messages
+                   SET embedding = %s::vector, embedding_model = %s,
+                       embedded_at = NOW()
+                   WHERE id = %s""",
+                (vec_str, EMBED_MODEL, r["id"]),
+            )
+            processed += 1
     if processed:
         logger.info("embedded_batch processed=%d", processed)
     return processed
