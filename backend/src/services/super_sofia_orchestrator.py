@@ -42,6 +42,7 @@ from src.services.csm import (
     ConversationState,
     QuestionIntent,
     get_data_extractor,
+    get_user_memory_writer,
 )
 from src.services.event_bus import Streams, get_event_bus
 from src.services.identity_resolver import get_identity_resolver
@@ -125,6 +126,9 @@ class SuperSofiaOrchestrator:
         # Lazy: se DB do CSM não existir ainda em ambiente local,
         # extrator não trava o orchestrator (best-effort).
         self.data_extractor = get_data_extractor()
+        # Phase C v2.7: writer de memória cross-session pra users
+        # identificados (LGPD opt-in). Anônimos usam só CSM lead_data.
+        self.user_memory_writer = get_user_memory_writer()
 
     def process(self, inbound: dict) -> dict:
         """Processa 1 evento da stream sofia:inbound.
@@ -463,6 +467,20 @@ class SuperSofiaOrchestrator:
             except Exception as exc:
                 logger.exception(
                     "orchestrator_outbound_publish_failed",
+                    trace_id=trace_id, error=str(exc)[:200],
+                )
+
+        # ─── Phase C v2.7: user memory writeback (LGPD opt-in) ─────
+        # Para users identificados, dispara summarize a cada N msgs.
+        # Best-effort — falha é absorvida e não afeta turn.
+        if identity_user_id:
+            try:
+                self.user_memory_writer.maybe_summarize_async(
+                    identity_user_id, tenant.id,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "user_memory_writeback_failed",
                     trace_id=trace_id, error=str(exc)[:200],
                 )
 

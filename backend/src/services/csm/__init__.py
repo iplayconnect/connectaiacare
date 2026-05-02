@@ -45,6 +45,11 @@ from src.services.csm.flow_state import (
     QuestionIntent,
 )
 from src.services.csm.interaction import Interaction
+from src.services.csm.user_memory import (
+    UserMemorySnapshot,
+    UserMemoryWriter,
+    get_user_memory_writer,
+)
 
 __all__ = [
     "Capability",
@@ -58,6 +63,9 @@ __all__ = [
     "FlowState",
     "Interaction",
     "QuestionIntent",
+    "UserMemorySnapshot",
+    "UserMemoryWriter",
     "get_capabilities_service",
     "get_data_extractor",
+    "get_user_memory_writer",
 ]

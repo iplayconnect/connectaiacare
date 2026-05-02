@@ -194,6 +194,7 @@ def patch_get_postgres(monkeypatch, mock_db):
         "src.services.csm.capabilities",
         "src.services.csm.conversation_state",
         "src.services.csm.embedding_worker",
+        "src.services.csm.user_memory",
         "src.services.sofia_persistence",
         "src.services.active_context",
         "src.handlers.onboarding_web_routes",
