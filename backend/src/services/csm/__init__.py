@@ -1,0 +1,47 @@
+"""csm — ConversationStateManager v2 (vertical care).
+
+Port da arquitetura da ConnectaIA, adaptado pra Sofia Cuida.
+
+Problema que resolve:
+    Phase C v1 lia active_context (texto bruto) mas não tinha registro
+    estruturado de "pergunta X = resposta Y, dado extraído Z". Resultado:
+    em conversas longas Sofia repetia perguntas (test Douglas 2026-05-01:
+    perguntou "Quantos idosos" 3× seguidas).
+
+Solução:
+    1 ConversationState por (tenant_id, client_id) com:
+        • CareLeadData cumulativo (nome, idades_idosos, dores, etc.)
+        • FlowState com pending_question + current_stage
+        • Interactions[] (últimas 30 pareadas)
+
+API principal:
+    from src.services.csm import (
+        ConversationState, CareLeadData, FlowState, Interaction,
+        ConversationStage, QuestionIntent,
+    )
+
+    state = ConversationState.load(tenant_id="t1", client_id="5511...")
+    state.lead_data.merge({"primeiro_nome": "Douglas"})
+    state.add_interaction(...)
+    state.save()
+"""
+from __future__ import annotations
+
+from src.services.csm.care_lead_data import CARE_LEAD_DATA_SCHEMA, CareLeadData
+from src.services.csm.conversation_state import ConversationState
+from src.services.csm.flow_state import (
+    ConversationStage,
+    FlowState,
+    QuestionIntent,
+)
+from src.services.csm.interaction import Interaction
+
+__all__ = [
+    "CareLeadData",
+    "CARE_LEAD_DATA_SCHEMA",
+    "ConversationStage",
+    "ConversationState",
+    "FlowState",
+    "Interaction",
+    "QuestionIntent",
+]
