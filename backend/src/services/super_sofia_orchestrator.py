@@ -38,6 +38,11 @@ from typing import Any, Optional
 
 from src.services.active_context import append_turn, load_recent
 from src.services.audit_log_writer import write_audit, redact_phone
+from src.services.csm import (
+    ConversationState,
+    QuestionIntent,
+    get_data_extractor,
+)
 from src.services.event_bus import Streams, get_event_bus
 from src.services.identity_resolver import get_identity_resolver
 from src.services.sofia_agents import AgentContext, get_agent_for
@@ -116,6 +121,10 @@ class SuperSofiaOrchestrator:
         self.tenant_resolver = get_tenant_resolver()
         self.intent_classifier = get_whatsapp_intent_classifier()
         self.event_bus = get_event_bus()
+        # Phase C v2.4: extrator de dados PT-BR (regex + Haiku fallback).
+        # Lazy: se DB do CSM não existir ainda em ambiente local,
+        # extrator não trava o orchestrator (best-effort).
+        self.data_extractor = get_data_extractor()
 
     def process(self, inbound: dict) -> dict:
         """Processa 1 evento da stream sofia:inbound.
@@ -200,6 +209,46 @@ class SuperSofiaOrchestrator:
                 payload=classified_intent,
             )
 
+        # ─── CSM v2: load conversation state + extract user data ───
+        # Resolve sintoma "Sofia repete perguntas em conversa longa"
+        # mantendo: lead_data cumulativo + flow_state com pending_question
+        # + interactions[] pareadas. Best-effort — falha não bloqueia
+        # turno (DB pode estar fora, migração pode não estar rodada).
+        csm_state: Optional[ConversationState] = None
+        csm_ctx: dict = {}
+        extracted_data: dict = {}
+        try:
+            csm_state = ConversationState.load_or_create(
+                tenant_id=tenant.id,
+                client_id=phone,
+                user_id=(identity.primary.user_id if identity.primary else None),
+                patient_id=(identity.primary.patient_id if identity.primary else None),
+            )
+            # Extrai dados do user msg (PT-BR regex + Haiku fallback)
+            if text:
+                pending_intent = csm_state.flow_state.pending_question_intent
+                extraction = self.data_extractor.extract(
+                    text,
+                    pending_intent=pending_intent,
+                    current_lead_data=csm_state.lead_data,
+                )
+                extracted_data = extraction.data
+                # Pareia com pending question (limpa pending, aplica
+                # extracted ao lead_data, marca interaction.answered).
+                csm_state.attach_user_response(
+                    text,
+                    extracted=extracted_data,
+                    confidence=extraction.confidence,
+                )
+                # Auto-avança stage se requirements satisfeitos
+                csm_state.auto_advance_stage()
+            csm_ctx = csm_state.get_context_for_agent()
+        except Exception as exc:
+            logger.warning(
+                "csm_load_failed",
+                trace_id=trace_id, error=str(exc)[:200],
+            )
+
         # Build agent context
         ctx = AgentContext(
             phone=phone,
@@ -211,6 +260,7 @@ class SuperSofiaOrchestrator:
             inbound_text=text or "",
             active_context_messages=active_msgs,
             metadata={"classified_intent": classified_intent},
+            csm_context=csm_ctx,
         )
 
         # Resolve sub-agent
@@ -323,6 +373,35 @@ class SuperSofiaOrchestrator:
                     "error": tr.error,
                 })
 
+        # ─── CSM v2: registra pergunta do bot + persiste state ─────
+        # Se agent gerou texto e indicou next_question_intent, registra
+        # interaction bot-side com pending_question marcado. Próximo
+        # turno o user vai responder e CSM pareará automaticamente.
+        if csm_state is not None:
+            try:
+                if response.text:
+                    intent_str = response.next_question_intent
+                    intent_enum: Optional[QuestionIntent] = None
+                    if intent_str:
+                        try:
+                            intent_enum = QuestionIntent(intent_str)
+                        except ValueError:
+                            intent_enum = QuestionIntent.OPEN_ENDED
+                    elif "?" in response.text:
+                        # Heurística: tem "?" mas LLM não declarou intent
+                        intent_enum = QuestionIntent.OPEN_ENDED
+                    if intent_enum:
+                        csm_state.record_bot_question(
+                            response.text, intent_enum, agent=agent.name,
+                        )
+                csm_state.flow_state.current_agent = agent.name
+                csm_state.save()
+            except Exception as exc:
+                logger.warning(
+                    "csm_save_failed",
+                    trace_id=trace_id, error=str(exc)[:200],
+                )
+
         # ─── Persistir turn em active_context (memória cross-channel) ───
         # Bug fix 2026-05-02: sem isso Sofia esquece nome entre turnos.
         # User msg primeiro (cronológico), depois resposta da Sofia.
@@ -397,6 +476,14 @@ class SuperSofiaOrchestrator:
             "duration_ms": duration_ms,
             "is_anonymous": identity.is_anonymous,
             "intent": classified_intent,
+            "csm": {
+                "stage": csm_ctx.get("stage") if csm_ctx else None,
+                "extracted": list(extracted_data.keys()) if extracted_data else [],
+                "dados_confirmados": csm_ctx.get("dados_confirmados", []) if csm_ctx else [],
+                "pending_question_intent": (
+                    response.next_question_intent
+                ),
+            },
         }
 
     # ── Helpers ──

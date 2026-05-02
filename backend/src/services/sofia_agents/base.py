@@ -41,6 +41,10 @@ class AgentContext:
     inbound_text: str
     active_context_messages: list[dict] = field(default_factory=list)
     metadata: dict = field(default_factory=dict)
+    # Phase C v2.4: snapshot do CSM (lead_data + flow_state +
+    # has_X / should_ask_X / pending_question / dados_confirmados).
+    # Veja ConversationState.get_context_for_agent().
+    csm_context: dict = field(default_factory=dict)
 
     @property
     def profile(self) -> str:
@@ -65,6 +69,12 @@ class AgentResponse:
     handoff_reason: Optional[str] = None
     next_action: Optional[str] = None      # 'wait_user'|'wait_human'|'closed'
     metadata: dict = field(default_factory=dict)
+    # Phase C v2.4: intent semântico da PERGUNTA que o agent fez (se
+    # fez). Permite ao orchestrator marcar pending_question no CSM
+    # pra próximo turno saber a qual pergunta o user respondeu.
+    # Valores aceitos: nome de QuestionIntent enum (ex: "primeiro_nome",
+    # "count_idosos", "dor_principal") ou None / "open_ended".
+    next_question_intent: Optional[str] = None
 
     def to_dict(self) -> dict:
         return {
