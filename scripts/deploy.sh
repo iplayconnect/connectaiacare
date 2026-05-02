@@ -40,6 +40,7 @@ FILES_CHANGED=$(git diff --name-only "$CURRENT_COMMIT..$NEW_COMMIT")
 REBUILD_API=false
 REBUILD_FRONTEND=false
 REBUILD_SOFIA=false
+REBUILD_WORKERS=false
 RUN_MIGRATIONS=false
 
 if echo "$FILES_CHANGED" | grep -qE '^backend/(requirements\.txt|Dockerfile|\.env)'; then REBUILD_API=true; fi
@@ -49,11 +50,22 @@ if echo "$FILES_CHANGED" | grep -qE '^frontend/'; then REBUILD_FRONTEND=true; fi
 if echo "$FILES_CHANGED" | grep -qE '^sofia-service/'; then REBUILD_SOFIA=true; fi
 if echo "$FILES_CHANGED" | grep -qE '^backend/migrations/'; then RUN_MIGRATIONS=true; fi
 
+# Workers (sofia-inbound-worker + delivery-worker) compartilham build
+# context com api (./backend/Dockerfile). Sempre que api precisa rebuild,
+# workers também precisam — eles consomem o stream Redis e processam
+# turnos da Sofia, então código defasado neles = bug em produção
+# (ex: 2026-05-02: workers ficaram 21h com código pre-Phase C v2 porque
+# deploy.sh anterior só rebuildava `api` service).
+if [ "$REBUILD_API" = "true" ]; then
+    REBUILD_WORKERS=true
+fi
+
 # Override manual do serviço
 case "$SERVICE" in
-    api) REBUILD_API=true; REBUILD_FRONTEND=false; REBUILD_SOFIA=false ;;
-    frontend) REBUILD_API=false; REBUILD_FRONTEND=true; REBUILD_SOFIA=false ;;
-    sofia|sofia-service) REBUILD_API=false; REBUILD_FRONTEND=false; REBUILD_SOFIA=true ;;
+    api) REBUILD_API=true; REBUILD_WORKERS=true; REBUILD_FRONTEND=false; REBUILD_SOFIA=false ;;
+    frontend) REBUILD_API=false; REBUILD_WORKERS=false; REBUILD_FRONTEND=true; REBUILD_SOFIA=false ;;
+    sofia|sofia-service) REBUILD_API=false; REBUILD_WORKERS=false; REBUILD_FRONTEND=false; REBUILD_SOFIA=true ;;
+    workers) REBUILD_API=false; REBUILD_WORKERS=true; REBUILD_FRONTEND=false; REBUILD_SOFIA=false ;;
     all) ;;
 esac
 
@@ -77,6 +89,11 @@ fi
 if [ "$REBUILD_API" = "true" ]; then
     echo "==> Rebuild api..."
     docker compose up -d --build api
+fi
+
+if [ "$REBUILD_WORKERS" = "true" ]; then
+    echo "==> Rebuild workers (sofia-inbound-worker + delivery-worker)..."
+    docker compose up -d --build sofia-inbound-worker delivery-worker
 fi
 
 if [ "$REBUILD_FRONTEND" = "true" ]; then

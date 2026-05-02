@@ -90,13 +90,45 @@ O script `deploy.sh`:
 2. Detecta o que mudou (backend? frontend? migrations?)
 3. Roda migrations novas automaticamente
 4. Rebuilda só o container do serviço afetado (otimiza tempo)
-5. Valida health
+5. **Sempre que `api` é rebuilded, `sofia-inbound-worker` e `delivery-worker` também são** (compartilham build context — ver "Pegadinha: workers" abaixo)
+6. Valida health
 
-Para rebuilda só um serviço:
+Para rebuild manual de um serviço só:
 ```bash
-bash scripts/deploy.sh api
+bash scripts/deploy.sh api          # api + workers (sempre juntos)
+bash scripts/deploy.sh workers      # só os workers (sofia-inbound + delivery)
 bash scripts/deploy.sh frontend
+bash scripts/deploy.sh sofia        # sofia-service
 ```
+
+### ⚠️ Pegadinha histórica: workers compartilham imagem com `api`
+
+Os serviços `sofia-inbound-worker` e `delivery-worker` no `docker-compose.yml`
+buildam a partir do **mesmo `./backend/Dockerfile`** que o `api`. Mas no Docker
+Compose, `--build api` rebuilda **só a imagem do serviço `api`** — workers
+ficam com a tag antiga.
+
+**Bug histórico (2026-05-02)**: depois do merge do PR #85 (Phase C v2 — CSM
++ memory layers), `deploy.sh` rebuildou só o `api`. Os 2 workers ficaram
+21h com código pre-CSM enquanto `api` já tinha código novo. Resultado: o
+fluxo WhatsApp continuava rodando o pipeline antigo (sem CSM, sem
+capabilities whitelist, sem prompt caching) sem ninguém perceber.
+
+**Como o `deploy.sh` corrige isso (post-fix 2026-05-02)**: a flag
+`REBUILD_WORKERS` é setada automaticamente sempre que `REBUILD_API=true`.
+Ou seja, qualquer mudança em `backend/**` agora rebuilda **api + workers**
+juntos, sem opção de esquecer.
+
+**Verificar manualmente após deploy** (sanity check):
+```bash
+docker images --format 'table {{.Repository}}\t{{.CreatedAt}}\t{{.ID}}' \
+  | grep connectaiacare
+docker inspect connectaiacare-sofia-inbound-worker-2 --format '{{.Image}}'
+docker inspect connectaiacare-api --format '{{.Image}}'
+```
+Os hashes do `api` e dos workers **devem ser próximos no tempo** (mesmo
+deploy). Se divergirem por horas, workers ficaram pra trás — rode
+`bash scripts/deploy.sh workers` pra corrigir.
 
 ---
 
