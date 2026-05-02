@@ -35,11 +35,13 @@ import {
   Headphones,
   User,
   RefreshCw,
+  Zap,
 } from "lucide-react";
 
 import { useAuth } from "@/context/auth-context";
 import { hasRole } from "@/lib/permissions";
 import { api } from "@/lib/api";
+import { QuickRepliesSidebar } from "@/components/handoff/QuickRepliesSidebar";
 
 interface Handoff {
   id: string;
@@ -96,9 +98,34 @@ export default function HandoffChatPage() {
   const [text, setText] = useState("");
   const [resolveSummary, setResolveSummary] = useState("");
   const [showResolve, setShowResolve] = useState(false);
+  const [showQuickReplies, setShowQuickReplies] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const scrollRef = useRef<HTMLDivElement>(null);
+  const composerRef = useRef<HTMLTextAreaElement>(null);
+
+  const canManageQuickReplies = hasRole(user, "super_admin", "admin_tenant");
+
+  const insertQuickReply = useCallback((content: string) => {
+    setText((prev) => {
+      // Se input vazio: preenche direto. Senão: append com quebra de
+      // linha pra preservar o que operador já escreveu.
+      if (!prev.trim()) return content;
+      return `${prev.trimEnd()}\n${content}`;
+    });
+    // Devolve foco pro textarea pra operador customizar antes de enviar
+    requestAnimationFrame(() => composerRef.current?.focus());
+  }, []);
+
+  // Esc fecha sidebar quando aberta (sem afetar outros modais)
+  useEffect(() => {
+    if (!showQuickReplies) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setShowQuickReplies(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [showQuickReplies]);
 
   const loadAll = useCallback(async () => {
     if (!handoffId) return;
@@ -239,6 +266,17 @@ export default function HandoffChatPage() {
           </button>
           {isClaimedByMe && (
             <button
+              onClick={() => setShowQuickReplies((v) => !v)}
+              className={`p-1.5 rounded-md hover:bg-muted ${
+                showQuickReplies ? "text-amber-500 bg-muted" : ""
+              }`}
+              title="Respostas rápidas (Ctrl+1..9)"
+            >
+              <Zap className="h-4 w-4" />
+            </button>
+          )}
+          {isClaimedByMe && (
+            <button
               onClick={() => setShowResolve(true)}
               className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md border border-classification-routine/40 text-classification-routine hover:bg-classification-routine/10"
             >
@@ -298,6 +336,7 @@ export default function HandoffChatPage() {
         <div className="border-t border-border pt-3 pb-1">
           <div className="flex items-end gap-2">
             <textarea
+              ref={composerRef}
               value={text}
               onChange={(e) => setText(e.target.value)}
               onKeyDown={(e) => {
@@ -333,6 +372,18 @@ export default function HandoffChatPage() {
             ? "Esse handoff foi resolvido. Apenas leitura."
             : "Reivindique o handoff na fila pra começar a atender."}
         </div>
+      )}
+
+      {/* Sidebar de Respostas Rápidas — montada apenas qdo claimed_by_me
+          pra hotkeys Ctrl+1..9 não capturarem em modo read-only */}
+      {isClaimedByMe && (
+        <QuickRepliesSidebar
+          isOpen={showQuickReplies}
+          onClose={() => setShowQuickReplies(false)}
+          onSelect={insertQuickReply}
+          canManage={canManageQuickReplies}
+          leadName={handoff.phone}
+        />
       )}
 
       {/* Modal Resolver */}

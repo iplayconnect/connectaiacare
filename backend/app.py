@@ -8,6 +8,7 @@ from src.handlers.admin_conversations_routes import bp as admin_conversations_bp
 from src.handlers.admin_handoff_routes import bp as admin_handoff_bp
 from src.handlers.admin_health_routes import bp as admin_health_bp
 from src.handlers.admin_leads_routes import bp as admin_leads_bp
+from src.handlers.admin_quick_replies_routes import bp as admin_quick_replies_bp
 from src.handlers.alerts_routes import bp as alerts_bp
 from src.handlers.communications_routes import bp as communications_bp
 from src.handlers.corpus_review_routes import bp as corpus_review_bp
@@ -100,6 +101,7 @@ def create_app() -> Flask:
     app.register_blueprint(admin_leads_bp)        # Phase D — leads funnel
     app.register_blueprint(admin_handoff_bp)      # Phase D — handoff queue
     app.register_blueprint(admin_conversations_bp) # Phase D — conversations
+    app.register_blueprint(admin_quick_replies_bp) # Phase A — quick replies pra chat handoff
 
     # JWT middleware: protege /api/* exceto rotas públicas (auth, webhook,
     # portal do paciente com PIN, onboarding B2C).
