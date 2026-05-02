@@ -132,6 +132,35 @@ def _install_module_mocks() -> None:
         sys.modules["psycopg2.extras"].RealDictCursor = object
         sys.modules["psycopg2.extensions"].AsIs = lambda x: x
 
+    # redis — só mocka se não estiver instalado (necessário pra
+    # importar identity_resolver / event_bus em testes do CSM v2.4)
+    try:
+        import redis  # noqa: F401
+    except ImportError:
+        redis_mod = types.ModuleType("redis")
+
+        class _FakeRedis:
+            def __init__(self, *a, **kw):
+                pass
+
+            def __getattr__(self, name):
+                # Qualquer método retorna None / no-op
+                return lambda *a, **kw: None
+
+        redis_mod.Redis = _FakeRedis
+        redis_mod.from_url = lambda *a, **kw: _FakeRedis()
+        redis_mod.ConnectionPool = _FakeRedis
+
+        # exceptions submodule
+        exc_mod = types.ModuleType("redis.exceptions")
+        exc_mod.RedisError = type("RedisError", (Exception,), {})
+        exc_mod.ConnectionError = type("ConnectionError", (Exception,), {})
+        exc_mod.TimeoutError = type("TimeoutError", (Exception,), {})
+        redis_mod.exceptions = exc_mod
+        sys.modules["redis.exceptions"] = exc_mod
+
+        sys.modules["redis"] = redis_mod
+
 
 _install_module_mocks()
 
@@ -162,6 +191,12 @@ def patch_get_postgres(monkeypatch, mock_db):
         "src.services.knowledge_base_service",
         "src.services.conversation_state_manager",
         "src.services.objection_handler_service",
+        "src.services.csm.capabilities",
+        "src.services.csm.conversation_state",
+        "src.services.csm.embedding_worker",
+        "src.services.csm.user_memory",
+        "src.services.sofia_persistence",
+        "src.services.active_context",
         "src.handlers.onboarding_web_routes",
     ]:
         if mod_name in sys.modules:
