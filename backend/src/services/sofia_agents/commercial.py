@@ -76,6 +76,8 @@ EXEMPLO de tool call (saída JSON):
   "next_question_intent": "open_ended"
 }}
 
+{capabilities_block}
+
 CONTEXTO DESTE TURNO:
 - Phone do lead: {phone}
 - Intent classificado: {intent_label}
@@ -170,11 +172,27 @@ class CommercialSofiaAgent(BaseSofiaAgent):
         csm_block = _format_csm_block(ctx.csm_context or {})
         stage = (ctx.csm_context or {}).get("stage", "warmup")
 
+        # Whitelist de capabilities (anti-invenção) — Phase C v2.5.
+        # Best-effort: se DB não responde, format_for_prompt retorna
+        # mensagem de fallback informando Sofia a checar com time.
+        try:
+            from src.services.csm import get_capabilities_service
+            capabilities_block = get_capabilities_service().format_for_prompt(
+                persona="anonymous",
+            )
+        except Exception:
+            capabilities_block = (
+                "REGRA: se o lead perguntar de feature específica, "
+                "diga que vai checar com o time e passar o detalhe — "
+                "nunca invente capability."
+            )
+
         return PROMPT_TEMPLATE.format(
             phone=ctx.phone,
             intent_label=intent_label,
             stage=stage,
             csm_block=csm_block,
+            capabilities_block=capabilities_block,
             context_block="\n".join(context_lines),
             user_message=ctx.inbound_text[:1500],
         )

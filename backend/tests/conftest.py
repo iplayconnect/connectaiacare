@@ -191,6 +191,10 @@ def patch_get_postgres(monkeypatch, mock_db):
         "src.services.knowledge_base_service",
         "src.services.conversation_state_manager",
         "src.services.objection_handler_service",
+        "src.services.csm.capabilities",
+        "src.services.csm.conversation_state",
+        "src.services.sofia_persistence",
+        "src.services.active_context",
         "src.handlers.onboarding_web_routes",
     ]:
         if mod_name in sys.modules:

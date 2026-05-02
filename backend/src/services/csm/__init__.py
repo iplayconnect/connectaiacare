@@ -27,6 +27,11 @@ API principal:
 """
 from __future__ import annotations
 
+from src.services.csm.capabilities import (
+    Capability,
+    CapabilitiesService,
+    get_capabilities_service,
+)
 from src.services.csm.care_lead_data import CARE_LEAD_DATA_SCHEMA, CareLeadData
 from src.services.csm.conversation_state import ConversationState
 from src.services.csm.data_extractor import (
@@ -42,6 +47,8 @@ from src.services.csm.flow_state import (
 from src.services.csm.interaction import Interaction
 
 __all__ = [
+    "Capability",
+    "CapabilitiesService",
     "CareLeadData",
     "CARE_LEAD_DATA_SCHEMA",
     "ConversationStage",
@@ -51,5 +58,6 @@ __all__ = [
     "FlowState",
     "Interaction",
     "QuestionIntent",
+    "get_capabilities_service",
     "get_data_extractor",
 ]
