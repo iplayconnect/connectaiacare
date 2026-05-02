@@ -128,6 +128,129 @@ DYNAMIC_PROMPT_TEMPLATE = """CONTEXTO DESTE TURNO:
 {context_block}"""
 
 
+# ──────────────────────────────────────────────────────────────────
+# Tool schemas (Anthropic tool-use nativo, Phase D 2026-05-02)
+#
+# Formato segue spec da Anthropic: name + description + input_schema
+# (JSON Schema). Modelo recebe esses schemas via param `tools=[...]`
+# do messages.create — diferente do pattern legado JSON-em-string,
+# aqui Anthropic FORÇA o output a seguir o schema. Solução robusta
+# pro bug de 2026-05-02 onde DeepSeek e Haiku NÃO chamavam
+# escalate_to_human_whatsapp mesmo com pedido explícito do user.
+# ──────────────────────────────────────────────────────────────────
+
+COMMERCIAL_TOOLS_SCHEMA: list[dict] = [
+    {
+        "name": "capture_lead",
+        "description": (
+            "Captura/atualiza dados do lead em aia_health_leads. "
+            "É IDEMPOTENTE — chame ASSIM QUE souber o nome do lead, "
+            "mesmo que faltem dados. Pode chamar de novo nos turnos "
+            "seguintes pra adicionar organization, role, etc. NUNCA "
+            "termine um turno SEM chamar capture_lead se já souber o "
+            "nome."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "phone": {
+                    "type": "string",
+                    "description": "Phone do lead em formato E.164 (vem em CONTEXTO DESTE TURNO).",
+                },
+                "intent": {
+                    "type": "string",
+                    "enum": [
+                        "interesse_servico_b2c",
+                        "interesse_servico_b2b",
+                        "agendar_demo",
+                        "duvida_geral",
+                        "outro",
+                    ],
+                },
+                "full_name": {
+                    "type": "string",
+                    "description": "Nome completo do lead (ou só primeiro nome se for tudo que tiver).",
+                },
+                "email": {"type": "string"},
+                "organization": {
+                    "type": "string",
+                    "description": "Nome da empresa/ILPI/clínica do lead (B2B).",
+                },
+                "role_self_declared": {
+                    "type": "string",
+                    "description": "Cargo/papel declarado: 'gestor_ilpi','enfermeira_chefe','medico','familiar','cuidador_pro', etc.",
+                },
+                "confidence": {
+                    "type": "number",
+                    "description": "0.0–1.0. Quão confiante você está dos dados acima.",
+                },
+                "notes": {
+                    "type": "string",
+                    "description": "Resumo da dor / contexto / detalhes relevantes (ex: 'ILPI 30 leitos, dor quedas turno noite').",
+                },
+            },
+            "required": ["phone", "intent", "full_name"],
+        },
+    },
+    {
+        "name": "schedule_demo",
+        "description": (
+            "Agenda demo com time comercial. Use quando lead pediu "
+            "demo explicitamente OU intent=agendar_demo. Chame APÓS "
+            "capture_lead (ou junto se já tiver dados). NÃO chame se "
+            "lead ainda não confirmou interesse claro."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "phone": {"type": "string"},
+                "lead_full_name": {"type": "string"},
+                "preferred_window": {
+                    "type": "string",
+                    "description": "Janela preferida do lead se mencionou (ex: 'amanhã de manhã', 'esta semana à tarde'). Se não, omita.",
+                },
+            },
+            "required": ["phone", "lead_full_name"],
+        },
+    },
+    {
+        "name": "escalate_to_human_whatsapp",
+        "description": (
+            "Escala lead pra time humano da Central 24h. CHAME SEMPRE "
+            "que o user: (a) pedir explicitamente humano/atendente/"
+            "pessoa real ('quero falar com humano', 'preciso de "
+            "alguém da equipe'), (b) demonstrar emergência clínica "
+            "ou urgência ('minha mãe caiu', 'é emergência'), (c) "
+            "expressar frustração com a IA, (d) você tiver feito 5+ "
+            "turnos sem evolução. NÃO qualifique antes — escale "
+            "primeiro, dados ficam no summary. Após escalate, "
+            "responda ao user dizendo que humano vai contatar "
+            "(curto, sem prometer prazo)."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "phone": {"type": "string"},
+                "reason": {
+                    "type": "string",
+                    "description": "Motivo da escalação em 1 frase. Ex: 'lead pediu humano agora, emergência clínica reportada (mãe caiu)'.",
+                },
+                "summary": {
+                    "type": "string",
+                    "description": "Resumo da conversa pra humano (ate 1000 chars). Inclua: nome, dor, urgência, dados qualificados até o momento.",
+                },
+                "urgency": {
+                    "type": "string",
+                    "enum": ["P1", "P2", "P3"],
+                    "description": "P1 (5min SLA, emergência clínica/risco), P2 (30min SLA, urgência), P3 (2h SLA, rotina).",
+                },
+            },
+            "required": ["phone", "reason", "summary", "urgency"],
+        },
+    },
+]
+
+
 def _format_csm_block(csm_ctx: dict) -> str:
     """Formata snapshot do CSM (lead_data + flow_state) pra injetar
     no system prompt. Inclui: dados já coletados, próximas perguntas,
@@ -276,17 +399,25 @@ class CommercialSofiaAgent(BaseSofiaAgent):
 
         router = get_llm_router()
         try:
-            # Decision: texto direto OU tool call.
-            # Anthropic prompt caching: parte estática (regras + capabilities
-            # + JSON schema) vai como cacheable_system; parte dinâmica
-            # (CSM ctx, intent, contexto recente) vai como system normal.
-            # Cache TTL ~5min — turnos consecutivos do mesmo lead pagam
-            # ~10% do custo desse bloco e respondem ~30% mais rápido.
+            # Decision: texto direto OU tool call (NATIVO Anthropic).
+            #
+            # Phase D 2026-05-02: passa tools=COMMERCIAL_TOOLS_SCHEMA
+            # pra ativar tool-use NATIVO. Modelo (Haiku 4.5) recebe
+            # schema estruturado, output garantido vem como tool_use
+            # block (não JSON-em-string que o modelo podia ignorar).
+            #
+            # Anthropic prompt caching: parte estática (regras +
+            # capabilities) vai como cacheable_system; parte dinâmica
+            # (CSM ctx, intent, contexto recente) vai como system
+            # normal. Cache TTL ~5min — turnos consecutivos do mesmo
+            # lead pagam ~10% do custo desse bloco.
             decision = router.complete_json(
                 task="sofia_chat_tool_decision",
                 cacheable_system=self._cacheable_system(ctx),
                 system=self._dynamic_system(ctx),
                 user=ctx.inbound_text[:1500],
+                tools=COMMERCIAL_TOOLS_SCHEMA,
+                tool_choice="auto",
             )
         except Exception as exc:
             logger.exception(

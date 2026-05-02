@@ -149,6 +149,8 @@ class LLMRouter:
         image_b64: str | None = None,
         image_mime: str = "image/jpeg",
         cacheable_system: str | None = None,
+        tools: list[dict] | None = None,
+        tool_choice: str = "auto",
         **overrides,
     ) -> dict[str, Any]:
         """Completa chamada JSON pra uma task. Aplica fallback cascade.
@@ -165,6 +167,40 @@ class LLMRouter:
                 concatenam — comportamento idêntico ao antigo.
                 Mínimo recomendado: 1024 tokens (~4k chars) pra valer
                 a pena. Abaixo disso a Anthropic não cacheia.
+
+            tools: lista de tool schemas (formato Anthropic):
+                [{"name": "x", "description": "...", "input_schema": {...}}].
+                Quando passado E provider=anthropic, ATIVA tool-use
+                NATIVO via param `tools=` da API messages.create — modelo
+                pode retornar tool_use blocks que são parseados
+                estruturadamente. SEM `tools`, comportamento legacy:
+                modelo é instruído a retornar JSON-em-string (frágil,
+                modelo pode preferir texto livre — bug observado em
+                2026-05-02 com escalate_to_human_whatsapp).
+
+                Outros providers (OpenAI/Gemini): tools são convertidos
+                em prompt instruction (fallback gracioso). Phase D
+                futura adiciona suporte nativo.
+
+            tool_choice: "auto" (modelo decide), "any" (força chamar
+                ALGUMA tool), "<nome_tool>" (força específica). Default
+                auto. Anthropic only.
+
+        Returns:
+            dict com a resposta. Campos especiais:
+            - "_model_used", "_provider", "_elapsed_ms"
+            - "_cache_creation_input_tokens", "_cache_read_input_tokens"
+            - "_input_tokens", "_output_tokens"
+
+            Se tool foi chamada (tool-use nativo Anthropic):
+            - "action": "tool"
+            - "tool_name": str
+            - "args": dict
+            - "tool_use_id": str (anthropic-specific)
+            - "text_after": str (texto opcional do modelo antes/depois
+              da tool call; vazio se não houve)
+
+            Sem tool (texto puro): mantém schema legado do task.
         """
         task_cfg = self.config.task(task)
         models_to_try = [task_cfg["primary"]] + (task_cfg.get("fallbacks") or [])
@@ -192,6 +228,8 @@ class LLMRouter:
                     image_b64=image_b64,
                     image_mime=image_mime,
                     cacheable_system=cacheable_system,
+                    tools=tools,
+                    tool_choice=tool_choice,
                 )
                 elapsed_ms = int((time.time() - t0) * 1000)
                 logger.info(
@@ -231,6 +269,8 @@ class LLMRouter:
         temperature: float, max_tokens: int,
         image_b64: str | None, image_mime: str,
         cacheable_system: str | None = None,
+        tools: list[dict] | None = None,
+        tool_choice: str = "auto",
     ) -> dict:
         model_id = self.config.model_meta(model_key).get("model_id") or model_key.split("/", 1)[-1]
 
@@ -238,10 +278,14 @@ class LLMRouter:
             return self._call_anthropic(
                 model_id, system, user, temperature, max_tokens,
                 image_b64, image_mime, cacheable_system=cacheable_system,
+                tools=tools, tool_choice=tool_choice,
             )
         # Outros providers: cacheable_system é mesclado com system
         # (sem cache real). OpenAI tem prompt cache automático no
         # backend deles; Gemini tem API diferente (a fazer Phase D).
+        # tools[] também não é propagada nativamente — modelo recebe
+        # apenas via prompt JSON-em-string (fallback do design legado).
+        # Phase D próxima: adicionar tool_use nativo OpenAI/Gemini.
         merged_system = f"{cacheable_system}\n\n{system}" if cacheable_system else system
         if provider == "openai":
             return self._call_openai(model_id, merged_system, user, temperature, max_tokens, image_b64, image_mime)
@@ -258,6 +302,8 @@ class LLMRouter:
         temperature: float, max_tokens: int,
         image_b64: str | None, image_mime: str,
         cacheable_system: str | None = None,
+        tools: list[dict] | None = None,
+        tool_choice: str = "auto",
     ) -> dict:
         client = self.clients.anthropic()
         if client is None:
@@ -291,15 +337,64 @@ class LLMRouter:
         else:
             system_arg = system
 
-        resp = client.messages.create(
-            model=model,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            system=system_arg,
-            messages=[{"role": "user", "content": content}],
-        )
-        text = "".join(b.text for b in resp.content if hasattr(b, "text"))
-        parsed = _extract_json(text)
+        # Tool-use NATIVO (Phase D 2026-05-02): se tools[] foi passado,
+        # ativa function calling estruturado. Modelo retorna blocks
+        # `tool_use` que parsamos depois. Isso é MUITO mais confiável
+        # que JSON-em-string — modelo segue schema dos tools, não
+        # depende de prompting milagroso.
+        kwargs: dict[str, Any] = {
+            "model": model,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "system": system_arg,
+            "messages": [{"role": "user", "content": content}],
+        }
+        if tools:
+            kwargs["tools"] = tools
+            # tool_choice: "auto"|"any"|"<nome>" → Anthropic format
+            if tool_choice == "any":
+                kwargs["tool_choice"] = {"type": "any"}
+            elif tool_choice == "auto":
+                kwargs["tool_choice"] = {"type": "auto"}
+            else:
+                # Força tool específica
+                kwargs["tool_choice"] = {"type": "tool", "name": tool_choice}
+
+        resp = client.messages.create(**kwargs)
+
+        # Parsear blocks estruturadamente
+        text_parts: list[str] = []
+        tool_uses: list[dict] = []
+        for block in resp.content:
+            btype = getattr(block, "type", None)
+            if btype == "text":
+                text_parts.append(getattr(block, "text", "") or "")
+            elif btype == "tool_use":
+                tool_uses.append({
+                    "id": getattr(block, "id", ""),
+                    "name": getattr(block, "name", ""),
+                    "input": dict(getattr(block, "input", {}) or {}),
+                })
+
+        text = "".join(text_parts)
+
+        # Tool foi chamada → format estruturado (não passa por _extract_json)
+        if tool_uses:
+            primary = tool_uses[0]
+            parsed: dict[str, Any] = {
+                "action": "tool",
+                "tool_name": primary["name"],
+                "args": primary["input"],
+                "tool_use_id": primary["id"],
+                "text_after": text.strip(),
+            }
+            # Se múltiplas tools (raro), exponha pra debugging
+            if len(tool_uses) > 1:
+                parsed["_extra_tool_uses"] = tool_uses[1:]
+        else:
+            # Sem tool_use: comportamento legado (parse JSON do texto)
+            parsed = _extract_json(text)
+
         # Métricas de cache (Anthropic 0.34+ retorna em usage)
         usage = getattr(resp, "usage", None)
         if usage:
