@@ -16,7 +16,11 @@
  *  5. Quando resolver, click "Marcar resolvido" → handoff.status=resolved,
  *     bypass desativa, Sofia volta a atender.
  *
- * Phase D 2026-05-02 — esqueleto inicial. Próxima sessão:
+ * Phase A 2026-05-02:
+ *  - PR #93: QuickRepliesSidebar (Ctrl+1..9)
+ *  - PR atual (A1): MessageBubble rico — edit/reply/delete por msg
+ *
+ * Próximas fases:
  *  - WebSocket pra real-time (hoje é polling)
  *  - Notificações de "lead respondeu" enquanto operador tá em outra aba
  *  - Multi-operador (handoff transferido entre operadores)
@@ -32,16 +36,21 @@ import {
   CheckCircle2,
   AlertTriangle,
   Bot,
-  Headphones,
   User,
   RefreshCw,
   Zap,
+  X,
+  Reply as ReplyIcon,
 } from "lucide-react";
 
 import { useAuth } from "@/context/auth-context";
 import { hasRole } from "@/lib/permissions";
 import { api } from "@/lib/api";
 import { QuickRepliesSidebar } from "@/components/handoff/QuickRepliesSidebar";
+import {
+  MessageBubble,
+  type ChatMessage,
+} from "@/components/handoff/MessageBubble";
 
 interface Handoff {
   id: string;
@@ -64,15 +73,8 @@ interface SnapshotMessage {
   bot_intent?: string;
 }
 
-interface LiveMessage {
-  id: number;
-  role: string; // 'user' | 'assistant' | 'tool' | 'system'
-  content: string | null;
-  created_at: string;
-  actor?: string; // 'human' | 'sofia' (presente quando role=assistant)
-}
-
 const POLL_INTERVAL_MS = 3000;
+const MUTATION_WINDOW_SECONDS = 300; // sincronizado com backend
 
 const PRIORITY_COLORS: Record<string, string> = {
   P1: "#ef4444",
@@ -91,7 +93,7 @@ export default function HandoffChatPage() {
 
   const [handoff, setHandoff] = useState<Handoff | null>(null);
   const [snapshot, setSnapshot] = useState<SnapshotMessage[]>([]);
-  const [live, setLive] = useState<LiveMessage[]>([]);
+  const [live, setLive] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [resolving, setResolving] = useState(false);
@@ -99,6 +101,7 @@ export default function HandoffChatPage() {
   const [resolveSummary, setResolveSummary] = useState("");
   const [showResolve, setShowResolve] = useState(false);
   const [showQuickReplies, setShowQuickReplies] = useState(false);
+  const [replyTo, setReplyTo] = useState<ChatMessage | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -132,7 +135,7 @@ export default function HandoffChatPage() {
     try {
       const [hRes, mRes] = await Promise.all([
         api.request<{ handoff: Handoff }>(`/api/admin/handoff/${handoffId}`),
-        api.request<{ snapshot: SnapshotMessage[]; live: LiveMessage[] }>(
+        api.request<{ snapshot: SnapshotMessage[]; live: ChatMessage[] }>(
           `/api/admin/handoff/${handoffId}/messages`,
         ),
       ]);
@@ -162,15 +165,35 @@ export default function HandoffChatPage() {
     }
   }, [live.length]);
 
+  const buildOutgoingText = useCallback(
+    (raw: string, quoted: ChatMessage | null): string => {
+      if (!quoted || !quoted.content) return raw;
+      // Quote estilo WhatsApp: prefixo "> " em cada linha do original.
+      // Limita a 240 chars pra não inundar a mensagem.
+      const truncated =
+        quoted.content.length > 240
+          ? quoted.content.slice(0, 240) + "…"
+          : quoted.content;
+      const quotedLines = truncated
+        .split("\n")
+        .map((l) => `> ${l}`)
+        .join("\n");
+      return `${quotedLines}\n\n${raw}`;
+    },
+    [],
+  );
+
   const send = async () => {
     if (!handoffId || !text.trim() || sending) return;
     setSending(true);
+    const outgoing = buildOutgoingText(text.trim(), replyTo);
     try {
       await api.request(`/api/admin/handoff/${handoffId}/send`, {
         method: "POST",
-        body: JSON.stringify({ text: text.trim() }),
+        body: JSON.stringify({ text: outgoing }),
       });
       setText("");
+      setReplyTo(null);
       // Recarrega imediatamente pra ver msg enviada
       await loadAll();
     } catch (e) {
@@ -179,6 +202,52 @@ export default function HandoffChatPage() {
       setSending(false);
     }
   };
+
+  const handleEditMessage = useCallback(
+    async (msg: ChatMessage, newContent: string) => {
+      if (!handoffId) return;
+      await api.request(
+        `/api/admin/handoff/${handoffId}/messages/${msg.id}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({ content: newContent }),
+        },
+      );
+      // Atualização otimista local + revalida no próximo poll
+      setLive((prev) =>
+        prev.map((m) =>
+          m.id === msg.id
+            ? {
+                ...m,
+                content: newContent,
+                edited_at: new Date().toISOString(),
+                edit_count: (m.edit_count || 0) + 1,
+              }
+            : m,
+        ),
+      );
+    },
+    [handoffId],
+  );
+
+  const handleDeleteMessage = useCallback(
+    async (msg: ChatMessage) => {
+      if (!handoffId) return;
+      await api.request(
+        `/api/admin/handoff/${handoffId}/messages/${msg.id}`,
+        { method: "DELETE" },
+      );
+      setLive((prev) =>
+        prev.map((m) => (m.id === msg.id ? { ...m, deleted: true } : m)),
+      );
+    },
+    [handoffId],
+  );
+
+  const handleReplyTo = useCallback((msg: ChatMessage) => {
+    setReplyTo(msg);
+    requestAnimationFrame(() => composerRef.current?.focus());
+  }, []);
 
   const resolve = async () => {
     if (!handoffId || !resolveSummary.trim() || resolving) return;
@@ -327,9 +396,41 @@ export default function HandoffChatPage() {
           </div>
         )}
         {live.map((m) => (
-          <LiveBubble key={m.id} msg={m} />
+          <MessageBubble
+            key={m.id}
+            msg={m}
+            currentUserId={user?.id}
+            mutationWindowSeconds={MUTATION_WINDOW_SECONDS}
+            onReply={isClaimedByMe ? handleReplyTo : undefined}
+            onEdit={isClaimedByMe ? handleEditMessage : undefined}
+            onDelete={isClaimedByMe ? handleDeleteMessage : undefined}
+          />
         ))}
       </div>
+
+      {/* Reply quoted preview */}
+      {replyTo && replyTo.content && isClaimedByMe && (
+        <div className="border-t border-border pt-2 px-3">
+          <div className="flex items-start gap-2 px-2 py-1.5 rounded-md bg-cyan-500/5 border-l-2 border-cyan-500/50">
+            <ReplyIcon className="h-3 w-3 text-cyan-500 mt-1 shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="text-[10px] font-medium text-cyan-500/80">
+                Respondendo
+              </p>
+              <p className="text-xs text-muted-foreground truncate">
+                {replyTo.content}
+              </p>
+            </div>
+            <button
+              onClick={() => setReplyTo(null)}
+              className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground shrink-0"
+              title="Cancelar resposta"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Composer */}
       {isClaimedByMe ? (
@@ -343,9 +444,16 @@ export default function HandoffChatPage() {
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
                   send();
+                } else if (e.key === "Escape" && replyTo) {
+                  e.preventDefault();
+                  setReplyTo(null);
                 }
               }}
-              placeholder="Digite a resposta pro lead… (Enter envia, Shift+Enter quebra linha)"
+              placeholder={
+                replyTo
+                  ? "Digite sua resposta…"
+                  : "Digite a resposta pro lead… (Enter envia, Shift+Enter quebra linha)"
+              }
               rows={2}
               className="flex-1 resize-none px-3 py-2 text-sm rounded-md border border-border bg-background focus:outline-none focus:ring-1 focus:ring-primary"
               disabled={sending}
@@ -430,83 +538,40 @@ export default function HandoffChatPage() {
   );
 }
 
-// ─── Sub-componentes ───────────────────────────────────────────
+// ─── Snapshot bubble (histórico Sofia pré-handoff, sem affordances) ───
 
 function SnapshotBubble({ msg }: { msg: SnapshotMessage }) {
   const botText = msg.bot_message;
   const leadText = msg.lead_message;
   return (
     <>
-      {botText && <Bubble role="sofia" content={botText} />}
-      {leadText && <Bubble role="user" content={leadText} />}
+      {botText && <SimpleBubble role="sofia" content={botText} />}
+      {leadText && <SimpleBubble role="user" content={leadText} />}
     </>
   );
 }
 
-function LiveBubble({ msg }: { msg: LiveMessage }) {
-  if (!msg.content) return null;
-  // role + actor → quem mandou
-  let who: "user" | "sofia" | "human" | "tool" = "user";
-  if (msg.role === "assistant") {
-    who = msg.actor === "human" ? "human" : "sofia";
-  } else if (msg.role === "tool") {
-    who = "tool";
-  } else if (msg.role === "user") {
-    who = "user";
-  }
-  return <Bubble role={who} content={msg.content} ts={msg.created_at} />;
-}
-
-function Bubble({
+function SimpleBubble({
   role,
   content,
-  ts,
 }: {
-  role: "user" | "sofia" | "human" | "tool";
+  role: "user" | "sofia";
   content: string;
-  ts?: string;
 }) {
   const isFromUser = role === "user";
   const align = isFromUser ? "items-start" : "items-end";
-  const bgColor =
-    role === "user"
-      ? "bg-muted text-foreground"
-      : role === "human"
-      ? "bg-cyan-500/15 text-foreground border border-cyan-500/30"
-      : role === "sofia"
-      ? "bg-primary/10 text-foreground border border-primary/20"
-      : "bg-amber-500/10 text-foreground border border-amber-500/20";
-  const Icon = isFromUser ? User : role === "human" ? Headphones : Bot;
-  const labelColor =
-    role === "human"
-      ? "text-cyan-500"
-      : role === "sofia"
-      ? "text-primary"
-      : role === "tool"
-      ? "text-amber-500"
-      : "text-muted-foreground";
-  const label =
-    role === "user"
-      ? "Lead"
-      : role === "human"
-      ? "Você"
-      : role === "sofia"
-      ? "Sofia"
-      : "Tool";
+  const bgColor = isFromUser
+    ? "bg-muted text-foreground"
+    : "bg-primary/10 text-foreground border border-primary/20";
+  const Icon = isFromUser ? User : Bot;
+  const labelColor = isFromUser ? "text-muted-foreground" : "text-primary";
+  const label = isFromUser ? "Lead" : "Sofia";
 
   return (
     <div className={`flex flex-col ${align}`}>
       <div className="flex items-center gap-1.5 mb-1 text-[10px]">
         <Icon className={`h-3 w-3 ${labelColor}`} />
         <span className={`font-medium ${labelColor}`}>{label}</span>
-        {ts && (
-          <span className="text-muted-foreground/60">
-            {new Date(ts).toLocaleTimeString("pt-BR", {
-              hour: "2-digit",
-              minute: "2-digit",
-            })}
-          </span>
-        )}
       </div>
       <div
         className={`max-w-[80%] px-3 py-2 rounded-lg text-sm whitespace-pre-wrap ${bgColor}`}
