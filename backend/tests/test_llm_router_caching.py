@@ -20,11 +20,33 @@ class _FakeAnthropicUsage:
             setattr(self, k, v)
 
 
+class _FakeAnthropicTextBlock:
+    """Mimica anthropic SDK TextBlock pra parser identificar."""
+    def __init__(self, text: str):
+        self.type = "text"
+        self.text = text
+
+
+class _FakeAnthropicToolUseBlock:
+    """Mimica anthropic SDK ToolUseBlock pra parser identificar."""
+    def __init__(self, name: str, input_data: dict, block_id: str = "tu_test"):
+        self.type = "tool_use"
+        self.id = block_id
+        self.name = name
+        self.input = input_data
+
+
 class _FakeAnthropicResponse:
-    def __init__(self, text: str, usage=None):
-        block = MagicMock()
-        block.text = text
-        self.content = [block]
+    def __init__(self, text: str = "", usage=None, tool_uses: list | None = None):
+        self.content: list = []
+        if text:
+            self.content.append(_FakeAnthropicTextBlock(text))
+        for tu in (tool_uses or []):
+            self.content.append(_FakeAnthropicToolUseBlock(
+                name=tu["name"],
+                input_data=tu.get("input", {}),
+                block_id=tu.get("id", "tu_test"),
+            ))
         self.usage = usage
 
 
@@ -148,6 +170,127 @@ class TestAnthropicCacheControl:
         )
         assert result["_cache_read_input_tokens"] == 2800
         assert result["_cache_creation_input_tokens"] == 0
+
+
+class TestAnthropicToolUseNative:
+    """Phase D 2026-05-02: tool-use nativo via param `tools=[...]`."""
+
+    def test_tools_param_propagated_to_anthropic_api(
+        self, router_with_anthropic, fake_anthropic,
+    ):
+        fake_anthropic.messages.create.return_value = _FakeAnthropicResponse(
+            text="",
+            tool_uses=[{
+                "name": "escalate_to_human_whatsapp",
+                "input": {"phone": "5511", "reason": "user pediu humano",
+                          "summary": "lead disse PRECISO HUMANO AGORA",
+                          "urgency": "P1"},
+                "id": "tu_abc123",
+            }],
+            usage=_FakeAnthropicUsage(input_tokens=200, output_tokens=50,
+                                     cache_creation_input_tokens=0,
+                                     cache_read_input_tokens=0),
+        )
+
+        tools_schema = [{
+            "name": "escalate_to_human_whatsapp",
+            "description": "test",
+            "input_schema": {"type": "object", "properties": {}},
+        }]
+
+        result = router_with_anthropic.complete_json(
+            task="any_task",
+            system="dyn",
+            user="quero falar com humano",
+            tools=tools_schema,
+            tool_choice="auto",
+        )
+
+        # Confirma que messages.create recebeu tools= + tool_choice
+        call_kwargs = fake_anthropic.messages.create.call_args.kwargs
+        assert call_kwargs["tools"] == tools_schema
+        assert call_kwargs["tool_choice"] == {"type": "auto"}
+
+        # Result tem o formato estruturado de tool call
+        assert result["action"] == "tool"
+        assert result["tool_name"] == "escalate_to_human_whatsapp"
+        assert result["args"]["urgency"] == "P1"
+        assert result["args"]["phone"] == "5511"
+        assert result["tool_use_id"] == "tu_abc123"
+        assert result["text_after"] == ""
+
+    def test_tool_choice_force_specific_tool(
+        self, router_with_anthropic, fake_anthropic,
+    ):
+        fake_anthropic.messages.create.return_value = _FakeAnthropicResponse(
+            text="",
+            tool_uses=[{
+                "name": "capture_lead",
+                "input": {"phone": "5511", "intent": "interesse_servico_b2c",
+                          "full_name": "Douglas"},
+                "id": "tu_capture",
+            }],
+        )
+
+        router_with_anthropic.complete_json(
+            task="any_task",
+            system="x",
+            user="sou douglas",
+            tools=[{"name": "capture_lead", "description": "x",
+                   "input_schema": {"type": "object"}}],
+            tool_choice="capture_lead",  # força específica
+        )
+
+        call_kwargs = fake_anthropic.messages.create.call_args.kwargs
+        assert call_kwargs["tool_choice"] == {"type": "tool",
+                                              "name": "capture_lead"}
+
+    def test_text_with_tool_use_combines(
+        self, router_with_anthropic, fake_anthropic,
+    ):
+        """Modelo pode retornar texto ANTES da tool call."""
+        fake_anthropic.messages.create.return_value = _FakeAnthropicResponse(
+            text="Vou conectar você com nossa equipe agora mesmo.",
+            tool_uses=[{
+                "name": "escalate_to_human_whatsapp",
+                "input": {"phone": "5511", "reason": "lead pediu humano",
+                         "summary": "...", "urgency": "P2"},
+                "id": "tu_1",
+            }],
+        )
+
+        result = router_with_anthropic.complete_json(
+            task="any_task", system="x", user="humano",
+            tools=[{"name": "escalate_to_human_whatsapp",
+                   "description": "x",
+                   "input_schema": {"type": "object"}}],
+        )
+
+        assert result["action"] == "tool"
+        assert result["tool_name"] == "escalate_to_human_whatsapp"
+        assert "conectar" in result["text_after"]
+
+    def test_no_tools_passed_falls_back_to_json_string(
+        self, router_with_anthropic, fake_anthropic,
+    ):
+        """Sem tools=, comportamento legado (JSON-em-string parsed)."""
+        fake_anthropic.messages.create.return_value = _FakeAnthropicResponse(
+            text='{"action":"text","text":"oi"}',
+        )
+
+        result = router_with_anthropic.complete_json(
+            task="any_task", system="x", user="hi",
+            # NO tools=
+        )
+
+        # API call NÃO recebeu tools=
+        call_kwargs = fake_anthropic.messages.create.call_args.kwargs
+        assert "tools" not in call_kwargs
+        assert "tool_choice" not in call_kwargs
+
+        # Resposta parseada via JSON-em-string
+        assert result["action"] == "text"
+        assert result["text"] == "oi"
 
 
 class TestCommercialAgentPromptParts:
