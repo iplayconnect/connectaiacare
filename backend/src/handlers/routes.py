@@ -24,29 +24,111 @@ def health():
 # ---------- Webhook WhatsApp (Evolution API) ----------
 @bp.post("/webhook/whatsapp")
 def whatsapp_webhook():
-    # `silent=True` já retorna None em JSON inválido (não levanta exceção).
-    # Remove o try/except dead code que existia antes.
+    """Webhook LEGADO síncrono.
+
+    Phase B/C migration: feature flag WEBHOOK_LEGACY_REDIRECT_V2 (default
+    true) faz este webhook DESPACHAR pra v2 (event bus async + Super
+    Sofia orchestrator) ao invés de chamar pipeline.handle_webhook
+    síncrono. Permite migração sem reconfigurar Evolution painel.
+
+    Tenant resolution:
+        - data.instance no payload Evolution (campo presente em
+          messages.upsert) → resolve via TenantResolver
+        - fallback: settings.tenant_id (env)
+    """
+    import os
     event = request.get_json(silent=True)
     if event is None:
         logger.warning("webhook_invalid_json", remote=request.remote_addr)
         return jsonify({"status": "error", "reason": "invalid_json"}), 400
 
-    # Não vazar str(exc) para o cliente — pode conter stack trace, detalhes de DB,
-    # nomes de paciente em mensagens de erro, etc. Retorna trace_id para correlacionar
-    # com o log interno (structlog preserva todo o traceback).
-    # Ver FINDING-004 do security audit.
+    # ─── Auto-redirect pro Phase B/C v2 ───
+    legacy_redirect = os.getenv("WEBHOOK_LEGACY_REDIRECT_V2", "true").lower() == "true"
+    if legacy_redirect:
+        try:
+            from src.services.event_bus import Streams, get_event_bus
+            from src.services.idempotency import is_first_occurrence
+            from src.services.tenant_resolver import get_tenant_resolver
+            from src.services.audit_log_writer import write_audit, redact_phone
+
+            # Idempotência por message_id (Evolution retry → não duplica)
+            data = event.get("data") or {}
+            key = data.get("key") if isinstance(data, dict) else {}
+            msg_id = (key or {}).get("id") if isinstance(key, dict) else None
+            if msg_id and not is_first_occurrence("wa_msg", str(msg_id)):
+                return jsonify({"status": "ok", "reason": "duplicate_skipped"}), 200
+
+            # Tenant resolution: instance no payload → tenant
+            instance_name = event.get("instance") or data.get("instance")
+            tenant = None
+            if instance_name:
+                tenant = get_tenant_resolver().from_evolution_instance(instance_name)
+            if not tenant:
+                # Fallback: tenant default da env
+                from config.settings import settings
+                tenant = get_tenant_resolver().by_id(settings.tenant_id)
+            if not tenant:
+                # Último recurso: cai no pipeline legado
+                logger.warning("webhook_legacy_no_tenant_fallback_pipeline")
+                result = get_pipeline().handle_webhook(event)
+                return jsonify(result), 200
+
+            trace_id = str(uuid.uuid4())
+            entry_id = get_event_bus().publish(Streams.INBOUND, {
+                "event_type": "whatsapp_inbound",
+                "tenant_id": tenant.id,
+                "instance": instance_name or "legacy",
+                "trace_id": trace_id,
+                "received_at": __import__("time").time(),
+                "payload": event,
+                "msg_id": msg_id,
+            })
+
+            # Phone redacted pra audit
+            phone = None
+            jid = (key or {}).get("remoteJid") if isinstance(key, dict) else None
+            if jid and "@" in jid:
+                phone = jid.split("@")[0]
+            write_audit(
+                action="webhook_received",
+                actor="system",
+                tenant_id=tenant.id,
+                trace_id=trace_id,
+                payload={
+                    "via": "legacy_redirect_v2",
+                    "instance": instance_name,
+                    "msg_id": msg_id,
+                    "phone_redacted": redact_phone(phone),
+                    "stream_entry_id": entry_id,
+                },
+            )
+
+            return jsonify({
+                "status": "queued",
+                "via": "legacy_redirect_v2",
+                "trace_id": trace_id,
+                "stream_entry_id": entry_id,
+            }), 200
+        except Exception as exc:
+            # Failsafe: erro no redirect → cai no pipeline legado
+            trace_id = str(uuid.uuid4())
+            logger.exception(
+                "webhook_legacy_redirect_failed",
+                trace_id=trace_id, error_class=type(exc).__name__,
+            )
+            # Continua pro pipeline legado abaixo
+
+    # ─── Pipeline LEGADO síncrono (fallback ou flag desligada) ───
     try:
         result = get_pipeline().handle_webhook(event)
         return jsonify(result), 200
-    except Exception as exc:  # noqa: BLE001 - catchall intencional (webhook pode receber qualquer coisa)
+    except Exception as exc:
         trace_id = str(uuid.uuid4())
         logger.exception(
             "webhook_processing_failed",
             trace_id=trace_id,
             error_class=type(exc).__name__,
         )
-        # Evolution API espera 200 para confirmar entrega (senão desabilita webhook).
-        # TODO(P1): distinguir erros transitórios (retry) vs permanentes — FINDING-007.
         return jsonify({"status": "error", "reason": "internal_error", "trace_id": trace_id}), 200
 
 
