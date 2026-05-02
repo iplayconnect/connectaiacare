@@ -246,17 +246,22 @@ class SuperSofiaOrchestrator:
             }
 
         # Anti-hallucination guardrail (post-LLM, pre-send).
-        # Smart: se o user JÁ MENCIONOU o pattern clínico no turno
-        # atual ou em turnos recentes do active_context, é PARAFRASEIO
-        # (Sofia validando o que o usuário disse), não alucinação.
-        # Bug fix 2026-05-02: estávamos substituindo respostas legítimas
-        # como "vou anotar a idade dos seus pais (81 e 97 anos)".
+        # Aplicado APENAS em sub-agents CLÍNICOS (Phase C v2 vai criar).
+        # Comercial/support NÃO devem ter guardrail clínico:
+        #   - Eles capturam lead/dão suporte, não conselho clínico
+        #   - User dando idade/dor dos pais é info pra qualificação,
+        #     não dado clínico que Sofia inventaria
+        #   - Guardrail estava bloqueando parafraseio legítimo
+        #     ("seus pais com 90 e 92 anos..." → fallback genérico)
+        # Bug fix 2026-05-02: removido pra commercial/support.
+        # Mantido pra futuros sub-agents clinical_* (Phase C v2).
         had_valid_tool = any(
             t.get("status") not in ("pending_phase_c4",)
             and (t.get("ok") in (True, None))
             for t in response.tools_called
         )
-        if response.text:
+        CLINICAL_AGENTS = ("clinical", "caregiver", "family")  # futuros
+        if response.text and agent.name in CLINICAL_AGENTS:
             clinical_pattern = _is_clinical_narration(response.text)
             user_already_mentioned = False
             if clinical_pattern:
@@ -277,25 +282,20 @@ class SuperSofiaOrchestrator:
                 clinical_pattern
                 and not had_valid_tool
                 and not user_already_mentioned
-                and agent.name in ("commercial", "support")
             ):
                 logger.warning(
                     "hallucination_suspected_skip_send",
-                    trace_id=trace_id,
-                    agent=agent.name,
+                    trace_id=trace_id, agent=agent.name,
                     pattern=clinical_pattern,
                     text_preview=response.text[:200],
                 )
-                # Substitui por mensagem segura
                 response.text = (
-                    "Recebi sua mensagem! Pra te ajudar melhor, pode me "
-                    "contar um pouco mais sobre o contexto? (seu nome, "
-                    "se é pra você ou pra alguém da família, e o que "
-                    "você gostaria de saber sobre a ConnectaIACare). 🙏"
+                    "Tive uma demora técnica buscando essa informação. "
+                    "Pode confirmar de novo o que precisa que eu tento "
+                    "de outra forma?"
                 )
                 response.metadata["hallucination_replaced"] = clinical_pattern
             elif clinical_pattern and user_already_mentioned:
-                # Paraf rfaseio legítimo — log info, não substitui
                 logger.info(
                     "guardrail_skipped_user_paraphrase",
                     trace_id=trace_id, agent=agent.name,
