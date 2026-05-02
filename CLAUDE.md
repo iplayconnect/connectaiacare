@@ -165,6 +165,55 @@ Verificar: `docker compose ps` — todos devem estar `healthy`.
 
 ---
 
+## 3.1. Inventário de Processos Background
+
+> **REGRA ANTI-REDUNDÂNCIA — leitura obrigatória antes de criar QUALQUER
+> worker, scheduler, daemon ou loop de polling novo.**
+
+Antes de adicionar um novo processo background, confira esta tabela.
+Se o que você quer fazer já existe, ESTENDA o existente — não duplique.
+Dois processos consumindo a mesma fila / escrevendo na mesma coluna =
+race condition + custo dobrado de API + estado inconsistente.
+
+### Processos rodando em produção (canônicos)
+
+| Processo | Container | Onde | Tabela / Fila | Função | Modelo |
+|----------|-----------|------|---------------|--------|--------|
+| `embedding_worker` | sofia-service | `sofia-service/src/embedding_service.py` | `aia_health_sofia_messages.embedding` (NULL) | Gera embedding 768-dim pra recall semântico | Gemini `gemini-embedding-001` |
+| `checkin_scheduler` | api | `src/services/checkin_scheduler.py` | `aia_health_checkins` agendados | Dispara check-ins programados | — |
+| `safety_queue_executor` | api | `src/services/safety_queue.py` | Fila de safety (Redis) | Aplica análises de segurança em ações pendentes | — |
+| `dose_revalidation_scheduler` | api | `src/services/dose_revalidation_scheduler.py` | `aia_health_medication_events` | Revalida doses periodicamente (semanal) | — |
+| `proactive_caller_scheduler` | api | `src/services/proactive_caller.py` | `aia_health_patients` | Decide quem ligar proativamente | — |
+| `collective_insights_scheduler` | sofia-service | `src/collective_insights_scheduler.py` | `aia_health_sofia_messages` (24h window) | Gera insights agregados | — |
+| `medication_events_materialization` | api | (loop dentro de `app.py`) | `aia_health_medication_events` | Materializa próximos eventos de medicação | — |
+
+### Processos CLI / utilitários (NÃO são daemons)
+
+| CLI | Onde | Quando usar |
+|-----|------|-------------|
+| `python -m src.services.csm.embedding_worker` | backend | **Backfill manual** de rows com embedding NULL (ex: pós-downtime do sofia-service). NÃO é daemon — produção é o `embedding_worker` do sofia-service. |
+
+### Checklist obrigatório ANTES de criar novo worker / scheduler / daemon
+
+1. **Procure o nome esperado** com `grep -rni "<keyword>_worker\|<keyword>_scheduler" backend/ sofia-service/`
+2. **Procure pela tabela alvo** com `grep -rn "FROM <tabela>\|UPDATE <tabela>" backend/src/ sofia-service/src/`
+3. **Procure pelo critério `WHERE`** semelhante (ex: `WHERE embedding IS NULL`)
+4. **Olhe os logs em produção** com `docker logs --tail 200 <container> 2>&1 | grep -E "scheduler|worker|started"` — algo já roda nessa frequência?
+5. **Confira esta tabela acima** — o processo já existe?
+
+Se passou nos 5 e ainda assim faz sentido um processo novo, **adicione
+nesta tabela junto com o PR**. Sem entrada na tabela, não foi feito.
+
+### Regras pra TODO worker novo
+
+- **Multi-worker safe**: se o container roda 2+ workers gunicorn (a maioria roda), o SELECT de pendentes DEVE usar `FOR UPDATE SKIP LOCKED` em transação que cobre o UPDATE/DELETE final. Cuidado: `SELECT FOR UPDATE` + commit antes do UPDATE = lock perdido. Solução: SELECT + UPDATEs no MESMO cursor (ver `sofia-service/src/embedding_service.py::embed_pending_batch`).
+- **Connection-per-batch é OK pra batches < 30s**: pool de 8 conexões + 2 workers = 6 livres. Se o batch durar mais que isso (ex: chama LLM por row), considere claim-then-process (UPDATE pra marcar `status='claimed'` antes, processa fora da transação, UPDATE final).
+- **Backoff exponencial em erro consecutivo**: tick mínimo 30s. Cap em 5min. Não martelar API externa em erro.
+- **Logar `<nome>_started worker_id=<id> tick=<s> batch=<n>`** no boot pra dar visibilidade no inventário acima.
+- **Best-effort**: nunca derrubar o request de turno do user por causa de falha em worker secundário.
+
+---
+
 ## 4. Estrutura do Banco de Dados
 
 PostgreSQL 16 (imagem `pgvector/pgvector:pg16`), database `connectaiacare`, user `postgres`.
@@ -210,6 +259,7 @@ Rodar: `bash scripts/init_db.sh` (local) ou `docker compose exec ...` (VPS).
 6. Commitar `.env`, chaves, tokens, credenciais
 7. Criar nova tabela sem prefixo `aia_health_`
 8. Chamar Sofia Voice sem validar destinatário (risco: ligar pro paciente/família errado)
+9. **Criar worker/scheduler/daemon novo sem antes consultar §3.1 (Inventário de Processos Background)** — redundância gera race condition + custo dobrado de API.
 
 ### SEMPRE
 1. Testar sintaxe antes de commit (`python3 -c "import ast; ast.parse(...)"`)
@@ -220,6 +270,7 @@ Rodar: `bash scripts/init_db.sh` (local) ou `docker compose exec ...` (VPS).
 6. Atualizar `scripts/verify.sh` quando adicionar arquivos críticos
 7. Consultar `SECURITY.md` antes de qualquer endpoint que toque PHI
 8. Considerar LGPD Art. 11 (dados sensíveis) em qualquer feature nova
+9. **Antes de criar worker/scheduler novo**: rodar o checklist de §3.1 (5 passos: grep nome, grep tabela, grep WHERE, log da VPS, tabela do inventário). Se passar, **adicionar entrada nova na tabela do §3.1 no MESMO PR**. Sem entrada na tabela, não foi feito.
 
 ---
 
@@ -349,6 +400,7 @@ Ao iniciar nova sessão Claude Code neste projeto:
 5. Verificar git: `git status && git log --oneline -5`
 6. Se for mexer em backend: `docker compose ps` (containers de pé?)
 7. Se for mexer em biometria: consultar `audio_preprocessing.py` + `voice_biometrics_service.py` (thresholds, cache)
+8. **Se a tarefa envolver criar worker / scheduler / daemon / loop de polling**: ler §3.1 (Inventário de Processos Background) e rodar o checklist de 5 passos antes de codar.
 
 ### Regras CRÍTICAS
 - **Fluxo**: SEMPRE Local → git commit → push → VPS git pull → rebuild

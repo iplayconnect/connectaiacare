@@ -1,29 +1,36 @@
-"""Background worker pra gerar embeddings de aia_health_sofia_messages.
+"""CLI de backfill pra embeddings de aia_health_sofia_messages.
 
-Phase C v2.6 — semantic recall. Sofia persiste mensagens com
-embedding=NULL (sofia_persistence.append_message). Este worker pega
-batch de mensagens pendentes e popula embedding via EmbeddingService
-(text-embedding-004 ou similar, 768 dims).
+⚠️ ATENÇÃO — produção é coberta pelo sofia-service:
+    sofia-service/src/embedding_service.py JÁ roda como daemon dentro
+    do container sofia-service (auto-start via _start_worker_thread no
+    boot, tick=60s, batch=20, modelo gemini-embedding-001) e popula a
+    coluna aia_health_sofia_messages.embedding em prod. Esse é o
+    produtor primário e canônico.
 
-Uso de produção (Hostinger):
-    Loop infinito num thread/timer no sofia-service. Backoff
-    exponencial em erro. Concorrente-safe via SELECT ... FOR UPDATE
-    SKIP LOCKED.
+Este módulo (CLI) existe pra dois cenários EXCEPCIONAIS:
+    1. Backfill manual de rows antigas que ficaram com embedding NULL
+       por bug, downtime do sofia-service, ou pós-migração.
+    2. Debug local / dev sem o sofia-service rodando.
 
-Uso CLI (manual, debug, backfill):
-    python -m src.services.csm.embedding_worker --batch 50
+NÃO transforme isso em daemon paralelo — duas peças escrevendo na
+mesma coluna seria redundância e dobraria custo de API. Se precisar
+de mais throughput em prod, escale o sofia-service (mais workers
+gunicorn ou tick menor) — não inicie este aqui em paralelo.
 
-Index suportado:
-    idx_sofia_messages_pending_embed (migration 037)
-    WHERE embedding IS NULL AND content IS NOT NULL
+Uso CLI:
+    # Single-shot até esgotar pendentes
+    python -m src.services.csm.embedding_worker
 
-API principal:
+    # Limita pra N batches
+    python -m src.services.csm.embedding_worker --batch 50 --max-iter 10
+
+Schema usado (migration 037):
+    aia_health_sofia_messages.embedding vector(768)
+    idx_sofia_messages_pending_embed WHERE embedding IS NULL
+
+API programática (rara — prefira sofia-service em prod):
     worker = EmbeddingWorker(batch_size=20)
     n = worker.process_batch()
-    # 0 quando não tem mais pendentes; loop pode dormir e tentar de novo
-
-    # Modo daemon
-    worker.run_forever(interval_seconds=30)
 """
 from __future__ import annotations
 
@@ -169,72 +176,37 @@ class EmbeddingWorker:
         )
         return stats
 
-    # ─── Daemon loop ────────────────────────────────────────────
-
-    def run_forever(
-        self,
-        *,
-        interval_seconds: float = 30.0,
-        backoff_max: float = 300.0,
-    ) -> None:
-        """Loop infinito. Backoff exponencial em erro consecutivo.
-
-        Para parar: SIGTERM (process inteiro) ou daemon=True quando
-        spawnado em thread.
-        """
-        backoff = interval_seconds
-        consecutive_errors = 0
-        while True:
-            try:
-                stats = self.process_batch()
-                if stats.failed and not stats.processed:
-                    consecutive_errors += 1
-                    backoff = min(backoff * 2, backoff_max)
-                else:
-                    consecutive_errors = 0
-                    backoff = interval_seconds
-                # Se batch full, loop imediato (provável backlog grande)
-                if stats.processed >= self.batch_size:
-                    continue
-            except Exception as exc:
-                consecutive_errors += 1
-                backoff = min(backoff * 2, backoff_max)
-                logger.exception(
-                    "embedding_worker_iter_failed",
-                    error=str(exc)[:200],
-                    consecutive_errors=consecutive_errors,
-                )
-            time.sleep(backoff)
+    # NOTA — não há run_forever. Daemon mode foi removido na limpeza
+    # 2026-05-02 quando descobrimos que sofia-service já tem worker
+    # canônico. Se precisar de daemon em prod, escale o sofia-service.
 
 
 # ─── CLI ────────────────────────────────────────────────────────
 
 def main() -> int:
-    """Modo CLI pra backfill / debug.
+    """Modo CLI single-shot pra backfill.
 
     Uso:
-        python -m src.services.csm.embedding_worker --batch 50
-        python -m src.services.csm.embedding_worker --daemon --interval 60
+        python -m src.services.csm.embedding_worker
+        python -m src.services.csm.embedding_worker --batch 50 --max-iter 10
     """
     import argparse
-    parser = argparse.ArgumentParser(description="Sofia messages embedding worker")
+    parser = argparse.ArgumentParser(
+        description=(
+            "Backfill embeddings de aia_health_sofia_messages. NÃO é "
+            "daemon — produção usa sofia-service. Roda batches até "
+            "esgotar pendentes (ou até max-iter)."
+        ),
+    )
     parser.add_argument("--batch", type=int, default=20)
-    parser.add_argument("--daemon", action="store_true",
-                        help="Roda como daemon em loop infinito")
-    parser.add_argument("--interval", type=float, default=30.0,
-                        help="Intervalo entre batches em modo daemon (s)")
-    parser.add_argument("--max-iter", type=int, default=0,
-                        help="Em modo single-shot, número de batches "
-                             "(0=infinito até esgotar)")
+    parser.add_argument(
+        "--max-iter", type=int, default=0,
+        help="Número máximo de batches (0=até esgotar)",
+    )
     args = parser.parse_args()
 
     worker = EmbeddingWorker(batch_size=args.batch)
 
-    if args.daemon:
-        worker.run_forever(interval_seconds=args.interval)
-        return 0
-
-    # Single-shot: roda até esgotar OU max-iter
     total = 0
     iters = 0
     while True:
