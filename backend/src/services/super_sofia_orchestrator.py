@@ -155,6 +155,76 @@ class SuperSofiaOrchestrator:
             tenant = self.tenant_resolver.central()
             tenant_id = tenant.id
 
+        # ─── Handoff bypass: phone com handoff 'claimed' ativo ──
+        # Quando operador humano reivindicou o lead, mensagens dele
+        # NÃO devem ser processadas pela Sofia — humano está atendendo.
+        # A msg fica visível no chat handoff via aia_health_sofia_messages
+        # (persistida pelo append_turn cross-channel adiante) e o operador
+        # responde via /api/admin/handoff/<id>/send.
+        try:
+            from src.services.postgres import get_postgres as _get_pg
+            active_handoff = _get_pg().fetch_one(
+                """SELECT id::text AS id, claimed_by_user_id::text AS claimed_by
+                   FROM aia_health_human_handoff_queue
+                   WHERE phone = %s
+                     AND status = 'claimed'
+                   ORDER BY claimed_at DESC LIMIT 1""",
+                (phone,),
+            )
+            if active_handoff:
+                logger.info(
+                    "orchestrator_bypassed_for_active_handoff",
+                    trace_id=trace_id,
+                    handoff_id=active_handoff["id"],
+                    phone_redacted=redact_phone(phone),
+                )
+                # Persiste msg do user em DOIS lugares pra UI funcionar:
+                #  1) sofia_messages (consultado por /handoff/<id>/messages)
+                #  2) active_context (cross-channel memory)
+                if text:
+                    try:
+                        from src.services.sofia_persistence import (
+                            get_or_create_session, append_message,
+                        )
+                        sess = get_or_create_session(
+                            tenant_id=tenant_id or "central",
+                            phone=phone, channel="whatsapp",
+                        )
+                        append_message(
+                            session_id=sess.id,
+                            tenant_id=tenant_id or "central",
+                            role="user",
+                            content=text,
+                            metadata={
+                                "handoff_id": active_handoff["id"],
+                                "received_during": "human_handoff",
+                            },
+                        )
+                    except Exception as exc:
+                        logger.warning(
+                            "handoff_bypass_persist_failed",
+                            error=str(exc)[:200],
+                        )
+                    append_turn(
+                        tenant_id=tenant_id or "central",
+                        role="user",
+                        content=text,
+                        channel="whatsapp",
+                        phone=phone,
+                    )
+                return {
+                    "status": "handed_to_human",
+                    "handoff_id": active_handoff["id"],
+                    "trace_id": trace_id,
+                    "claimed_by": active_handoff["claimed_by"],
+                }
+        except Exception as exc:
+            logger.warning(
+                "handoff_bypass_check_failed",
+                trace_id=trace_id, error=str(exc)[:200],
+            )
+            # Em caso de erro, deixa Sofia processar normal (best-effort)
+
         # Identity resolution
         identity = self.identity_resolver.resolve(phone, tenant_id=tenant_id)
         # Se NÃO casou no tenant específico, tenta global (multi-tenant)

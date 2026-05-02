@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   HeartHandshake,
   RefreshCw,
@@ -12,6 +13,7 @@ import {
   XCircle,
   Phone,
   User,
+  MessageSquare,
 } from "lucide-react";
 
 import { useAuth } from "@/context/auth-context";
@@ -52,6 +54,7 @@ const STATUS_COLORS: Record<string, string> = {
 
 export default function HandoffQueuePage() {
   const { user } = useAuth();
+  const router = useRouter();
   const allowed = hasRole(user, "super_admin", "admin_tenant", "medico", "enfermeiro");
 
   const [items, setItems] = useState<Handoff[]>([]);
@@ -89,12 +92,19 @@ export default function HandoffQueuePage() {
     setBusyId(id);
     try {
       await api.request(`/api/admin/handoff/${id}/claim`, { method: "POST" });
-      load();
+      // Após reivindicar, vai direto pro chat — operador pode atender
+      // o lead em tempo real sem extra clique. Padrão "Aba Leads"
+      // do CRM ConnectaIA.
+      router.push(`/admin/system/operations/handoff/${id}/chat`);
     } catch (e) {
       alert(e instanceof Error ? e.message : "erro");
-    } finally {
       setBusyId(null);
     }
+  };
+
+  const openChat = (id: string) => {
+    // Pra handoffs já claimed pelo próprio user (continuar atendimento)
+    router.push(`/admin/system/operations/handoff/${id}/chat`);
   };
 
   const resolve = async () => {
@@ -243,14 +253,23 @@ export default function HandoffQueuePage() {
                       </button>
                     )}
                     {h.status === "claimed" && (
-                      <button
-                        onClick={() => setResolveFor(h)}
-                        disabled={busyId === h.id}
-                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md border border-classification-routine/30 text-classification-routine hover:bg-classification-routine/10 disabled:opacity-50"
-                      >
-                        <CheckCircle2 className="h-3 w-3" />
-                        Resolver
-                      </button>
+                      <>
+                        <button
+                          onClick={() => openChat(h.id)}
+                          className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md accent-gradient text-slate-900 font-medium"
+                        >
+                          <MessageSquare className="h-3 w-3" />
+                          Abrir chat
+                        </button>
+                        <button
+                          onClick={() => setResolveFor(h)}
+                          disabled={busyId === h.id}
+                          className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md border border-classification-routine/30 text-classification-routine hover:bg-classification-routine/10 disabled:opacity-50"
+                        >
+                          <CheckCircle2 className="h-3 w-3" />
+                          Resolver
+                        </button>
+                      </>
                     )}
                   </div>
                 </div>
