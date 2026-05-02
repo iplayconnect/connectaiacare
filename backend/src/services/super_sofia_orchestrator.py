@@ -245,7 +245,12 @@ class SuperSofiaOrchestrator:
                 "trace_id": trace_id,
             }
 
-        # Anti-hallucination guardrail (post-LLM, pre-send)
+        # Anti-hallucination guardrail (post-LLM, pre-send).
+        # Smart: se o user JÁ MENCIONOU o pattern clínico no turno
+        # atual ou em turnos recentes do active_context, é PARAFRASEIO
+        # (Sofia validando o que o usuário disse), não alucinação.
+        # Bug fix 2026-05-02: estávamos substituindo respostas legítimas
+        # como "vou anotar a idade dos seus pais (81 e 97 anos)".
         had_valid_tool = any(
             t.get("status") not in ("pending_phase_c4",)
             and (t.get("ok") in (True, None))
@@ -253,7 +258,27 @@ class SuperSofiaOrchestrator:
         )
         if response.text:
             clinical_pattern = _is_clinical_narration(response.text)
-            if clinical_pattern and not had_valid_tool and agent.name in ("commercial", "support"):
+            user_already_mentioned = False
+            if clinical_pattern:
+                # Checa user msg do turno atual
+                if text and _is_clinical_narration(text) == clinical_pattern:
+                    user_already_mentioned = True
+                # Checa turnos recentes do user no active_context
+                if not user_already_mentioned:
+                    for msg in active_msgs:
+                        if (
+                            msg.get("role") == "user"
+                            and msg.get("content")
+                            and _is_clinical_narration(msg["content"]) == clinical_pattern
+                        ):
+                            user_already_mentioned = True
+                            break
+            if (
+                clinical_pattern
+                and not had_valid_tool
+                and not user_already_mentioned
+                and agent.name in ("commercial", "support")
+            ):
                 logger.warning(
                     "hallucination_suspected_skip_send",
                     trace_id=trace_id,
@@ -269,6 +294,13 @@ class SuperSofiaOrchestrator:
                     "você gostaria de saber sobre a ConnectaIACare). 🙏"
                 )
                 response.metadata["hallucination_replaced"] = clinical_pattern
+            elif clinical_pattern and user_already_mentioned:
+                # Paraf rfaseio legítimo — log info, não substitui
+                logger.info(
+                    "guardrail_skipped_user_paraphrase",
+                    trace_id=trace_id, agent=agent.name,
+                    pattern=clinical_pattern,
+                )
 
         # Execute tools chamadas pelo agent (Phase C v1: in-process)
         tool_results: list[dict] = []
