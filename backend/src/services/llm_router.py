@@ -148,9 +148,24 @@ class LLMRouter:
         user: str,
         image_b64: str | None = None,
         image_mime: str = "image/jpeg",
+        cacheable_system: str | None = None,
         **overrides,
     ) -> dict[str, Any]:
-        """Completa chamada JSON pra uma task. Aplica fallback cascade."""
+        """Completa chamada JSON pra uma task. Aplica fallback cascade.
+
+        Args:
+            cacheable_system: parte ESTÁTICA do system prompt (prompt
+                template base, whitelists, regras gerais). Se fornecido
+                E o provider for Anthropic, é enviado como bloco com
+                `cache_control: ephemeral` — chamadas seguintes em <5min
+                pagam ~10% do custo dessa parte e respondem ~30% mais
+                rápido. `system` (kwarg normal) continua sendo a parte
+                DINÂMICA (varia por turno: contexto, dados do user).
+                Outros providers (OpenAI/Gemini) ignoram o split e
+                concatenam — comportamento idêntico ao antigo.
+                Mínimo recomendado: 1024 tokens (~4k chars) pra valer
+                a pena. Abaixo disso a Anthropic não cacheia.
+        """
         task_cfg = self.config.task(task)
         models_to_try = [task_cfg["primary"]] + (task_cfg.get("fallbacks") or [])
         temperature = overrides.get("temperature", task_cfg.get("temperature", 0.2))
@@ -176,12 +191,15 @@ class LLMRouter:
                     max_tokens=max_tokens,
                     image_b64=image_b64,
                     image_mime=image_mime,
+                    cacheable_system=cacheable_system,
                 )
                 elapsed_ms = int((time.time() - t0) * 1000)
                 logger.info(
                     "llm_call_ok",
                     task=task, model=model_key, provider=provider,
                     elapsed_ms=elapsed_ms,
+                    cache_creation_tokens=result.get("_cache_creation_input_tokens"),
+                    cache_read_tokens=result.get("_cache_read_input_tokens"),
                 )
                 result["_model_used"] = model_key
                 result["_provider"] = provider
@@ -212,17 +230,25 @@ class LLMRouter:
         system: str, user: str,
         temperature: float, max_tokens: int,
         image_b64: str | None, image_mime: str,
+        cacheable_system: str | None = None,
     ) -> dict:
         model_id = self.config.model_meta(model_key).get("model_id") or model_key.split("/", 1)[-1]
 
         if provider == "anthropic":
-            return self._call_anthropic(model_id, system, user, temperature, max_tokens, image_b64, image_mime)
+            return self._call_anthropic(
+                model_id, system, user, temperature, max_tokens,
+                image_b64, image_mime, cacheable_system=cacheable_system,
+            )
+        # Outros providers: cacheable_system é mesclado com system
+        # (sem cache real). OpenAI tem prompt cache automático no
+        # backend deles; Gemini tem API diferente (a fazer Phase D).
+        merged_system = f"{cacheable_system}\n\n{system}" if cacheable_system else system
         if provider == "openai":
-            return self._call_openai(model_id, system, user, temperature, max_tokens, image_b64, image_mime)
+            return self._call_openai(model_id, merged_system, user, temperature, max_tokens, image_b64, image_mime)
         if provider == "gemini":
-            return self._call_gemini(model_id, system, user, temperature, max_tokens, image_b64, image_mime)
+            return self._call_gemini(model_id, merged_system, user, temperature, max_tokens, image_b64, image_mime)
         if provider == "deepseek":
-            return self._call_deepseek(model_id, system, user, temperature, max_tokens)
+            return self._call_deepseek(model_id, merged_system, user, temperature, max_tokens)
         raise ValueError(f"provider desconhecido: {provider}")
 
     # ─── Anthropic ───
@@ -231,6 +257,7 @@ class LLMRouter:
         self, model: str, system: str, user: str,
         temperature: float, max_tokens: int,
         image_b64: str | None, image_mime: str,
+        cacheable_system: str | None = None,
     ) -> dict:
         client = self.clients.anthropic()
         if client is None:
@@ -245,15 +272,45 @@ class LLMRouter:
             })
         content.append({"type": "text", "text": user})
 
+        # Prompt caching: se houver bloco estável (cacheable_system),
+        # passa system como list[block] com cache_control no estável.
+        # Caso contrário, system continua string (path original).
+        # Nota: Anthropic exige bloco cacheado >= 1024 tokens (Sonnet/Haiku)
+        # ou 2048 (Opus) — abaixo disso a API ignora cache_control e
+        # cobra normal. Não há erro nem warning, apenas no-op.
+        if cacheable_system:
+            system_arg: Any = [
+                {
+                    "type": "text",
+                    "text": cacheable_system,
+                    "cache_control": {"type": "ephemeral"},
+                },
+                {"type": "text", "text": system} if system else None,
+            ]
+            system_arg = [b for b in system_arg if b]
+        else:
+            system_arg = system
+
         resp = client.messages.create(
             model=model,
             max_tokens=max_tokens,
             temperature=temperature,
-            system=system,
+            system=system_arg,
             messages=[{"role": "user", "content": content}],
         )
         text = "".join(b.text for b in resp.content if hasattr(b, "text"))
         parsed = _extract_json(text)
+        # Métricas de cache (Anthropic 0.34+ retorna em usage)
+        usage = getattr(resp, "usage", None)
+        if usage:
+            ccit = getattr(usage, "cache_creation_input_tokens", None)
+            crit = getattr(usage, "cache_read_input_tokens", None)
+            if ccit is not None:
+                parsed["_cache_creation_input_tokens"] = int(ccit)
+            if crit is not None:
+                parsed["_cache_read_input_tokens"] = int(crit)
+            parsed["_input_tokens"] = int(getattr(usage, "input_tokens", 0) or 0)
+            parsed["_output_tokens"] = int(getattr(usage, "output_tokens", 0) or 0)
         return parsed
 
     # ─── OpenAI ───
@@ -295,7 +352,21 @@ class LLMRouter:
 
         resp = client.chat.completions.create(**kwargs)
         text = resp.choices[0].message.content or ""
-        return _extract_json(text)
+        parsed = _extract_json(text)
+        # OpenAI tem prompt caching automático (out/2024+).
+        # Hit reduz custo do prefixo cacheado em 50%. Mínimo 1024 tokens.
+        # Não precisa marcar nada — basta o prefixo do prompt repetir.
+        # Métrica: usage.prompt_tokens_details.cached_tokens
+        usage = getattr(resp, "usage", None)
+        if usage:
+            parsed["_input_tokens"] = int(getattr(usage, "prompt_tokens", 0) or 0)
+            parsed["_output_tokens"] = int(getattr(usage, "completion_tokens", 0) or 0)
+            details = getattr(usage, "prompt_tokens_details", None)
+            cached = getattr(details, "cached_tokens", 0) if details else 0
+            if cached:
+                # Mapeia pro mesmo nome da Anthropic pra logging unificado
+                parsed["_cache_read_input_tokens"] = int(cached)
+        return parsed
 
     # ─── Gemini ───
 
@@ -328,7 +399,22 @@ class LLMRouter:
             },
         )
         text = resp.text if hasattr(resp, "text") else ""
-        return _extract_json(text)
+        parsed = _extract_json(text)
+        # Gemini tem caching EXPLÍCITO via Cached Content API
+        # (caching.create + referenciar em generate_content).
+        # Mínimo: 32k tokens (Pro), 4k tokens (Flash). Custo: ~25% +
+        # storage. Implementação fica pra Phase D — hoje Gemini é
+        # fallback secundário no router; volume não justifica ainda.
+        # Ainda assim capturamos o token count se vier (cached_content_token_count
+        # quando estivermos usando cached content).
+        usage = getattr(resp, "usage_metadata", None)
+        if usage:
+            parsed["_input_tokens"] = int(getattr(usage, "prompt_token_count", 0) or 0)
+            parsed["_output_tokens"] = int(getattr(usage, "candidates_token_count", 0) or 0)
+            cached = getattr(usage, "cached_content_token_count", 0) or 0
+            if cached:
+                parsed["_cache_read_input_tokens"] = int(cached)
+        return parsed
 
     # ─── DeepSeek (OpenAI-compat) ───
 
@@ -361,7 +447,18 @@ class LLMRouter:
         resp.raise_for_status()
         data = resp.json()
         text = data["choices"][0]["message"]["content"]
-        return _extract_json(text)
+        parsed = _extract_json(text)
+        # DeepSeek tem prompt caching automático (Context Caching, fev/2024).
+        # Mínimo 128 tokens (mais agressivo que outros). Hit = 10% custo.
+        # Métricas: usage.prompt_cache_hit_tokens / prompt_cache_miss_tokens
+        usage = data.get("usage") or {}
+        if usage:
+            parsed["_input_tokens"] = int(usage.get("prompt_tokens") or 0)
+            parsed["_output_tokens"] = int(usage.get("completion_tokens") or 0)
+            hit = usage.get("prompt_cache_hit_tokens") or 0
+            if hit:
+                parsed["_cache_read_input_tokens"] = int(hit)
+        return parsed
 
 
 # ══════════════════════════════════════════════════════════════════

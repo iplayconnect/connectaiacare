@@ -25,7 +25,24 @@ from src.utils.logger import get_logger
 logger = get_logger(__name__)
 
 
-PROMPT_TEMPLATE = """Você é Sofia, IA da ConnectaIACare (cuidados de idosos com IA + atendimento humano 24/7).
+# ──────────────────────────────────────────────────────────────────
+# Prompt commercial em DUAS partes (Phase D escala — Anthropic cache)
+#
+# Parte estática (STATIC_PROMPT_BASE + capabilities) → cacheable_system
+#   - Não muda entre turnos da mesma persona
+#   - ~3000 tokens (acima do mínimo 1024 do Anthropic cache)
+#   - Hit do cache em <5min reduz custo desse bloco em ~90% e
+#     latência ~30%
+#
+# Parte dinâmica (DYNAMIC_PROMPT_TEMPLATE) → system normal
+#   - Muda a cada turno (CSM ctx, intent, contexto recente)
+#   - ~500-1500 tokens
+#
+# user_message NÃO entra mais no system prompt — vai como user message
+# da chamada (era duplicado antes).
+# ──────────────────────────────────────────────────────────────────
+
+STATIC_PROMPT_BASE = """Você é Sofia, IA da ConnectaIACare (cuidados de idosos com IA + atendimento humano 24/7).
 
 Acabou de receber mensagem no WhatsApp de alguém NÃO cadastrado — provavelmente um lead. Sua missão:
 
@@ -54,16 +71,16 @@ REGRAS DE TOM:
 
 QUANDO USAR TOOL VS TEXTO:
 - Lead disse só "oi" / sem dados → text (cumprimenta + pergunta nome)
-- Lead deu apenas nome → tool capture_lead com {{phone, intent, full_name}} + text_after pedindo organização/papel
+- Lead deu apenas nome → tool capture_lead com {phone, intent, full_name} + text_after pedindo organização/papel
 - Lead deu nome + empresa + papel → tool capture_lead completo + text_after pedindo dor específica
 - Lead pediu demo claramente → tool schedule_demo
 - Lead pediu humano → tool escalate_to_human_whatsapp com summary completo
 
 EXEMPLO de tool call (saída JSON):
-{{
+{
   "action": "tool",
   "tool_name": "capture_lead",
-  "args": {{
+  "args": {
     "phone": "5511987654321",
     "intent": "interesse_servico_b2b",
     "full_name": "João Silva",
@@ -71,22 +88,44 @@ EXEMPLO de tool call (saída JSON):
     "role_self_declared": "gestor_ilpi",
     "confidence": 0.9,
     "notes": "ILPI 30 idosos, dor de quedas no turno da noite"
-  }},
+  },
   "text_after": "Anotei aqui, João. Sobre quedas na madrugada — quantos colaboradores atuam nesse turno?",
   "next_question_intent": "open_ended"
-}}
+}"""
 
-{capabilities_block}
 
-CONTEXTO DESTE TURNO:
+# Schema de saída + lista de intents — também estático, cacheable junto.
+ALLOWED_TOOLS_TEXT = "capture_lead, schedule_demo, escalate_to_human_whatsapp"
+INTENTS_HINT = (
+    "primeiro_nome, nome_completo, email, cidade, relacao_idoso, "
+    "count_idosos, idades_idosos, moram_sozinhos, moram_em_ilpi, "
+    "dor_principal, count_medicamentos, dificuldade_medicacao, "
+    "organizacao, cargo_b2b, ja_cliente_concorrente, quer_demo, "
+    "intent_b2c_b2b, open_ended"
+)
+JSON_SCHEMA_TEXT = (
+    "\n\nSAÍDA OBRIGATÓRIA: JSON estrito. Escolha ENTRE:\n"
+    "  A) Resposta de texto (sem tool):\n"
+    '     {"action": "text", '
+    '"text": "<sua resposta brasileira coloquial>", '
+    f'"next_question_intent": "<um destes: {INTENTS_HINT}>"}}\n\n'
+    "  B) Chamar tool (uma das permitidas: " + ALLOWED_TOOLS_TEXT + "):\n"
+    '     {"action": "tool", "tool_name": "<nome>", "args": {...}, '
+    '"text_after": "<resposta confirmando ao user>", '
+    '"next_question_intent": "<um destes ou null>"}'
+    "\n\nO campo `next_question_intent` é OBRIGATÓRIO quando "
+    "o text/text_after contém uma pergunta. Se for só "
+    "afirmação/confirmação sem pergunta, use null."
+)
+
+
+# Parte dinâmica — varia por turno, NÃO entra no cache.
+DYNAMIC_PROMPT_TEMPLATE = """CONTEXTO DESTE TURNO:
 - Phone do lead: {phone}
 - Intent classificado: {intent_label}
 - Stage do funil: {stage}
 {csm_block}
-{context_block}
-
-Mensagem do usuário:
-{user_message}"""
+{context_block}"""
 
 
 def _format_csm_block(csm_ctx: dict) -> str:
@@ -149,7 +188,38 @@ def _format_csm_block(csm_ctx: dict) -> str:
 class CommercialSofiaAgent(BaseSofiaAgent):
     name = "commercial"
 
-    def system_prompt(self, ctx: AgentContext) -> str:
+    # ─── System prompt em duas partes (Phase D escala) ──────────────
+
+    def _cacheable_system(self, ctx: AgentContext) -> str:
+        """Parte ESTÁTICA do prompt — não muda entre turnos.
+
+        Esta é a parte que vai com cache_control no Anthropic. Inclui:
+        - Persona + missão + regras de tom + REGRA DE OURO
+        - Whitelist de capabilities (varia por persona, mas mesma persona
+          em sessão consecutiva é o MESMO bloco)
+        - Schema de saída JSON + lista de intents
+
+        Tem ~3000 tokens (acima do mínimo 1024 do Anthropic).
+        """
+        try:
+            from src.services.csm import get_capabilities_service
+            capabilities_block = get_capabilities_service().format_for_prompt(
+                persona="anonymous",
+            )
+        except Exception:
+            capabilities_block = (
+                "REGRA: se o lead perguntar de feature específica, "
+                "diga que vai checar com o time e passar o detalhe — "
+                "nunca invente capability."
+            )
+        return (
+            STATIC_PROMPT_BASE
+            + "\n\n" + capabilities_block
+            + JSON_SCHEMA_TEXT
+        )
+
+    def _dynamic_system(self, ctx: AgentContext) -> str:
+        """Parte DINÂMICA — muda a cada turno. Não entra no cache."""
         ci = ctx.metadata.get("classified_intent") or {}
         intent_label = (
             f"{ci.get('intent', 'unclear')} "
@@ -168,34 +238,24 @@ class CommercialSofiaAgent(BaseSofiaAgent):
         else:
             context_lines.append("- Primeira mensagem do lead nesta sessão.")
 
-        # CSM v2 snapshot — chave pra Sofia não repetir perguntas.
         csm_block = _format_csm_block(ctx.csm_context or {})
         stage = (ctx.csm_context or {}).get("stage", "warmup")
 
-        # Whitelist de capabilities (anti-invenção) — Phase C v2.5.
-        # Best-effort: se DB não responde, format_for_prompt retorna
-        # mensagem de fallback informando Sofia a checar com time.
-        try:
-            from src.services.csm import get_capabilities_service
-            capabilities_block = get_capabilities_service().format_for_prompt(
-                persona="anonymous",
-            )
-        except Exception:
-            capabilities_block = (
-                "REGRA: se o lead perguntar de feature específica, "
-                "diga que vai checar com o time e passar o detalhe — "
-                "nunca invente capability."
-            )
-
-        return PROMPT_TEMPLATE.format(
+        return DYNAMIC_PROMPT_TEMPLATE.format(
             phone=ctx.phone,
             intent_label=intent_label,
             stage=stage,
             csm_block=csm_block,
-            capabilities_block=capabilities_block,
             context_block="\n".join(context_lines),
-            user_message=ctx.inbound_text[:1500],
         )
+
+    def system_prompt(self, ctx: AgentContext) -> str:
+        """Backward-compat: retorna prompt completo (estático + dinâmico).
+
+        Usado pra audit log + tests. Em produção, .process() usa as duas
+        partes separadas pra aproveitar cache do Anthropic.
+        """
+        return self._cacheable_system(ctx) + "\n\n" + self._dynamic_system(ctx)
 
     def allowed_tools(self, ctx: AgentContext) -> list[str]:
         return [
@@ -215,36 +275,17 @@ class CommercialSofiaAgent(BaseSofiaAgent):
         from src.services.llm_router import get_llm_router
 
         router = get_llm_router()
-        # Lista de intents válidos pra próximo turno (CSM v2).
-        # LLM declara o que está perguntando — orchestrator marca
-        # como pending_question pra próximo turno saber a qual
-        # pergunta o user respondeu.
-        intents_hint = (
-            "primeiro_nome, nome_completo, email, cidade, relacao_idoso, "
-            "count_idosos, idades_idosos, moram_sozinhos, moram_em_ilpi, "
-            "dor_principal, count_medicamentos, dificuldade_medicacao, "
-            "organizacao, cargo_b2b, ja_cliente_concorrente, quer_demo, "
-            "intent_b2c_b2b, open_ended"
-        )
         try:
-            # Decision: texto direto OU tool call
+            # Decision: texto direto OU tool call.
+            # Anthropic prompt caching: parte estática (regras + capabilities
+            # + JSON schema) vai como cacheable_system; parte dinâmica
+            # (CSM ctx, intent, contexto recente) vai como system normal.
+            # Cache TTL ~5min — turnos consecutivos do mesmo lead pagam
+            # ~10% do custo desse bloco e respondem ~30% mais rápido.
             decision = router.complete_json(
                 task="sofia_chat_tool_decision",
-                system=self.system_prompt(ctx) + (
-                    "\n\nSAÍDA OBRIGATÓRIA: JSON estrito. Escolha ENTRE:\n"
-                    "  A) Resposta de texto (sem tool):\n"
-                    '     {"action": "text", '
-                    '"text": "<sua resposta brasileira coloquial>", '
-                    '"next_question_intent": "<um destes: ' + intents_hint + '>"}\n\n'
-                    "  B) Chamar tool (uma das permitidas: " +
-                    ", ".join(self.allowed_tools(ctx)) + "):\n"
-                    '     {"action": "tool", "tool_name": "<nome>", "args": {...}, '
-                    '"text_after": "<resposta confirmando ao user>", '
-                    '"next_question_intent": "<um destes ou null>"}'
-                    "\n\nO campo `next_question_intent` é OBRIGATÓRIO quando "
-                    "o text/text_after contém uma pergunta. Se for só "
-                    "afirmação/confirmação sem pergunta, use null."
-                ),
+                cacheable_system=self._cacheable_system(ctx),
+                system=self._dynamic_system(ctx),
                 user=ctx.inbound_text[:1500],
             )
         except Exception as exc:
