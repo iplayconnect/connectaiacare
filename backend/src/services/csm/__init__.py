@@ -29,6 +29,11 @@ from __future__ import annotations
 
 from src.services.csm.care_lead_data import CARE_LEAD_DATA_SCHEMA, CareLeadData
 from src.services.csm.conversation_state import ConversationState
+from src.services.csm.data_extractor import (
+    DataExtractor,
+    ExtractionResult,
+    get_data_extractor,
+)
 from src.services.csm.flow_state import (
     ConversationStage,
     FlowState,
@@ -41,7 +46,10 @@ __all__ = [
     "CARE_LEAD_DATA_SCHEMA",
     "ConversationStage",
     "ConversationState",
+    "DataExtractor",
+    "ExtractionResult",
     "FlowState",
     "Interaction",
     "QuestionIntent",
+    "get_data_extractor",
 ]
