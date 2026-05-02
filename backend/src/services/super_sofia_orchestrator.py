@@ -36,6 +36,7 @@ import time
 from dataclasses import asdict
 from typing import Any, Optional
 
+from src.services.active_context import append_turn, load_recent
 from src.services.audit_log_writer import write_audit, redact_phone
 from src.services.event_bus import Streams, get_event_bus
 from src.services.identity_resolver import get_identity_resolver
@@ -56,6 +57,9 @@ logger = get_logger(__name__)
 # ──────────────────────────────────────────────────────────────────
 
 
+# active_context loader/writer movido pra services/active_context.py
+# (importado no topo). Mantemos esta função como adapter pra backward
+# compat de uso interno; chamadas legadas usam load_recent diretamente.
 def _load_active_context(
     *,
     tenant_id: str,
@@ -64,35 +68,10 @@ def _load_active_context(
     patient_id: Optional[str] = None,
     limit: int = 8,
 ) -> list[dict]:
-    """Lê últimos turnos cross-channel pra contexto. Reusa
-    aia_health_sofia_active_context (UNLOGGED, TTL 45min)."""
-    if user_id:
-        key = f"user:{user_id}"
-    elif patient_id:
-        key = f"patient:{patient_id}"
-    else:
-        key = f"phone:{phone}"
-    try:
-        from src.services.postgres import get_postgres
-        rows = get_postgres().fetch_all(
-            """SELECT role, content, channel, created_at
-               FROM aia_health_sofia_active_context
-               WHERE context_key = %s AND expires_at > NOW()
-               ORDER BY created_at DESC LIMIT %s""",
-            (key, limit),
-        )
-        # Mais antigo primeiro (cronológico)
-        return list(reversed([
-            {
-                "role": r["role"],
-                "content": r["content"],
-                "channel": r.get("channel"),
-            }
-            for r in rows
-        ]))
-    except Exception as exc:
-        logger.warning("active_context_load_failed", error=str(exc))
-        return []
+    """Wrapper sobre active_context.load_recent — mantido pra clareza."""
+    return load_recent(
+        user_id=user_id, patient_id=patient_id, phone=phone, limit=limit,
+    )
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -311,6 +290,50 @@ class SuperSofiaOrchestrator:
                     "data": tr.data,
                     "error": tr.error,
                 })
+
+        # ─── Persistir turn em active_context (memória cross-channel) ───
+        # Bug fix 2026-05-02: sem isso Sofia esquece nome entre turnos.
+        # User msg primeiro (cronológico), depois resposta da Sofia.
+        identity_user_id = (
+            identity.primary.user_id if identity.primary else None
+        )
+        identity_patient_id = (
+            identity.primary.patient_id if identity.primary else None
+        )
+        if text:
+            append_turn(
+                tenant_id=tenant.id,
+                role="user",
+                content=text,
+                channel="whatsapp",
+                user_id=identity_user_id,
+                patient_id=identity_patient_id,
+                phone=phone,
+            )
+        if response.text:
+            append_turn(
+                tenant_id=tenant.id,
+                role="assistant",
+                content=response.text,
+                channel="whatsapp",
+                user_id=identity_user_id,
+                patient_id=identity_patient_id,
+                phone=phone,
+            )
+        # Tool calls bem-sucedidas também viram contexto (Sofia "lembra"
+        # que chamou capture_lead no turno passado).
+        for tr in tool_results:
+            if tr.get("ok"):
+                append_turn(
+                    tenant_id=tenant.id,
+                    role="tool",
+                    content=f"tool {tr.get('name')} ok",
+                    channel="whatsapp",
+                    user_id=identity_user_id,
+                    patient_id=identity_patient_id,
+                    phone=phone,
+                    tool_name=tr.get("name"),
+                )
 
         # Despacha resposta de texto via outbound stream
         if response.text:
