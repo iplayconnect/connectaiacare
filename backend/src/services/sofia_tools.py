@@ -277,9 +277,16 @@ def escalate_to_human_whatsapp(
     if not phone or not reason or not summary:
         return ToolResult(ok=False, data={}, error="missing_required_fields")
 
-    idem_key = f"{phone}:handoff"
+    # Phone normalization (bug fix 2026-05-03): WhatsApp pode mandar
+    # com/sem o "9" do celular, e idempotency baseada em phone bruto
+    # criava handoffs duplicados pra mesmo lead em formatos diferentes.
+    # Usa forma canônica E.164 BR (13 dígitos com 9 quando móvel).
+    from src.services.identity_resolver import normalize_phone_e164_br
+    canonical_phone = normalize_phone_e164_br(phone) or phone
+
+    idem_key = f"{canonical_phone}:handoff"
     if not is_first_occurrence("escalate_to_human", idem_key, ttl_seconds=3600):
-        logger.info("escalate_idempotent_skip", phone=phone, trace_id=trace_id)
+        logger.info("escalate_idempotent_skip", phone=canonical_phone, trace_id=trace_id)
         return ToolResult(
             ok=True, data={},
             idempotent_skip=True,
@@ -291,6 +298,10 @@ def escalate_to_human_whatsapp(
 
     db = get_postgres()
     try:
+        # Persiste com phone canônico pra evitar duplicação cross-format
+        # (ex: "555194267222" e "5551994267222" eram tratados como leads
+        # diferentes — agora ambos viram "5551994267222").
+        phone = canonical_phone
         row = db.insert_returning(
             """INSERT INTO aia_health_human_handoff_queue (
                 trace_id, phone, tenant_id, channel, reason,
