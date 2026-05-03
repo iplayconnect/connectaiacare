@@ -60,33 +60,76 @@ export default function HandoffQueuePage() {
   const [items, setItems] = useState<Handoff[]>([]);
   const [stats, setStats] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [filter, setFilter] = useState<string>("pending");
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [resolveFor, setResolveFor] = useState<Handoff | null>(null);
   const [resolveSummary, setResolveSummary] = useState("");
 
-  const load = useCallback(async () => {
-    setError(null);
-    try {
-      const qs = new URLSearchParams({ days: "7", limit: "100" });
-      if (filter) qs.set("status", filter);
-      const [listRes, statsRes] = await Promise.all([
-        api.request<{ items: Handoff[] }>(`/api/admin/handoff?${qs.toString()}`),
-        api.request<{ totals: any; by_priority: any[] }>("/api/admin/handoff/stats?days=7"),
-      ]);
-      setItems(listRes.items || []);
-      setStats(statsRes);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Erro carregando");
-    } finally {
-      setLoading(false);
-    }
-  }, [filter]);
+  const load = useCallback(
+    async (opts: { silent?: boolean } = {}) => {
+      const silent = opts.silent ?? false;
+      if (silent) setRefreshing(true);
+      else setError(null);
+      try {
+        const qs = new URLSearchParams({ days: "7", limit: "100" });
+        if (filter) qs.set("status", filter);
+        const [listRes, statsRes] = await Promise.all([
+          api.request<{ items: Handoff[] }>(`/api/admin/handoff?${qs.toString()}`),
+          api.request<{ totals: any; by_priority: any[] }>("/api/admin/handoff/stats?days=7"),
+        ]);
+        setItems(listRes.items || []);
+        setStats(statsRes);
+        if (silent) setError(null); // só limpa erro se silent veio bem
+      } catch (e) {
+        // Em modo silent, não derruba a UI com banner de erro — só loga.
+        // Reload manual ou próximo tick mostra se persiste.
+        if (!silent) {
+          setError(e instanceof Error ? e.message : "Erro carregando");
+        }
+      } finally {
+        if (silent) setRefreshing(false);
+        else setLoading(false);
+      }
+    },
+    [filter],
+  );
 
   useEffect(() => {
     if (allowed) load();
   }, [allowed, load]);
+
+  // Auto-refresh: polling a cada 10s pra não obrigar operador 24/7 a
+  // ficar dando F5. Pausa quando:
+  //   - aba em background (document.hidden) — sem motivo pra puxar dados
+  //     que ninguém vai ver, e libera quota da API
+  //   - modal "Resolver" aberto — não atrapalhar o operador escrevendo
+  //   - claim em andamento — evita race do redirect pro chat
+  // Refetch imediato quando aba volta a ficar visível.
+  useEffect(() => {
+    if (!allowed) return;
+
+    const tick = () => {
+      if (document.hidden) return;
+      if (resolveFor) return;
+      if (busyId) return;
+      load({ silent: true });
+    };
+
+    const interval = setInterval(tick, 10000);
+    const onVisible = () => {
+      if (!document.hidden && !resolveFor && !busyId) {
+        load({ silent: true });
+      }
+    };
+    document.addEventListener("visibilitychange", onVisible);
+
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [allowed, load, resolveFor, busyId]);
 
   const claim = async (id: string) => {
     setBusyId(id);
@@ -148,11 +191,13 @@ export default function HandoffQueuePage() {
           </p>
         </div>
         <button
-          onClick={load}
-          className="flex items-center gap-2 px-3 py-2 text-sm rounded-lg border border-white/10 hover:bg-white/5"
+          onClick={() => load()}
+          disabled={refreshing}
+          className="flex items-center gap-2 px-3 py-2 text-sm rounded-lg border border-white/10 hover:bg-white/5 disabled:opacity-60"
+          title="Auto-refresh a cada 10s (pausa em background ou com modal aberto)"
         >
-          <RefreshCw className="h-4 w-4" />
-          Atualizar
+          <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
+          {refreshing ? "Atualizando…" : "Atualizar"}
         </button>
       </header>
 
