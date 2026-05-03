@@ -45,11 +45,24 @@ LOCK_KEY = 8731029471
 
 
 def _get_genai_client():
+    """Cria client google-genai (new SDK) configurado pra v1 (não v1beta).
+
+    Bug fix 2026-05-03: SDK google-genai default é v1beta, que NÃO suporta
+    embedContent pra modelos legacy estáveis (models/embedding-001,
+    models/text-embedding-004). Endpoint v1 suporta TODOS os embeddings
+    GA. Backend (backend/src/services/embedding_service.py) usa SDK legacy
+    `google.generativeai` que default em v1 naturalmente — por isso
+    funciona. Aqui (new SDK) precisa explicit.
+    """
     from google import genai
     api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
     if not api_key:
         raise RuntimeError("GOOGLE_API_KEY required for embeddings")
-    return genai.Client(api_key=api_key)
+    api_version = os.getenv("GENAI_API_VERSION", "v1")
+    return genai.Client(
+        api_key=api_key,
+        http_options={"api_version": api_version},
+    )
 
 
 def embed_text(text: str) -> list[float] | None:
