@@ -53,6 +53,7 @@ import {
   type ChatMessage,
 } from "@/components/handoff/MessageBubble";
 import { ContextPanel } from "@/components/handoff/ContextPanel";
+import { FinalizationModal } from "@/components/handoff/FinalizationModal";
 
 interface Handoff {
   id: string;
@@ -98,9 +99,7 @@ export default function HandoffChatPage() {
   const [live, setLive] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
-  const [resolving, setResolving] = useState(false);
   const [text, setText] = useState("");
-  const [resolveSummary, setResolveSummary] = useState("");
   const [showResolve, setShowResolve] = useState(false);
   const [showQuickReplies, setShowQuickReplies] = useState(false);
   const [showContext, setShowContext] = useState(false);
@@ -255,21 +254,9 @@ export default function HandoffChatPage() {
     requestAnimationFrame(() => composerRef.current?.focus());
   }, []);
 
-  const resolve = async () => {
-    if (!handoffId || !resolveSummary.trim() || resolving) return;
-    setResolving(true);
-    try {
-      await api.request(`/api/admin/handoff/${handoffId}/resolve`, {
-        method: "POST",
-        body: JSON.stringify({ resolution_summary: resolveSummary.trim() }),
-      });
-      router.push("/admin/system/operations/handoff");
-    } catch (e) {
-      alert(e instanceof Error ? e.message : "erro resolvendo");
-    } finally {
-      setResolving(false);
-    }
-  };
+  const handleResolved = useCallback(() => {
+    router.push("/admin/system/operations/handoff");
+  }, [router]);
 
   if (!allowed) {
     return (
@@ -518,46 +505,15 @@ export default function HandoffChatPage() {
         onClose={() => setShowContext(false)}
       />
 
-      {/* Modal Resolver */}
-      {showResolve && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 px-4">
-          <div className="bg-background border border-border rounded-lg max-w-md w-full p-5">
-            <h3 className="font-semibold mb-3 flex items-center gap-2">
-              <CheckCircle2 className="h-4 w-4 text-emerald-500" />
-              Resolver handoff
-            </h3>
-            <textarea
-              value={resolveSummary}
-              onChange={(e) => setResolveSummary(e.target.value)}
-              rows={4}
-              placeholder="Resumo do desfecho (ex: 'Conectei lead com Murilo, agendei demo dia 15')"
-              className="w-full px-3 py-2 text-sm rounded-md border border-border bg-background focus:outline-none focus:ring-1 focus:ring-primary mb-3"
-            />
-            <div className="flex items-center justify-end gap-2">
-              <button
-                onClick={() => {
-                  setShowResolve(false);
-                  setResolveSummary("");
-                }}
-                disabled={resolving}
-                className="px-3 py-1.5 text-xs rounded-md hover:bg-muted"
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={resolve}
-                disabled={resolving || !resolveSummary.trim()}
-                className="px-3 py-1.5 text-xs rounded-md accent-gradient text-slate-900 font-medium disabled:opacity-50"
-              >
-                {resolving && (
-                  <Loader2 className="h-3 w-3 animate-spin inline mr-1" />
-                )}
-                Confirmar
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Modal Resolver — captura desfecho estruturado (categoria,
+          tags, rating, summary). Backend persiste em outcome_*
+          (migration 064). Após sucesso, navega pra fila. */}
+      <FinalizationModal
+        handoffId={handoff.id}
+        isOpen={showResolve}
+        onClose={() => setShowResolve(false)}
+        onResolved={handleResolved}
+      />
     </div>
   );
 }
