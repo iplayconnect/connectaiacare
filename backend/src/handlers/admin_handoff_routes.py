@@ -1,13 +1,15 @@
 """Admin handoff queue — fila de pedidos pra atendimento humano.
 
 Endpoints:
-    GET  /api/admin/handoff                       — lista + filtros
-    GET  /api/admin/handoff/<id>                  — detalhe
-    POST /api/admin/handoff/<id>/claim            — humano reivindica
-    POST /api/admin/handoff/<id>/resolve          — humano marca resolvido
-    GET  /api/admin/handoff/<id>/messages         — histórico chat
-    POST /api/admin/handoff/<id>/send             — operador envia msg
-    GET  /api/admin/handoff/stats                 — agregação SLA
+    GET    /api/admin/handoff                              — lista + filtros
+    GET    /api/admin/handoff/<id>                         — detalhe
+    POST   /api/admin/handoff/<id>/claim                   — humano reivindica
+    POST   /api/admin/handoff/<id>/resolve                 — humano marca resolvido
+    GET    /api/admin/handoff/<id>/messages                — histórico chat
+    POST   /api/admin/handoff/<id>/send                    — operador envia msg
+    PATCH  /api/admin/handoff/<id>/messages/<msg_id>       — edita msg do operador
+    DELETE /api/admin/handoff/<id>/messages/<msg_id>       — soft delete
+    GET    /api/admin/handoff/stats                        — agregação SLA
 
 Acesso: super_admin, admin_tenant, medico, enfermeiro, atendente_humano.
 """
@@ -29,6 +31,11 @@ bp = Blueprint("admin_handoff", __name__)
 
 VALID_STATUSES = ("pending", "claimed", "resolved", "expired")
 VALID_PRIORITIES = ("P1", "P2", "P3")
+
+# Janela em que operador pode editar/deletar a própria msg. Depois disso a msg
+# vira imutável pra audit trail (LGPD/CFM exigem rastreabilidade clínica).
+# Escolha de 5min é equilíbrio entre "ops corrigi um typo" e "audit confiável".
+MESSAGE_MUTATION_WINDOW_SECONDS = 300
 
 
 def _serialize_handoff(row: dict) -> dict:
@@ -252,22 +259,34 @@ def handoff_messages(handoff_id: str):
     )
     live = []
     for r in live_rows:
+        md = r.get("metadata") or {}
+        if isinstance(md, str):
+            try:
+                md = json.loads(md)
+            except Exception:
+                md = {}
+        if not isinstance(md, dict):
+            md = {}
+
         item = {
             "id": int(r["id"]),
             "role": r["role"],
             "content": r.get("content"),
             "created_at": r["created_at"].isoformat() if r.get("created_at") else None,
         }
-        if r.get("metadata"):
-            md = r["metadata"]
-            if isinstance(md, str):
-                try:
-                    md = json.loads(md)
-                except Exception:
-                    md = {}
-            actor = md.get("actor") if isinstance(md, dict) else None
-            if actor:
-                item["actor"] = actor  # 'human' | 'sofia'
+        if md.get("actor"):
+            item["actor"] = md["actor"]  # 'human' | 'sofia'
+        if md.get("operator_user_id"):
+            item["operator_user_id"] = str(md["operator_user_id"])
+        if md.get("deleted") is True:
+            item["deleted"] = True
+            item["deleted_at"] = md.get("deleted_at")
+        if md.get("edited_at"):
+            item["edited_at"] = md["edited_at"]
+            # Conta de edições — não retornamos o histórico completo no GET
+            # pra não vazar conteúdo intermediário acidentalmente. Histórico
+            # fica só no DB pra auditoria.
+            item["edit_count"] = len(md.get("edit_history") or [])
         live.append(item)
 
     return jsonify({
@@ -379,6 +398,226 @@ def handoff_send(handoff_id: str):
         resource_type="handoff",
         resource_id=handoff_id,
         payload={"chars": len(text)},
+    )
+    return jsonify({"status": "ok"})
+
+
+def _load_mutable_message(handoff_id: str, msg_id: str, user_id: str):
+    """Carrega msg + handoff e valida permissão pra editar/deletar.
+
+    Retorna (handoff, msg, metadata, error_response). Se error_response não
+    é None, abortar com ele (já é (json, status)).
+
+    Validações (em ordem, parar no primeiro fail):
+        1. Handoff existe e está claimed pelo user atual
+        2. Msg existe + pertence ao mesmo phone do handoff
+        3. Msg.role == 'assistant' AND metadata.actor == 'human'
+        4. metadata.operator_user_id == user_id (anti-hijack entre operadores)
+        5. Msg não foi deletada antes
+        6. Created_at dentro da janela de mutação (5min)
+    """
+    db = get_postgres()
+    handoff = db.fetch_one(
+        """SELECT id, phone, tenant_id, status, claimed_by_user_id
+           FROM aia_health_human_handoff_queue WHERE id = %s""",
+        (handoff_id,),
+    )
+    if not handoff:
+        return None, None, None, (jsonify({
+            "status": "error", "reason": "handoff_not_found",
+        }), 404)
+    if handoff["status"] != "claimed":
+        return None, None, None, (jsonify({
+            "status": "error", "reason": "handoff_not_claimed",
+            "current_status": handoff["status"],
+        }), 409)
+    if str(handoff.get("claimed_by_user_id") or "") != str(user_id):
+        return None, None, None, (jsonify({
+            "status": "error", "reason": "not_claim_owner",
+        }), 403)
+
+    msg = db.fetch_one(
+        """SELECT m.id, m.role, m.content, m.metadata, m.created_at,
+                  m.session_id, s.phone AS session_phone
+           FROM aia_health_sofia_messages m
+           JOIN aia_health_sofia_sessions s ON s.id = m.session_id
+           WHERE m.id = %s""",
+        (msg_id,),
+    )
+    if not msg:
+        return None, None, None, (jsonify({
+            "status": "error", "reason": "message_not_found",
+        }), 404)
+    if msg["session_phone"] != handoff["phone"]:
+        return None, None, None, (jsonify({
+            "status": "error", "reason": "message_not_in_handoff",
+        }), 404)
+
+    md = msg.get("metadata") or {}
+    if isinstance(md, str):
+        try:
+            md = json.loads(md)
+        except Exception:
+            md = {}
+    if not isinstance(md, dict):
+        md = {}
+
+    if msg["role"] != "assistant" or md.get("actor") != "human":
+        return None, None, None, (jsonify({
+            "status": "error", "reason": "only_human_messages_mutable",
+        }), 403)
+
+    if str(md.get("operator_user_id") or "") != str(user_id):
+        return None, None, None, (jsonify({
+            "status": "error", "reason": "not_message_owner",
+        }), 403)
+
+    if md.get("deleted") is True:
+        return None, None, None, (jsonify({
+            "status": "error", "reason": "message_already_deleted",
+        }), 409)
+
+    # Janela de mutação: created_at deve estar a < N segundos atrás.
+    # Comparação em SQL (timezone-safe) pra evitar drift entre app/db.
+    db2 = get_postgres()
+    in_window = db2.fetch_one(
+        """SELECT (created_at > NOW() - (%s || ' seconds')::interval) AS ok
+           FROM aia_health_sofia_messages WHERE id = %s""",
+        (str(MESSAGE_MUTATION_WINDOW_SECONDS), msg_id),
+    )
+    if not in_window or not in_window.get("ok"):
+        return None, None, None, (jsonify({
+            "status": "error", "reason": "edit_window_expired",
+            "window_seconds": MESSAGE_MUTATION_WINDOW_SECONDS,
+        }), 409)
+
+    return handoff, msg, md, None
+
+
+@bp.patch("/api/admin/handoff/<handoff_id>/messages/<msg_id>")
+@require_role("super_admin", "admin_tenant", "medico", "enfermeiro")
+def handoff_message_edit(handoff_id: str, msg_id: str):
+    """Edita conteúdo de uma msg do operador.
+
+    Mantém histórico completo em metadata.edit_history[] pra audit.
+    Janela de mutação 5min — depois msg vira imutável.
+    """
+    body = request.get_json(silent=True) or {}
+    new_content = (body.get("content") or "").strip()
+    if not new_content:
+        return jsonify({"status": "error", "reason": "content_required"}), 400
+    if len(new_content) > 4000:
+        return jsonify({"status": "error", "reason": "content_too_long"}), 400
+
+    user_id = (getattr(g, "user", {}) or {}).get("sub")
+    if not user_id:
+        return jsonify({"status": "error", "reason": "no_user"}), 401
+
+    handoff, msg, md, err = _load_mutable_message(handoff_id, msg_id, user_id)
+    if err:
+        return err
+
+    if msg["content"] == new_content:
+        # No-op — evita poluir audit chain
+        return jsonify({"status": "ok", "noop": True})
+
+    # Append no histórico, preserva original e timestamps
+    history = list(md.get("edit_history") or [])
+    history.append({
+        "previous_content": msg["content"],
+        "edited_at_db": None,  # preenchido via NOW() abaixo
+        "edited_by": str(user_id),
+    })
+    new_md = {
+        **md,
+        "edit_history": history,
+        "last_edited_by": str(user_id),
+    }
+
+    db = get_postgres()
+    updated = db.fetch_one(
+        """UPDATE aia_health_sofia_messages
+              SET content = %s,
+                  metadata = jsonb_set(
+                      %s::jsonb,
+                      '{edited_at}',
+                      to_jsonb(NOW()::text)
+                  )
+            WHERE id = %s
+            RETURNING id, content, metadata, created_at""",
+        (new_content, json.dumps(new_md), msg_id),
+    )
+
+    write_audit(
+        action="handoff_message_edited",
+        actor=str(user_id),
+        tenant_id=handoff["tenant_id"],
+        resource_type="sofia_message",
+        resource_id=str(msg_id),
+        payload={
+            "handoff_id": str(handoff_id),
+            "old_chars": len(msg["content"] or ""),
+            "new_chars": len(new_content),
+            "edit_count": len(history),
+        },
+    )
+    logger.info(
+        "handoff_message_edited",
+        handoff_id=str(handoff_id), msg_id=str(msg_id),
+        operator=str(user_id), edit_count=len(history),
+    )
+    return jsonify({"status": "ok", "message_id": int(updated["id"])})
+
+
+@bp.delete("/api/admin/handoff/<handoff_id>/messages/<msg_id>")
+@require_role("super_admin", "admin_tenant", "medico", "enfermeiro")
+def handoff_message_delete(handoff_id: str, msg_id: str):
+    """Soft delete: marca metadata.deleted=true mas preserva content.
+
+    UI mostra '[mensagem apagada]' mas auditor consegue ver o original
+    via metadata.previous_content_at_delete.
+    """
+    user_id = (getattr(g, "user", {}) or {}).get("sub")
+    if not user_id:
+        return jsonify({"status": "error", "reason": "no_user"}), 401
+
+    handoff, msg, md, err = _load_mutable_message(handoff_id, msg_id, user_id)
+    if err:
+        return err
+
+    new_md = {
+        **md,
+        "deleted": True,
+        "deleted_by": str(user_id),
+        "previous_content_at_delete": msg["content"],
+    }
+    db = get_postgres()
+    db.execute(
+        """UPDATE aia_health_sofia_messages
+              SET metadata = jsonb_set(
+                      %s::jsonb,
+                      '{deleted_at}',
+                      to_jsonb(NOW()::text)
+                  )
+            WHERE id = %s""",
+        (json.dumps(new_md), msg_id),
+    )
+
+    write_audit(
+        action="handoff_message_deleted",
+        actor=str(user_id),
+        tenant_id=handoff["tenant_id"],
+        resource_type="sofia_message",
+        resource_id=str(msg_id),
+        payload={
+            "handoff_id": str(handoff_id),
+            "deleted_chars": len(msg["content"] or ""),
+        },
+    )
+    logger.info(
+        "handoff_message_deleted",
+        handoff_id=str(handoff_id), msg_id=str(msg_id),
+        operator=str(user_id),
     )
     return jsonify({"status": "ok"})
 
