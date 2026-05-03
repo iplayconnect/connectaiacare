@@ -38,6 +38,32 @@ VALID_PRIORITIES = ("P1", "P2", "P3")
 # Escolha de 5min é equilíbrio entre "ops corrigi um typo" e "audit confiável".
 MESSAGE_MUTATION_WINDOW_SECONDS = 300
 
+# Whitelist do desfecho — armazenado como TEXT no DB pra extensibilidade
+# sem migration, mas validado aqui pra não permitir lixo. Cada categoria
+# define a "próxima ação automatizada" mostrada como preview no modal
+# (ver FinalizationModal.tsx).
+VALID_OUTCOME_CATEGORIES = (
+    "resolved_by_phone",          # operador resolveu via WhatsApp/voz
+    "escalated_to_specialist",    # repassado pra especialista (médico/clínico)
+    "lead_lost",                  # lead não respondeu / desistiu
+    "closed_by_lead",             # lead pediu pra encerrar
+    "system_error",               # falha técnica (Sofia bugou, etc.)
+    "other",                      # fallback
+)
+
+# Tags multi-select de issues comuns em desfechos clínicos. Mesma lógica:
+# TEXT[] no DB, validação em app pra higiene.
+VALID_OUTCOME_TAGS = (
+    "medicacao_alterada",
+    "urgencia_real",
+    "falso_positivo",
+    "paciente_internado",
+    "familia_orientada",
+    "agendamento_marcado",
+    "reembolso_solicitado",
+    "fora_de_escopo",
+)
+
 
 def _serialize_handoff(row: dict) -> dict:
     if not row:
@@ -353,12 +379,72 @@ def claim_handoff(handoff_id: str):
 @bp.post("/api/admin/handoff/<handoff_id>/resolve")
 @require_role("super_admin", "admin_tenant", "medico", "enfermeiro")
 def resolve_handoff(handoff_id: str):
+    """Marca handoff como resolvido + grava desfecho estruturado.
+
+    Body:
+        resolution_summary: str (obrigatório, texto livre — auditoria)
+        outcome_category:   str (opcional, mas só whitelist VALID_OUTCOME_CATEGORIES)
+        outcome_tags:       list[str] (opcional, só whitelist VALID_OUTCOME_TAGS)
+        outcome_rating:     int (opcional, 1..5)
+
+    Backwards-compat: callers antigos que enviam só resolution_summary
+    continuam funcionando — outcome_* são todos opcionais.
+    """
     body = request.get_json(silent=True) or {}
     summary = (body.get("resolution_summary") or "").strip()
     if not summary:
         return jsonify({
             "status": "error", "reason": "resolution_summary_required",
         }), 400
+    if len(summary) > 4000:
+        return jsonify({
+            "status": "error", "reason": "resolution_summary_too_long",
+        }), 400
+
+    # ── Validação dos campos novos (todos opcionais) ──
+    outcome_category = body.get("outcome_category")
+    if outcome_category is not None:
+        outcome_category = str(outcome_category).strip().lower() or None
+        if outcome_category and outcome_category not in VALID_OUTCOME_CATEGORIES:
+            return jsonify({
+                "status": "error", "reason": "invalid_outcome_category",
+            }), 400
+
+    outcome_tags = body.get("outcome_tags")
+    if outcome_tags is not None:
+        if not isinstance(outcome_tags, list):
+            return jsonify({
+                "status": "error", "reason": "outcome_tags_must_be_array",
+            }), 400
+        # Normaliza + dedupe + valida
+        clean_tags = []
+        for t in outcome_tags:
+            if not isinstance(t, str):
+                continue
+            tag = t.strip().lower()
+            if not tag:
+                continue
+            if tag not in VALID_OUTCOME_TAGS:
+                return jsonify({
+                    "status": "error", "reason": "invalid_outcome_tag",
+                    "tag": tag,
+                }), 400
+            if tag not in clean_tags:
+                clean_tags.append(tag)
+        outcome_tags = clean_tags or None
+
+    outcome_rating = body.get("outcome_rating")
+    if outcome_rating is not None:
+        try:
+            outcome_rating = int(outcome_rating)
+        except (TypeError, ValueError):
+            return jsonify({
+                "status": "error", "reason": "outcome_rating_invalid",
+            }), 400
+        if outcome_rating < 1 or outcome_rating > 5:
+            return jsonify({
+                "status": "error", "reason": "outcome_rating_out_of_range",
+            }), 400
 
     user_id = (getattr(g, "user", {}) or {}).get("sub")
     db = get_postgres()
@@ -379,14 +465,26 @@ def resolve_handoff(handoff_id: str):
               SET status = 'resolved',
                   resolved_at = NOW(),
                   resolved_by_user_id = %s,
-                  resolution_summary = %s
+                  resolution_summary = %s,
+                  outcome_category = %s,
+                  outcome_tags = %s,
+                  outcome_rating = %s
             WHERE id = %s""",
-        (user_id, summary, handoff_id),
+        (
+            user_id, summary,
+            outcome_category, outcome_tags, outcome_rating,
+            handoff_id,
+        ),
     )
     write_audit(
         action="handoff_resolved",
         actor=str(user_id), resource_type="handoff", resource_id=handoff_id,
-        payload={"summary_chars": len(summary)},
+        payload={
+            "summary_chars": len(summary),
+            "outcome_category": outcome_category,
+            "outcome_tags": outcome_tags,
+            "outcome_rating": outcome_rating,
+        },
     )
     updated = db.fetch_one(
         "SELECT * FROM aia_health_human_handoff_queue WHERE id = %s",
