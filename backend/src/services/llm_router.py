@@ -283,12 +283,16 @@ class LLMRouter:
         # Outros providers: cacheable_system é mesclado com system
         # (sem cache real). OpenAI tem prompt cache automático no
         # backend deles; Gemini tem API diferente (a fazer Phase D).
-        # tools[] também não é propagada nativamente — modelo recebe
-        # apenas via prompt JSON-em-string (fallback do design legado).
-        # Phase D próxima: adicionar tool_use nativo OpenAI/Gemini.
+        # OpenAI: tool-use NATIVO via param `tools=` + `tool_choice=` da
+        # Chat Completions API (ativado 2026-05-03 pra usar GPT-5.4 mini
+        # como primary do sofia_chat_tool_decision). Gemini ainda usa
+        # fallback de prompt JSON-em-string até implementação Phase D+.
         merged_system = f"{cacheable_system}\n\n{system}" if cacheable_system else system
         if provider == "openai":
-            return self._call_openai(model_id, merged_system, user, temperature, max_tokens, image_b64, image_mime)
+            return self._call_openai(
+                model_id, merged_system, user, temperature, max_tokens,
+                image_b64, image_mime, tools=tools, tool_choice=tool_choice,
+            )
         if provider == "gemini":
             return self._call_gemini(model_id, merged_system, user, temperature, max_tokens, image_b64, image_mime)
         if provider == "deepseek":
@@ -414,6 +418,8 @@ class LLMRouter:
         self, model: str, system: str, user: str,
         temperature: float, max_tokens: int,
         image_b64: str | None, image_mime: str,
+        tools: list[dict] | None = None,
+        tool_choice: str = "auto",
     ) -> dict:
         client = self.clients.openai()
         if client is None:
@@ -430,14 +436,45 @@ class LLMRouter:
 
         # GPT-5.x usa max_completion_tokens em vez de max_tokens
         uses_completion = any(model.lower().startswith(p) for p in ("gpt-5", "o1", "o3"))
-        kwargs = {
+        kwargs: dict[str, Any] = {
             "model": model,
             "messages": [
                 {"role": "system", "content": system},
                 {"role": "user", "content": user_content},
             ],
-            "response_format": {"type": "json_object"},
         }
+
+        # Tool-use NATIVO OpenAI (ativado 2026-05-03):
+        #   - Anthropic schema: {"name", "description", "input_schema": {...}}
+        #   - OpenAI schema:    {"type": "function", "function": {"name", "description", "parameters": {...}}}
+        # Quando tools[] passa, NÃO setamos response_format=json_object porque
+        # a resposta legítima pode ser tool_calls (sem content JSON). Sem tools,
+        # mantemos json_object pra compat com tasks legacy.
+        if tools:
+            kwargs["tools"] = [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": t["name"],
+                        "description": t.get("description", ""),
+                        "parameters": t.get("input_schema", {}),
+                    },
+                }
+                for t in tools
+            ]
+            # tool_choice mapping: "auto"/"any"/"<name>" → OpenAI format
+            if tool_choice == "auto":
+                kwargs["tool_choice"] = "auto"
+            elif tool_choice == "any":
+                kwargs["tool_choice"] = "required"
+            else:
+                kwargs["tool_choice"] = {
+                    "type": "function",
+                    "function": {"name": tool_choice},
+                }
+        else:
+            kwargs["response_format"] = {"type": "json_object"}
+
         # Reasoning models não aceitam temperature
         if not uses_completion:
             kwargs["temperature"] = temperature
@@ -446,11 +483,54 @@ class LLMRouter:
             kwargs["max_completion_tokens"] = max_tokens
 
         resp = client.chat.completions.create(**kwargs)
-        text = resp.choices[0].message.content or ""
-        parsed = _extract_json(text)
+        msg = resp.choices[0].message
+        tool_calls = getattr(msg, "tool_calls", None) or []
+
+        if tool_calls and tools:
+            # Modelo decidiu chamar tool. Mesmo schema do Anthropic
+            # tool_use pra agent code não diferenciar provider.
+            primary = tool_calls[0]
+            try:
+                args = json.loads(primary.function.arguments or "{}")
+            except Exception:
+                args = {}
+            parsed: dict[str, Any] = {
+                "action": "tool",
+                "tool_name": primary.function.name,
+                "args": args,
+                "tool_use_id": primary.id,
+                "text_after": msg.content or "",
+            }
+            if len(tool_calls) > 1:
+                extra: list[dict] = []
+                for tc in tool_calls[1:]:
+                    try:
+                        extra_args = json.loads(tc.function.arguments or "{}")
+                    except Exception:
+                        extra_args = {}
+                    extra.append({
+                        "name": tc.function.name,
+                        "args": extra_args,
+                        "tool_use_id": tc.id,
+                    })
+                parsed["_extra_tool_uses"] = extra
+        else:
+            text = msg.content or ""
+            # Sem tools: comportamento legacy (response_format json_object).
+            # Com tools mas modelo escolheu não chamar: tenta JSON, senão
+            # devolve action=text com texto puro.
+            if tools:
+                try:
+                    parsed = _extract_json(text)
+                    if not parsed.get("action"):
+                        parsed = {"action": "text", "text": text}
+                except Exception:
+                    parsed = {"action": "text", "text": text}
+            else:
+                parsed = _extract_json(text)
+
         # OpenAI tem prompt caching automático (out/2024+).
         # Hit reduz custo do prefixo cacheado em 50%. Mínimo 1024 tokens.
-        # Não precisa marcar nada — basta o prefixo do prompt repetir.
         # Métrica: usage.prompt_tokens_details.cached_tokens
         usage = getattr(resp, "usage", None)
         if usage:

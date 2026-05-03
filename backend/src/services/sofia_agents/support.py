@@ -182,7 +182,74 @@ class SupportSofiaAgent(BaseSofiaAgent):
                     "tool_idempotent_skip": tool_result.idempotent_skip,
                 },
             )
+        # action == 'text' — validator semântico pega caso em que LLM
+        # narrou promessa de escalate sem chamar tool. Auto-recovery
+        # com defaults P2 seguros (ver commercial.py pra detalhes).
+        text = decision.get("text") or ""
+        from src.services.sofia_agents.escalate_output_validator import (
+            detect_escalate_promise, build_recovery_summary,
+        )
+
+        validation = detect_escalate_promise(text)
+        if validation.promised_escalate:
+            from src.services.sofia_tools import execute_tool
+
+            recovery_args = {
+                "phone": ctx.phone,
+                "reason": (
+                    "[AUTO-RECOVERY] Sofia(support) narrou escalate sem chamar tool — "
+                    f"validador detectou: '{validation.matched_pattern}'"
+                ),
+                "summary": build_recovery_summary(
+                    ctx.inbound_text or "",
+                    text,
+                    validation.matched_pattern or "",
+                ),
+                "urgency": "P2",
+                "conversation_log": list(ctx.active_context_messages or []),
+            }
+            tool_result = execute_tool(
+                "escalate_to_human_whatsapp",
+                recovery_args,
+                tenant_id=ctx.tenant.id,
+                trace_id=ctx.trace_id,
+                session_id=ctx.session_id,
+            )
+            logger.warning(
+                "support_escalate_auto_recovered",
+                trace_id=ctx.trace_id,
+                matched_pattern=validation.matched_pattern,
+                tool_ok=tool_result.ok,
+                idempotent_skip=tool_result.idempotent_skip,
+                tool_error=tool_result.error,
+            )
+            tool_call_record = {
+                "name": "escalate_to_human_whatsapp",
+                "args": recovery_args,
+                "ok": tool_result.ok,
+                "idempotent_skip": tool_result.idempotent_skip,
+                "output": tool_result.data,
+                "auto_recovery": True,
+                "matched_pattern": validation.matched_pattern,
+            }
+            if tool_result.error:
+                tool_call_record["error"] = tool_result.error
+            return AgentResponse(
+                text=text,
+                tools_called=[tool_call_record],
+                handoff_initiated=(
+                    tool_result.ok and not tool_result.idempotent_skip
+                ),
+                handoff_reason=recovery_args["reason"],
+                next_action="wait_human",
+                metadata={
+                    "auto_escalate_recovery": True,
+                    "tool_executed": True,
+                    "tool_idempotent_skip": tool_result.idempotent_skip,
+                },
+            )
+
         return AgentResponse(
-            text=decision.get("text") or "",
+            text=text,
             next_action="wait_user",
         )
