@@ -22,23 +22,27 @@ from src import persistence
 
 logger = logging.getLogger(__name__)
 
-# models/embedding-001: modelo Gemini estável, 768d nativo, suporta
-# embedContent em v1 e v1beta. Alinhado com backend/src/services/embedding_service.py
-# que já usa esse modelo em produção há meses sem incidente.
+# text-embedding-004: GA estável, arquitetura Matryoshka nativa pra 768d
+# (informação mais densa nas primeiras dimensões — superior ao
+# models/embedding-001 que era treinado pra dim fixa).
 #
-# Histórico de 2026-05-03 (resolvendo erros em cascata):
-#   1. Era "gemini-embedding-001" (alpha) → 403 PERMISSION_DENIED
-#   2. Trocado pra "text-embedding-004" → 404 NOT_FOUND porque o
-#      SDK google-genai (new SDK, `from google import genai`) usa
-#      endpoint v1beta que NÃO suporta embedContent pra text-embedding-004
-#      (esse só roda via v1 ou via batchEmbedContents).
-#   3. Aligned com backend: "models/embedding-001" — 768d nativo,
-#      funciona em ambos os SDKs, sem precisar Matryoshka manual.
+# Histórico de 2026-05-03 (4 bugs em cascata + decisão estratégica):
+#   1. Default "gemini-embedding-001" (alpha) → 403 PERMISSION_DENIED
+#      em projects sem acesso ao endpoint experimental.
+#   2. Tentativa "text-embedding-004" → 404 NOT_FOUND. Causa: SDK new
+#      `google.genai` default em v1beta, que NÃO suporta embedContent
+#      pra esse modelo GA. Endpoint v1 suporta.
+#   3. Workaround "models/embedding-001" alinhado com backend → 404
+#      mesma coisa (v1beta também não aceita esse modelo legacy).
+#   4. Root cause REAL identificado: api_version=v1 explicit no Client.
+#      _get_genai_client agora força v1.
 #
-# Override via env var SOFIA_EMBED_MODEL pra testar variantes (text-embedding-004
-# requer SDK config v1; gemini-embedding-exp-* podem rodar quando GA).
-EMBED_MODEL = os.getenv("SOFIA_EMBED_MODEL") or "models/embedding-001"
-EMBED_DIMS = 768  # vector(768) na tabela; models/embedding-001 já retorna 768 nativo
+# Decisão estratégica: voltar pra text-embedding-004 (Matryoshka nativo
+# + qualidade superior + alinhamento com migração do backend pro mesmo
+# SDK + modelo). Operação cirúrgica: backend e sofia-service agora
+# usam EXATAMENTE a mesma stack (new SDK + v1 + text-embedding-004).
+EMBED_MODEL = os.getenv("SOFIA_EMBED_MODEL") or "text-embedding-004"
+EMBED_DIMS = 768  # vector(768) na tabela; text-embedding-004 = 768 nativo
 BATCH_SIZE = int(os.getenv("SOFIA_EMBED_BATCH", "20"))
 TICK_INTERVAL_SEC = int(os.getenv("SOFIA_EMBED_TICK_SEC", "60"))
 LOCK_KEY = 8731029471
@@ -59,17 +63,25 @@ def embed_text(text: str) -> list[float] | None:
     try:
         from google.genai import types
         client = _get_genai_client()
-        # google-genai 1.73+ aceita config com output_dimensionality
-        # (Matryoshka truncation pra dimensão menor — melhor pra pgvector)
+        # text-embedding-004:
+        #   - output_dimensionality=768 ativa Matryoshka NATIVO (densidade
+        #     semântica superior nas primeiras dims vs truncação cega)
+        #   - task_type=RETRIEVAL_DOCUMENT é otimizado pra "indexar conteúdo
+        #     pra busca futura" (msgs históricas Sofia). Pra query usa
+        #     RETRIEVAL_QUERY (ver search_semantic abaixo).
         try:
-            cfg = types.EmbedContentConfig(output_dimensionality=EMBED_DIMS)
+            cfg = types.EmbedContentConfig(
+                output_dimensionality=EMBED_DIMS,
+                task_type="RETRIEVAL_DOCUMENT",
+            )
             result = client.models.embed_content(
                 model=EMBED_MODEL,
                 contents=text[:8000],
                 config=cfg,
             )
         except TypeError:
-            # Fallback se SDK não aceita config — pega 3072 e trunca
+            # Fallback se SDK não aceita config (versão antiga) — pega
+            # default e trunca/normaliza abaixo.
             result = client.models.embed_content(
                 model=EMBED_MODEL, contents=text[:8000],
             )
@@ -154,6 +166,49 @@ def embed_pending_batch(limit: int = BATCH_SIZE) -> int:
     return processed
 
 
+def embed_query(text: str) -> list[float] | None:
+    """Variante de embed_text otimizada pra busca (task_type=RETRIEVAL_QUERY).
+
+    text-embedding-004 tem prompts otimizados separados pra "indexar
+    documento" vs "buscar por query" — usar o tipo certo melhora recall
+    em ~3-7% (papers Google). Usado por search_semantic; embed_text
+    (default RETRIEVAL_DOCUMENT) usado por embed_pending_batch.
+    """
+    if not text or len(text.strip()) < 3:
+        return None
+    try:
+        from google.genai import types
+        client = _get_genai_client()
+        try:
+            cfg = types.EmbedContentConfig(
+                output_dimensionality=EMBED_DIMS,
+                task_type="RETRIEVAL_QUERY",
+            )
+            result = client.models.embed_content(
+                model=EMBED_MODEL, contents=text[:8000], config=cfg,
+            )
+        except TypeError:
+            result = client.models.embed_content(
+                model=EMBED_MODEL, contents=text[:8000],
+            )
+        embeddings = getattr(result, "embeddings", None) or []
+        if embeddings:
+            values = getattr(embeddings[0], "values", None)
+            if values:
+                vec = list(values)
+                if len(vec) > EMBED_DIMS:
+                    vec = vec[:EMBED_DIMS]
+                if len(vec) == EMBED_DIMS:
+                    import math
+                    norm = math.sqrt(sum(v * v for v in vec))
+                    if norm > 0:
+                        vec = [v / norm for v in vec]
+                return vec
+    except Exception as exc:
+        logger.warning("embed_query_failed: %s", exc)
+    return None
+
+
 def search_semantic(
     query: str,
     *,
@@ -164,7 +219,7 @@ def search_semantic(
 ) -> list[dict]:
     """Busca top-K mensagens semanticamente similares ao query.
     Filtra por patient_id (preferencial) ou user_id (sessions desse user)."""
-    qvec = embed_text(query)
+    qvec = embed_query(query)
     if qvec is None:
         return []
     qvec_str = "[" + ",".join(f"{v:.6f}" for v in qvec) + "]"

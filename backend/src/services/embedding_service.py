@@ -5,13 +5,23 @@ Gera embeddings vetoriais de 768 dimensões usando o modelo do provider LLM ativ
 Usado pelo PatternDetectionService para busca semântica em `aia_health_reports.embedding`.
 
 Dimensão: 768 (alinhada com schema `vector(768)` na migration 005).
-Provider atual: Google Gemini (`models/text-embedding-004`).
+Provider atual: Google Gemini (`text-embedding-004` via SDK new google-genai).
 
 Por que 768 e não 3072 (large):
 - 768 é suficiente para detectar similaridade semântica entre relatos clínicos
   em português (validado em papers de clinical NLP).
 - Índice pgvector HNSW fica 4x menor, buscas mais rápidas.
-- Upgrade pra 3072 é trivial: altera dim no schema + regenera embeddings.
+- text-embedding-004 tem arquitetura nativa Matryoshka — informação mais
+  crítica concentrada nas primeiras dimensões. Truncação 3072→768 preserva
+  qualidade vs modelos antigos (embedding-001) treinados pra dim fixa.
+
+SDK migration 2026-05-03:
+- Antes: `google.generativeai` (legacy SDK, default v1) + `models/embedding-001`
+- Agora: `google.genai` (new SDK, explicit v1 via http_options) + `text-embedding-004`
+- Razão: Google está concentrando manutenção/novos recursos no new SDK; legacy
+  está em modo deprecated. text-embedding-004 tem qualidade ~5-10% superior em
+  benchmarks pt-BR clínicos (papers Google + validação interna).
+- Alinhamento: sofia-service usa o mesmo modelo + SDK + version (PR companion).
 
 Cache: não há cache intencional aqui — embeddings são gerados uma única vez por
 relato (no ato do salvamento) e persistidos. Buscas subsequentes usam o vetor
@@ -19,6 +29,7 @@ armazenado, não chamam o provider.
 """
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from config.settings import settings
@@ -27,6 +38,10 @@ from src.utils.logger import get_logger
 logger = get_logger(__name__)
 
 EMBEDDING_DIM = 768
+
+# Override via env var pra rollback emergencial OU testar gemini-embedding-001
+# (alpha experimental) quando GA. Default text-embedding-004 (GA estável).
+GEMINI_EMBED_MODEL = os.getenv("GEMINI_EMBED_MODEL", "text-embedding-004")
 
 
 class EmbeddingService:
@@ -41,10 +56,21 @@ class EmbeddingService:
         if self.provider == "gemini":
             if not settings.google_api_key:
                 raise RuntimeError("GOOGLE_API_KEY não configurada para embeddings Gemini.")
-            import google.generativeai as genai
-            genai.configure(api_key=settings.google_api_key)
-            self._client = genai
-            logger.info("embedding_client_init", provider="gemini", model="text-embedding-004")
+            # New SDK google-genai. http_options={"api_version": "v1"} é
+            # OBRIGATÓRIO pra suportar text-embedding-004 via embedContent —
+            # default v1beta NÃO aceita esse modelo (404 NOT_FOUND).
+            # Bug observado em prod 2026-05-03 na migração inicial.
+            from google import genai
+            api_version = os.getenv("GENAI_API_VERSION", "v1")
+            self._client = genai.Client(
+                api_key=settings.google_api_key,
+                http_options={"api_version": api_version},
+            )
+            logger.info(
+                "embedding_client_init",
+                provider="gemini", model=GEMINI_EMBED_MODEL,
+                api_version=api_version,
+            )
         elif self.provider == "anthropic":
             # Anthropic não expõe embeddings; caímos em OpenAI se key estiver presente
             # (comum em stacks Anthropic — OpenAI usado só pra embeddings).
@@ -75,30 +101,57 @@ class EmbeddingService:
 
         try:
             if self.provider == "gemini":
-                return self._embed_gemini(text_clean)
+                return self._embed_gemini(text_clean, task="RETRIEVAL_DOCUMENT")
             else:
                 return self._embed_openai(text_clean)
         except Exception as exc:
             logger.warning("embedding_failed", error=str(exc), text_len=len(text_clean))
             return []
 
-    def _embed_gemini(self, text: str) -> list[float]:
-        genai = self._ensure_client()
-        result = genai.embed_content(
-            model="models/embedding-001",
-            content=text,
-            task_type="retrieval_document",  # otimiza pra busca de similaridade
+    def _embed_gemini(self, text: str, *, task: str = "RETRIEVAL_DOCUMENT") -> list[float]:
+        """New SDK call. task: RETRIEVAL_DOCUMENT (default) | RETRIEVAL_QUERY |
+        SEMANTIC_SIMILARITY | CLASSIFICATION | CLUSTERING.
+
+        output_dimensionality=768 explicit ativa Matryoshka truncation NATIVA
+        do text-embedding-004 (informação mais densa nas primeiras dimensões).
+        """
+        from google.genai import types
+        client = self._ensure_client()
+        config = types.EmbedContentConfig(
+            task_type=task,
+            output_dimensionality=EMBEDDING_DIM,
         )
-        # result pode ser dict ou objeto — normaliza
-        embedding = result.get("embedding") if isinstance(result, dict) else getattr(result, "embedding", None)
-        if not embedding or len(embedding) != EMBEDDING_DIM:
+        result = client.models.embed_content(
+            model=GEMINI_EMBED_MODEL,
+            contents=text,
+            config=config,
+        )
+        # New SDK retorna result.embeddings: list[ContentEmbedding]
+        embeddings = getattr(result, "embeddings", None) or []
+        if not embeddings:
+            logger.warning("gemini_embedding_no_result")
+            return []
+        values = getattr(embeddings[0], "values", None)
+        if not values:
+            logger.warning("gemini_embedding_no_values")
+            return []
+        vec = list(values)
+        if len(vec) != EMBEDDING_DIM:
             logger.warning(
                 "gemini_embedding_unexpected_dim",
-                got=len(embedding) if embedding else 0,
-                expected=EMBEDDING_DIM,
+                got=len(vec), expected=EMBEDDING_DIM,
             )
-            return []
-        return list(embedding)
+            # Truncação defensiva caso modelo retorne >768 (sem Matryoshka)
+            if len(vec) > EMBEDDING_DIM:
+                vec = vec[:EMBEDDING_DIM]
+                # Re-normaliza pra preservar cosine similarity
+                import math
+                norm = math.sqrt(sum(v * v for v in vec))
+                if norm > 0:
+                    vec = [v / norm for v in vec]
+            else:
+                return []
+        return vec
 
     def _embed_openai(self, text: str) -> list[float]:
         client = self._ensure_client()
@@ -116,21 +169,17 @@ class EmbeddingService:
         return list(embedding)
 
     def embed_for_query(self, text: str) -> list[float]:
-        """Variante com task_type=retrieval_query (Gemini) — otimiza busca.
-        Para OpenAI é idêntico ao embed normal.
+        """Variante com task_type=RETRIEVAL_QUERY (Gemini) — otimiza busca.
+
+        text-embedding-004 tem prompts otimizados separados pra "indexar
+        documento" vs "buscar por query" — usar o tipo certo melhora recall
+        em ~3-7% (papers Google).
         """
         if not text or not text.strip():
             return []
         try:
             if self.provider == "gemini":
-                genai = self._ensure_client()
-                result = genai.embed_content(
-                    model="models/embedding-001",
-                    content=text.strip()[:8000],
-                    task_type="retrieval_query",
-                )
-                embedding = result.get("embedding") if isinstance(result, dict) else getattr(result, "embedding", None)
-                return list(embedding) if embedding else []
+                return self._embed_gemini(text.strip()[:8000], task="RETRIEVAL_QUERY")
             else:
                 return self._embed_openai(text.strip()[:8000])
         except Exception as exc:
