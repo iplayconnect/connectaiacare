@@ -41,6 +41,7 @@ import {
   Zap,
   X,
   Reply as ReplyIcon,
+  Layers,
 } from "lucide-react";
 
 import { useAuth } from "@/context/auth-context";
@@ -51,6 +52,7 @@ import {
   MessageBubble,
   type ChatMessage,
 } from "@/components/handoff/MessageBubble";
+import { ContextPanel } from "@/components/handoff/ContextPanel";
 
 interface Handoff {
   id: string;
@@ -101,6 +103,7 @@ export default function HandoffChatPage() {
   const [resolveSummary, setResolveSummary] = useState("");
   const [showResolve, setShowResolve] = useState(false);
   const [showQuickReplies, setShowQuickReplies] = useState(false);
+  const [showContext, setShowContext] = useState(false);
   const [replyTo, setReplyTo] = useState<ChatMessage | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -120,15 +123,18 @@ export default function HandoffChatPage() {
     requestAnimationFrame(() => composerRef.current?.focus());
   }, []);
 
-  // Esc fecha sidebar quando aberta (sem afetar outros modais)
+  // Esc fecha sidebars quando abertas (sem afetar outros modais).
+  // Fecha primeiro QuickReplies (mais à direita), depois ContextPanel.
   useEffect(() => {
-    if (!showQuickReplies) return;
+    if (!showQuickReplies && !showContext) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setShowQuickReplies(false);
+      if (e.key !== "Escape") return;
+      if (showQuickReplies) setShowQuickReplies(false);
+      else if (showContext) setShowContext(false);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [showQuickReplies]);
+  }, [showQuickReplies, showContext]);
 
   const loadAll = useCallback(async () => {
     if (!handoffId) return;
@@ -333,6 +339,15 @@ export default function HandoffChatPage() {
           >
             <RefreshCw className="h-4 w-4" />
           </button>
+          <button
+            onClick={() => setShowContext((v) => !v)}
+            className={`p-1.5 rounded-md hover:bg-muted ${
+              showContext ? "text-primary bg-muted" : ""
+            }`}
+            title="Contexto do lead"
+          >
+            <Layers className="h-4 w-4" />
+          </button>
           {isClaimedByMe && (
             <button
               onClick={() => setShowQuickReplies((v) => !v)}
@@ -493,6 +508,15 @@ export default function HandoffChatPage() {
           leadName={handoff.phone}
         />
       )}
+
+      {/* ContextPanel — sidebar esquerda com info do lead, CSM, SLA,
+          capabilities. Disponível pra todos os roles autorizados (read-only),
+          inclusive quando handoff já está resolvido. */}
+      <ContextPanel
+        handoffId={handoff.id}
+        isOpen={showContext}
+        onClose={() => setShowContext(false)}
+      />
 
       {/* Modal Resolver */}
       {showResolve && (

@@ -3,6 +3,7 @@
 Endpoints:
     GET    /api/admin/handoff                              — lista + filtros
     GET    /api/admin/handoff/<id>                         — detalhe
+    GET    /api/admin/handoff/<id>/context                 — dados agregados pra ContextPanel
     POST   /api/admin/handoff/<id>/claim                   — humano reivindica
     POST   /api/admin/handoff/<id>/resolve                 — humano marca resolvido
     GET    /api/admin/handoff/<id>/messages                — histórico chat
@@ -125,6 +126,188 @@ def get_handoff(handoff_id: str):
     if not row:
         return jsonify({"status": "error", "reason": "not_found"}), 404
     return jsonify({"status": "ok", "handoff": _serialize_handoff(row)})
+
+
+def _infer_intent_from_reason(reason: str | None) -> str:
+    """Heurística simples — palavras-chave em handoff.reason → intent
+    operacional. Vai ser substituído por intent classifier formal em
+    fase posterior. Por hoje basta pra destacar capabilities relevantes.
+    """
+    if not reason:
+        return "geral"
+    r = reason.lower()
+    if any(k in r for k in ("emerg", "samu", "queda", "urgent", "crítico", "critico")):
+        return "emergencia"
+    if any(k in r for k in ("medic", "remedio", "remédio", "dose", "bula", "interaç")):
+        return "medicacao"
+    if any(k in r for k in ("agend", "demo", "comercial", "preç", "plano", "venda")):
+        return "comercial"
+    return "geral"
+
+
+# Mapeia categoria de capability pra intent que destaca.
+_INTENT_HIGHLIGHT_CATEGORIES = {
+    "emergencia": ("clinical", "ops"),
+    "medicacao": ("clinical",),
+    "comercial": ("commercial", "billing"),
+    "geral": (),
+}
+
+
+@bp.get("/api/admin/handoff/<handoff_id>/context")
+@require_role("super_admin", "admin_tenant", "medico", "enfermeiro")
+def handoff_context(handoff_id: str):
+    """Agregação rica pra ContextPanel — lead + CSM + capabilities + timing.
+
+    Tudo em uma única query batch pra evitar N+1 do polling. Capabilities
+    vem ranqueado: highlighted=true pras categorias relevantes ao intent
+    detectado em handoff.reason.
+    """
+    db = get_postgres()
+    handoff = db.fetch_one(
+        """SELECT id, phone, tenant_id, reason, priority, status,
+                  created_at, claimed_at, resolved_at,
+                  sla_target_seconds, sla_breached_at,
+                  context_summary
+           FROM aia_health_human_handoff_queue WHERE id = %s""",
+        (handoff_id,),
+    )
+    if not handoff:
+        return jsonify({"status": "error", "reason": "not_found"}), 404
+
+    tenant_id = handoff["tenant_id"]
+    phone = handoff["phone"]
+
+    # ── 1. CSM (best-effort — pode não existir pra leads antigos) ──
+    csm_block = None
+    try:
+        from src.services.csm.conversation_state import ConversationState
+
+        state = ConversationState.load(tenant_id, phone)
+        if state:
+            lead_dict = state.lead_data.to_dict()
+            csm_block = {
+                "current_stage": getattr(state.flow_state, "current_stage", None),
+                "current_agent": getattr(state.flow_state, "current_agent", None),
+                "warmup_complete": bool(
+                    getattr(state.flow_state, "warmup_complete", False),
+                ),
+                "qualification_complete": bool(
+                    getattr(state.flow_state, "qualification_complete", False),
+                ),
+                "pending_question": getattr(
+                    state.flow_state, "pending_question", None,
+                ),
+                "lead_data": lead_dict,
+                "interactions_count": len(state.interactions or []),
+                "last_activity_at": state.last_activity_at,
+            }
+    except Exception as exc:
+        logger.warning("handoff_context_csm_failed",
+                       handoff_id=handoff_id, error=str(exc)[:200])
+
+    # ── 2. Sofia stats (count msgs, primeiro contato) ──
+    stats_row = db.fetch_one(
+        """SELECT MIN(m.created_at) AS first_seen_at,
+                  MAX(m.created_at) AS last_seen_at,
+                  COUNT(*) FILTER (WHERE m.role = 'user') AS lead_msgs,
+                  COUNT(*) FILTER (WHERE m.role = 'assistant') AS sofia_msgs,
+                  COUNT(*) AS total_msgs
+           FROM aia_health_sofia_messages m
+           JOIN aia_health_sofia_sessions s ON s.id = m.session_id
+           WHERE s.phone = %s AND s.tenant_id = %s""",
+        (phone, tenant_id),
+    ) or {}
+    stats_block = {
+        "first_seen_at": (
+            stats_row.get("first_seen_at").isoformat()
+            if stats_row.get("first_seen_at") else None
+        ),
+        "last_seen_at": (
+            stats_row.get("last_seen_at").isoformat()
+            if stats_row.get("last_seen_at") else None
+        ),
+        "lead_msgs": int(stats_row.get("lead_msgs") or 0),
+        "sofia_msgs": int(stats_row.get("sofia_msgs") or 0),
+        "total_msgs": int(stats_row.get("total_msgs") or 0),
+    }
+
+    # ── 3. Capabilities whitelist (highlight por intent) ──
+    intent = _infer_intent_from_reason(handoff.get("reason"))
+    highlight_cats = _INTENT_HIGHLIGHT_CATEGORIES.get(intent, ())
+
+    capabilities_block: list[dict] = []
+    try:
+        from src.services.csm.capabilities import get_capabilities_service
+
+        caps = get_capabilities_service().list_for_persona("anonymous")
+        # Ordena: highlighted primeiro, depois alfabético
+        def _key(c):
+            highlighted = (c.category or "").lower() in highlight_cats
+            return (0 if highlighted else 1, c.label_user or "")
+        caps_sorted = sorted(caps[:20], key=_key)
+        for c in caps_sorted[:12]:
+            capabilities_block.append({
+                "code": c.code,
+                "label": c.label_user,
+                "category": c.category,
+                "requires_consent": bool(c.requires_consent),
+                "highlighted": (c.category or "").lower() in highlight_cats,
+            })
+    except Exception as exc:
+        logger.warning("handoff_context_caps_failed",
+                       handoff_id=handoff_id, error=str(exc)[:200])
+
+    # ── 4. Timing + SLA ──
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc)
+
+    def _delta_seconds(ts):
+        if not ts:
+            return None
+        if hasattr(ts, "tzinfo") and ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        return int((now - ts).total_seconds())
+
+    sla_target = int(handoff.get("sla_target_seconds") or 0)
+    age_seconds = _delta_seconds(handoff.get("created_at")) or 0
+    claim_age = _delta_seconds(handoff.get("claimed_at"))
+    timing_block = {
+        "created_at": handoff["created_at"].isoformat()
+            if handoff.get("created_at") else None,
+        "claimed_at": handoff["claimed_at"].isoformat()
+            if handoff.get("claimed_at") else None,
+        "resolved_at": handoff["resolved_at"].isoformat()
+            if handoff.get("resolved_at") else None,
+        "sla_target_seconds": sla_target,
+        "sla_breached_at": handoff["sla_breached_at"].isoformat()
+            if handoff.get("sla_breached_at") else None,
+        "age_seconds": age_seconds,
+        "claim_age_seconds": claim_age,
+        # Predição: True se ainda não claimed E age > 80% do SLA
+        "sla_at_risk": (
+            sla_target > 0
+            and not handoff.get("claimed_at")
+            and not handoff.get("sla_breached_at")
+            and age_seconds > sla_target * 0.8
+        ),
+    }
+
+    return jsonify({
+        "status": "ok",
+        "handoff_id": str(handoff["id"]),
+        "intent_inferred": intent,
+        "lead": {
+            "phone": phone,
+            "tenant_id": tenant_id,
+            "reason": handoff.get("reason"),
+            "context_summary": handoff.get("context_summary"),
+            **stats_block,
+        },
+        "csm": csm_block,
+        "capabilities": capabilities_block,
+        "timing": timing_block,
+    })
 
 
 @bp.post("/api/admin/handoff/<handoff_id>/claim")
