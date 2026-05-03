@@ -3,8 +3,8 @@ da Sofia (Gemini text-embedding-004) e habilita recall semântico.
 
 Estratégia:
   - Worker batch processa messages com embedding NULL (a cada 60s)
-  - Gera embedding via Gemini text-embedding-004 (768d)
-  - Persiste em aia_health_sofia_messages.embedding (vector)
+  - Gera embedding via Gemini text-embedding-004 (768d nativo)
+  - Persiste em aia_health_sofia_messages.embedding (vector(768))
 
 Tool recall_semantic faz cosine similarity search pra "lembrei quando
 falamos sobre X?" — retorna top-K mensagens passadas relevantes do
@@ -22,8 +22,16 @@ from src import persistence
 
 logger = logging.getLogger(__name__)
 
-EMBED_MODEL = os.getenv("SOFIA_EMBED_MODEL") or "gemini-embedding-001"
-EMBED_DIMS = 768  # Matryoshka truncation; vector(768) na tabela
+# text-embedding-004: GA estável, 768d nativo, recomendado pra produção.
+# Antes de 2026-05-03 default era "gemini-embedding-001" (alpha/experimental
+# que retornava 3072d e exigia truncação Matryoshka manual). Esse modelo
+# disparava 403 PERMISSION_DENIED em projects sem acesso ao endpoint
+# experimental — observado em prod 2026-05-03. Backfill recomendado das
+# 519 rows existentes (ver PR body).
+# Override via env var SOFIA_EMBED_MODEL pra rollback emergencial OU testar
+# variantes (ex: "text-embedding-005" quando lançar).
+EMBED_MODEL = os.getenv("SOFIA_EMBED_MODEL") or "text-embedding-004"
+EMBED_DIMS = 768  # vector(768) na tabela; text-embedding-004 já retorna 768 nativo
 BATCH_SIZE = int(os.getenv("SOFIA_EMBED_BATCH", "20"))
 TICK_INTERVAL_SEC = int(os.getenv("SOFIA_EMBED_TICK_SEC", "60"))
 LOCK_KEY = 8731029471
