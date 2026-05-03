@@ -22,16 +22,23 @@ from src import persistence
 
 logger = logging.getLogger(__name__)
 
-# text-embedding-004: GA estável, 768d nativo, recomendado pra produção.
-# Antes de 2026-05-03 default era "gemini-embedding-001" (alpha/experimental
-# que retornava 3072d e exigia truncação Matryoshka manual). Esse modelo
-# disparava 403 PERMISSION_DENIED em projects sem acesso ao endpoint
-# experimental — observado em prod 2026-05-03. Backfill recomendado das
-# 519 rows existentes (ver PR body).
-# Override via env var SOFIA_EMBED_MODEL pra rollback emergencial OU testar
-# variantes (ex: "text-embedding-005" quando lançar).
-EMBED_MODEL = os.getenv("SOFIA_EMBED_MODEL") or "text-embedding-004"
-EMBED_DIMS = 768  # vector(768) na tabela; text-embedding-004 já retorna 768 nativo
+# models/embedding-001: modelo Gemini estável, 768d nativo, suporta
+# embedContent em v1 e v1beta. Alinhado com backend/src/services/embedding_service.py
+# que já usa esse modelo em produção há meses sem incidente.
+#
+# Histórico de 2026-05-03 (resolvendo erros em cascata):
+#   1. Era "gemini-embedding-001" (alpha) → 403 PERMISSION_DENIED
+#   2. Trocado pra "text-embedding-004" → 404 NOT_FOUND porque o
+#      SDK google-genai (new SDK, `from google import genai`) usa
+#      endpoint v1beta que NÃO suporta embedContent pra text-embedding-004
+#      (esse só roda via v1 ou via batchEmbedContents).
+#   3. Aligned com backend: "models/embedding-001" — 768d nativo,
+#      funciona em ambos os SDKs, sem precisar Matryoshka manual.
+#
+# Override via env var SOFIA_EMBED_MODEL pra testar variantes (text-embedding-004
+# requer SDK config v1; gemini-embedding-exp-* podem rodar quando GA).
+EMBED_MODEL = os.getenv("SOFIA_EMBED_MODEL") or "models/embedding-001"
+EMBED_DIMS = 768  # vector(768) na tabela; models/embedding-001 já retorna 768 nativo
 BATCH_SIZE = int(os.getenv("SOFIA_EMBED_BATCH", "20"))
 TICK_INTERVAL_SEC = int(os.getenv("SOFIA_EMBED_TICK_SEC", "60"))
 LOCK_KEY = 8731029471
