@@ -65,6 +65,34 @@ VALID_OUTCOME_TAGS = (
 )
 
 
+def _tenant_scope() -> tuple[str, list]:
+    """Retorna SQL clause + params pra filtrar handoffs do tenant do user atual.
+
+    Bug fix 2026-05-03: require_role só checa role, não tenant. Sem este
+    scope, admin_tenant de Tenant A poderia GET/CLAIM/RESOLVE handoff de
+    Tenant B se soubesse o UUID — vazamento PHI cross-tenant + LGPD violation.
+
+    Comportamento:
+        - super_admin → "" (acesso global, sem filtro)
+        - qualquer outro role → " AND tenant_id = %s" + tenant_id do JWT
+
+    Uso:
+        scope_sql, scope_params = _tenant_scope()
+        query = f"SELECT ... FROM x WHERE id = %s {scope_sql}"
+        db.fetch_one(query, (handoff_id, *scope_params))
+    """
+    user = getattr(g, "user", {}) or {}
+    role = user.get("role") or ""
+    if role == "super_admin":
+        return "", []
+    tenant_id = user.get("tenant_id")
+    if not tenant_id:
+        # Sem tenant no JWT → bloqueia tudo (filtro impossível de satisfazer)
+        # NULL nunca é igual a NULL em SQL, então isso retorna 0 rows.
+        return " AND tenant_id IS NOT DISTINCT FROM NULL AND FALSE", []
+    return " AND tenant_id = %s", [tenant_id]
+
+
 def _serialize_handoff(row: dict) -> dict:
     if not row:
         return None
@@ -112,6 +140,13 @@ def list_handoff():
     where.append("created_at >= NOW() - (%s || ' days')::interval")
     params.append(str(days))
 
+    # Tenant scope: super_admin vê tudo, outros só seu tenant
+    scope_sql, scope_params = _tenant_scope()
+    if scope_sql:
+        # Remove o " AND " inicial pq vai concatenar com WHERE existente
+        where.append(scope_sql.lstrip(" AND "))
+        params.extend(scope_params)
+
     limit = max(1, min(int(qs.get("limit") or 50), 200))
     offset = max(0, int(qs.get("offset") or 0))
 
@@ -145,11 +180,13 @@ def list_handoff():
 @bp.get("/api/admin/handoff/<handoff_id>")
 @require_role("super_admin", "admin_tenant")
 def get_handoff(handoff_id: str):
+    scope_sql, scope_params = _tenant_scope()
     row = get_postgres().fetch_one(
-        "SELECT * FROM aia_health_human_handoff_queue WHERE id = %s",
-        (handoff_id,),
+        f"SELECT * FROM aia_health_human_handoff_queue WHERE id = %s{scope_sql}",
+        (handoff_id, *scope_params),
     )
     if not row:
+        # 404 igual pra "não existe" e "outro tenant" pra não vazar existência
         return jsonify({"status": "error", "reason": "not_found"}), 404
     return jsonify({"status": "ok", "handoff": _serialize_handoff(row)})
 
@@ -190,13 +227,14 @@ def handoff_context(handoff_id: str):
     detectado em handoff.reason.
     """
     db = get_postgres()
+    scope_sql, scope_params = _tenant_scope()
     handoff = db.fetch_one(
-        """SELECT id, phone, tenant_id, reason, priority, status,
+        f"""SELECT id, phone, tenant_id, reason, priority, status,
                   created_at, claimed_at, resolved_at,
                   sla_target_seconds, sla_breached_at,
                   context_summary
-           FROM aia_health_human_handoff_queue WHERE id = %s""",
-        (handoff_id,),
+           FROM aia_health_human_handoff_queue WHERE id = %s{scope_sql}""",
+        (handoff_id, *scope_params),
     )
     if not handoff:
         return jsonify({"status": "error", "reason": "not_found"}), 404
@@ -344,9 +382,10 @@ def claim_handoff(handoff_id: str):
         return jsonify({"status": "error", "reason": "no_user"}), 401
 
     db = get_postgres()
+    scope_sql, scope_params = _tenant_scope()
     row = db.fetch_one(
-        "SELECT id, status FROM aia_health_human_handoff_queue WHERE id = %s",
-        (handoff_id,),
+        f"SELECT id, status FROM aia_health_human_handoff_queue WHERE id = %s{scope_sql}",
+        (handoff_id, *scope_params),
     )
     if not row:
         return jsonify({"status": "error", "reason": "not_found"}), 404
@@ -356,22 +395,24 @@ def claim_handoff(handoff_id: str):
             "current_status": row["status"],
         }), 409
 
+    # UPDATE também usa scope: defesa em profundidade (race condition entre
+    # SELECT e UPDATE, ou se row mudou de tenant — improvável mas barato).
     db.execute(
-        """UPDATE aia_health_human_handoff_queue
+        f"""UPDATE aia_health_human_handoff_queue
               SET status = 'claimed',
                   claimed_at = NOW(),
                   claimed_by_user_id = %s,
                   assigned_to_user_id = COALESCE(assigned_to_user_id, %s)
-            WHERE id = %s""",
-        (user_id, user_id, handoff_id),
+            WHERE id = %s{scope_sql}""",
+        (user_id, user_id, handoff_id, *scope_params),
     )
     write_audit(
         action="handoff_claimed",
         actor=str(user_id), resource_type="handoff", resource_id=handoff_id,
     )
     updated = db.fetch_one(
-        "SELECT * FROM aia_health_human_handoff_queue WHERE id = %s",
-        (handoff_id,),
+        f"SELECT * FROM aia_health_human_handoff_queue WHERE id = %s{scope_sql}",
+        (handoff_id, *scope_params),
     )
     return jsonify({"status": "ok", "handoff": _serialize_handoff(updated)})
 
@@ -448,9 +489,10 @@ def resolve_handoff(handoff_id: str):
 
     user_id = (getattr(g, "user", {}) or {}).get("sub")
     db = get_postgres()
+    scope_sql, scope_params = _tenant_scope()
     row = db.fetch_one(
-        "SELECT id, status FROM aia_health_human_handoff_queue WHERE id = %s",
-        (handoff_id,),
+        f"SELECT id, status FROM aia_health_human_handoff_queue WHERE id = %s{scope_sql}",
+        (handoff_id, *scope_params),
     )
     if not row:
         return jsonify({"status": "error", "reason": "not_found"}), 404
@@ -461,7 +503,7 @@ def resolve_handoff(handoff_id: str):
         }), 409
 
     db.execute(
-        """UPDATE aia_health_human_handoff_queue
+        f"""UPDATE aia_health_human_handoff_queue
               SET status = 'resolved',
                   resolved_at = NOW(),
                   resolved_by_user_id = %s,
@@ -469,11 +511,11 @@ def resolve_handoff(handoff_id: str):
                   outcome_category = %s,
                   outcome_tags = %s,
                   outcome_rating = %s
-            WHERE id = %s""",
+            WHERE id = %s{scope_sql}""",
         (
             user_id, summary,
             outcome_category, outcome_tags, outcome_rating,
-            handoff_id,
+            handoff_id, *scope_params,
         ),
     )
     write_audit(
@@ -487,8 +529,8 @@ def resolve_handoff(handoff_id: str):
         },
     )
     updated = db.fetch_one(
-        "SELECT * FROM aia_health_human_handoff_queue WHERE id = %s",
-        (handoff_id,),
+        f"SELECT * FROM aia_health_human_handoff_queue WHERE id = %s{scope_sql}",
+        (handoff_id, *scope_params),
     )
     return jsonify({"status": "ok", "handoff": _serialize_handoff(updated)})
 
@@ -508,10 +550,11 @@ def handoff_messages(handoff_id: str):
     operador entender contexto.
     """
     db = get_postgres()
+    scope_sql, scope_params = _tenant_scope()
     handoff = db.fetch_one(
-        """SELECT id, phone, tenant_id, conversation_log, created_at
-           FROM aia_health_human_handoff_queue WHERE id = %s""",
-        (handoff_id,),
+        f"""SELECT id, phone, tenant_id, conversation_log, created_at
+           FROM aia_health_human_handoff_queue WHERE id = %s{scope_sql}""",
+        (handoff_id, *scope_params),
     )
     if not handoff:
         return jsonify({"status": "error", "reason": "not_found"}), 404
@@ -606,10 +649,11 @@ def handoff_send(handoff_id: str):
         return jsonify({"status": "error", "reason": "no_user"}), 401
 
     db = get_postgres()
+    scope_sql, scope_params = _tenant_scope()
     handoff = db.fetch_one(
-        """SELECT id, phone, tenant_id, status, claimed_by_user_id, trace_id
-           FROM aia_health_human_handoff_queue WHERE id = %s""",
-        (handoff_id,),
+        f"""SELECT id, phone, tenant_id, status, claimed_by_user_id, trace_id
+           FROM aia_health_human_handoff_queue WHERE id = %s{scope_sql}""",
+        (handoff_id, *scope_params),
     )
     if not handoff:
         return jsonify({"status": "error", "reason": "not_found"}), 404
@@ -698,10 +742,11 @@ def _load_mutable_message(handoff_id: str, msg_id: str, user_id: str):
         6. Created_at dentro da janela de mutação (5min)
     """
     db = get_postgres()
+    scope_sql, scope_params = _tenant_scope()
     handoff = db.fetch_one(
-        """SELECT id, phone, tenant_id, status, claimed_by_user_id
-           FROM aia_health_human_handoff_queue WHERE id = %s""",
-        (handoff_id,),
+        f"""SELECT id, phone, tenant_id, status, claimed_by_user_id
+           FROM aia_health_human_handoff_queue WHERE id = %s{scope_sql}""",
+        (handoff_id, *scope_params),
     )
     if not handoff:
         return None, None, None, (jsonify({
@@ -909,16 +954,17 @@ def handoff_stats():
     days = int(request.args.get("days") or 7)
     days = max(1, min(days, 90))
     db = get_postgres()
+    scope_sql, scope_params = _tenant_scope()
     totals = db.fetch_one(
-        """SELECT COUNT(*) AS total,
+        f"""SELECT COUNT(*) AS total,
                   COUNT(*) FILTER (WHERE status = 'pending') AS pending,
                   COUNT(*) FILTER (WHERE status = 'claimed') AS claimed,
                   COUNT(*) FILTER (WHERE status = 'resolved') AS resolved,
                   COUNT(*) FILTER (WHERE sla_breached_at IS NOT NULL) AS sla_breached,
                   AVG(EXTRACT(EPOCH FROM (claimed_at - created_at))) AS avg_claim_seconds
            FROM aia_health_human_handoff_queue
-           WHERE created_at >= NOW() - (%s || ' days')::interval""",
-        (str(days),),
+           WHERE created_at >= NOW() - (%s || ' days')::interval{scope_sql}""",
+        (str(days), *scope_params),
     ) or {}
     for k in ("total", "pending", "claimed", "resolved", "sla_breached"):
         totals[k] = int(totals.get(k) or 0)
@@ -929,11 +975,11 @@ def handoff_stats():
             totals["avg_claim_seconds"] = None
 
     by_priority = db.fetch_all(
-        """SELECT priority, status, COUNT(*) AS n
+        f"""SELECT priority, status, COUNT(*) AS n
            FROM aia_health_human_handoff_queue
-           WHERE created_at >= NOW() - (%s || ' days')::interval
+           WHERE created_at >= NOW() - (%s || ' days')::interval{scope_sql}
            GROUP BY 1, 2 ORDER BY 1, 2""",
-        (str(days),),
+        (str(days), *scope_params),
     )
     for r in by_priority:
         r["n"] = int(r.get("n") or 0)
