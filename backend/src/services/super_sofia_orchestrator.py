@@ -159,34 +159,42 @@ class SuperSofiaOrchestrator:
         # subsequentes do lead NÃO devem ser processadas pela Sofia —
         # ela já decidiu que precisa humano (handoff existe).
         #
-        # Bug fix 2026-05-03: antes filtrava só status='claimed'. Lead
-        # respondia "obrigado" depois do escalate inicial e Sofia
+        # Bug fix 2026-05-03 (parte 1): antes filtrava só status='claimed'.
+        # Lead respondia "obrigado" depois do escalate inicial e Sofia
         # continuava engajando ("qual seu nome?") porque handoff ainda
-        # estava 'pending' (operador não claimou no painel ainda). Isso
-        # gerava experiência incoerente — Sofia prometia escalar mas
-        # logo em seguida fazia perguntas de qualificação.
-        #
+        # estava 'pending' (operador não claimou no painel ainda).
         # Comportamento correto: assim que handoff existe (pending ou
         # claimed), bypass ativa. Sofia silencia até handoff ser
-        # 'resolved' ou 'expired'. Operador conduz a conversa via
-        # /api/admin/handoff/<id>/send.
+        # 'resolved' ou 'expired'.
         #
-        # Mensagem fica visível no chat handoff via aia_health_sofia_messages
-        # (persistida pelo append_turn cross-channel adiante).
+        # Bug fix 2026-05-03 (parte 2 — phone normalization):
+        # WhatsApp/Evolution às vezes manda o phone sem o "9" do celular
+        # (12 dígitos: "555194267222") e o código antigo escrevia
+        # handoffs com "9" (13 dígitos: "5551994267222"). Mismatch
+        # cruzado fazia o bypass não dar match — Sofia continuava
+        # respondendo mesmo após criar handoff próprio.
+        # Fix: usa phone_variants_for_match pra gerar todas as
+        # variantes (com/sem 9, com/sem DDI) e WHERE phone = ANY(%s).
         try:
             from src.services.postgres import get_postgres as _get_pg
+            from src.services.identity_resolver import (
+                phone_variants_for_match, normalize_phone_e164_br,
+            )
+
+            normalized = normalize_phone_e164_br(phone) or phone
+            phone_variants = phone_variants_for_match(normalized)
             active_handoff = _get_pg().fetch_one(
                 """SELECT id::text AS id,
                           status,
                           claimed_by_user_id::text AS claimed_by
                    FROM aia_health_human_handoff_queue
-                   WHERE phone = %s
+                   WHERE phone = ANY(%s)
                      AND status IN ('pending', 'claimed')
                    ORDER BY
                      CASE status WHEN 'claimed' THEN 0 ELSE 1 END,
                      COALESCE(claimed_at, created_at) DESC
                    LIMIT 1""",
-                (phone,),
+                (phone_variants,),
             )
             if active_handoff:
                 logger.info(
