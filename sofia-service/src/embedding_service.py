@@ -41,19 +41,31 @@ logger = logging.getLogger(__name__)
 # + qualidade superior + alinhamento com migração do backend pro mesmo
 # SDK + modelo). Operação cirúrgica: backend e sofia-service agora
 # usam EXATAMENTE a mesma stack (new SDK + v1 + text-embedding-004).
-EMBED_MODEL = os.getenv("SOFIA_EMBED_MODEL") or "text-embedding-004"
-EMBED_DIMS = 768  # vector(768) na tabela; text-embedding-004 = 768 nativo
+EMBED_MODEL = os.getenv("SOFIA_EMBED_MODEL") or "gemini-embedding-2"
+EMBED_DIMS = 768  # vector(768) na tabela; gemini-embedding-2 = 3072 nativo,
+                  # truncamos pra 768 via outputDimensionality (Matryoshka)
 BATCH_SIZE = int(os.getenv("SOFIA_EMBED_BATCH", "20"))
 TICK_INTERVAL_SEC = int(os.getenv("SOFIA_EMBED_TICK_SEC", "60"))
 LOCK_KEY = 8731029471
 
 
 def _get_genai_client():
+    """Cria client google-genai com api_version explícito.
+
+    v1beta é OBRIGATÓRIO pra acessar gemini-embedding-2 (e os outros
+    gemini-embedding-*). v1 estável NÃO lista nenhum embedding model
+    pra projects standard (descoberto 2026-05-03 via curl ListModels).
+    Override via env GENAI_API_VERSION quando v1 ganhar suporte.
+    """
     from google import genai
     api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
     if not api_key:
         raise RuntimeError("GOOGLE_API_KEY required for embeddings")
-    return genai.Client(api_key=api_key)
+    api_version = os.getenv("GENAI_API_VERSION", "v1beta")
+    return genai.Client(
+        api_key=api_key,
+        http_options={"api_version": api_version},
+    )
 
 
 def embed_text(text: str) -> list[float] | None:
