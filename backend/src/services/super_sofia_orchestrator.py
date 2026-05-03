@@ -155,20 +155,38 @@ class SuperSofiaOrchestrator:
             tenant = self.tenant_resolver.central()
             tenant_id = tenant.id
 
-        # ─── Handoff bypass: phone com handoff 'claimed' ativo ──
-        # Quando operador humano reivindicou o lead, mensagens dele
-        # NÃO devem ser processadas pela Sofia — humano está atendendo.
-        # A msg fica visível no chat handoff via aia_health_sofia_messages
-        # (persistida pelo append_turn cross-channel adiante) e o operador
-        # responde via /api/admin/handoff/<id>/send.
+        # ─── Handoff bypass: phone com handoff ATIVO (pending OU claimed) ──
+        # Quando Sofia escalou (ou operador reivindicou), mensagens
+        # subsequentes do lead NÃO devem ser processadas pela Sofia —
+        # ela já decidiu que precisa humano (handoff existe).
+        #
+        # Bug fix 2026-05-03: antes filtrava só status='claimed'. Lead
+        # respondia "obrigado" depois do escalate inicial e Sofia
+        # continuava engajando ("qual seu nome?") porque handoff ainda
+        # estava 'pending' (operador não claimou no painel ainda). Isso
+        # gerava experiência incoerente — Sofia prometia escalar mas
+        # logo em seguida fazia perguntas de qualificação.
+        #
+        # Comportamento correto: assim que handoff existe (pending ou
+        # claimed), bypass ativa. Sofia silencia até handoff ser
+        # 'resolved' ou 'expired'. Operador conduz a conversa via
+        # /api/admin/handoff/<id>/send.
+        #
+        # Mensagem fica visível no chat handoff via aia_health_sofia_messages
+        # (persistida pelo append_turn cross-channel adiante).
         try:
             from src.services.postgres import get_postgres as _get_pg
             active_handoff = _get_pg().fetch_one(
-                """SELECT id::text AS id, claimed_by_user_id::text AS claimed_by
+                """SELECT id::text AS id,
+                          status,
+                          claimed_by_user_id::text AS claimed_by
                    FROM aia_health_human_handoff_queue
                    WHERE phone = %s
-                     AND status = 'claimed'
-                   ORDER BY claimed_at DESC LIMIT 1""",
+                     AND status IN ('pending', 'claimed')
+                   ORDER BY
+                     CASE status WHEN 'claimed' THEN 0 ELSE 1 END,
+                     COALESCE(claimed_at, created_at) DESC
+                   LIMIT 1""",
                 (phone,),
             )
             if active_handoff:
@@ -176,6 +194,7 @@ class SuperSofiaOrchestrator:
                     "orchestrator_bypassed_for_active_handoff",
                     trace_id=trace_id,
                     handoff_id=active_handoff["id"],
+                    handoff_status=active_handoff["status"],
                     phone_redacted=redact_phone(phone),
                 )
                 # Persiste msg do user em DOIS lugares pra UI funcionar:
@@ -215,6 +234,7 @@ class SuperSofiaOrchestrator:
                 return {
                     "status": "handed_to_human",
                     "handoff_id": active_handoff["id"],
+                    "handoff_status": active_handoff["status"],
                     "trace_id": trace_id,
                     "claimed_by": active_handoff["claimed_by"],
                 }
