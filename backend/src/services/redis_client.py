@@ -17,7 +17,24 @@ _instance: Optional[redis.Redis] = None
 
 
 def get_redis() -> redis.Redis:
-    """Singleton Redis. Pool default tamanho 10, decode_responses=True."""
+    """Singleton Redis. Pool default tamanho 10, decode_responses=True.
+
+    socket_timeout precisa ser MAIOR que qualquer comando bloqueante
+    (XREADGROUP block, BLPOP timeout). Default 60s cobre BLOCK_MS=5000ms
+    e BLOCK_MS=30000 com folga.
+
+    Bug observado em prod 2026-05-03: socket_timeout=5s igual ao
+    WORKER_BLOCK_MS=5000ms fazia o socket levantar TimeoutError exatamente
+    quando o XREADGROUP terminava o block. Workers (sofia-inbound,
+    delivery) entravam em loop de timeout e msgs do stream ficavam
+    presas. Sofia respondia por sorte (quando msg nova chegava durante
+    o pequeno window de socket vivo entre timeouts). Healthchecks dos
+    workers viraram UNHEALTHY em loop.
+
+    Fix: socket_timeout=60s default + health_check_interval=30s pra
+    detectar conexões mortas sem cortar blocking commands. Override
+    via env var REDIS_SOCKET_TIMEOUT pra testes.
+    """
     global _instance
     if _instance is not None:
         return _instance
@@ -29,9 +46,11 @@ def get_redis() -> redis.Redis:
             url,
             max_connections=int(os.getenv("REDIS_MAX_CONNECTIONS", "20")),
             decode_responses=True,
-            socket_connect_timeout=2,
-            socket_timeout=5,
+            socket_connect_timeout=int(os.getenv("REDIS_SOCKET_CONNECT_TIMEOUT", "5")),
+            socket_timeout=int(os.getenv("REDIS_SOCKET_TIMEOUT", "60")),
+            socket_keepalive=True,
             retry_on_timeout=True,
+            health_check_interval=int(os.getenv("REDIS_HEALTH_CHECK_INTERVAL", "30")),
         )
         _instance = redis.Redis(connection_pool=pool)
         return _instance
