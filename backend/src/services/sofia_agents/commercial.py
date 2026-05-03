@@ -454,23 +454,95 @@ class CommercialSofiaAgent(BaseSofiaAgent):
         if next_q in ("", "null", "none", "None"):
             next_q = None
         if action == "tool":
-            # Phase C v1: registramos a INTENT da tool mas a execução
-            # da tool fica pra Phase C.4 (tool registry). Por enquanto,
-            # respondemos com text_after como se a tool tivesse rodado
-            # em modo dry-run (audit log marca pendente).
-            tool_name = decision.get("tool_name")
-            tool_args = decision.get("args") or {}
+            # Executa de fato via TOOL_REGISTRY (sofia_tools.execute_tool).
+            # Antes ficava como dry-run "pending_phase_c4" e nada acontecia
+            # — tool decisão era registrada mas nunca rodava (handoff
+            # nunca era criado, capture_lead nunca persistia, etc.).
+            # Bug observado em prod 2026-05-03: lead pediu humano em
+            # emergência, Sofia decidiu chamar escalate_to_human_whatsapp,
+            # texto narrativizado foi enviado mas handoff_queue ficou vazio.
+            from src.services.sofia_tools import execute_tool
+
+            tool_name = decision.get("tool_name") or ""
+            llm_args = decision.get("args") or {}
             text_after = decision.get("text_after") or ""
+
+            # Sanitiza args do LLM: phone e tenant_id sempre vêm do ctx
+            # (anti-hijack — LLM não pode escalar handoff de outro lead
+            # ou pra outro tenant). Demais args (reason/summary/urgency)
+            # ficam por conta do LLM.
+            safe_args = dict(llm_args)
+            safe_args["phone"] = ctx.phone
+            if tool_name == "escalate_to_human_whatsapp":
+                # conversation_log: deriva do active_context_messages do
+                # ctx pra dar contexto pro operador humano.
+                safe_args.setdefault(
+                    "conversation_log",
+                    list(ctx.active_context_messages or []),
+                )
+
+            tool_result = execute_tool(
+                tool_name,
+                safe_args,
+                tenant_id=ctx.tenant.id,
+                trace_id=ctx.trace_id,
+                session_id=ctx.session_id,
+            )
+
+            tool_call_record = {
+                "name": tool_name,
+                "args": safe_args,
+                "ok": tool_result.ok,
+                "idempotent_skip": tool_result.idempotent_skip,
+                "output": tool_result.data,
+            }
+            if tool_result.error:
+                tool_call_record["error"] = tool_result.error
+
+            # Se a tool falhou (não idempotent_skip), evita prometer ao
+            # lead algo que não aconteceu. Devolve fallback honesto.
+            if not tool_result.ok and not tool_result.idempotent_skip:
+                logger.warning(
+                    "commercial_tool_failed",
+                    trace_id=ctx.trace_id,
+                    tool=tool_name,
+                    error=tool_result.error,
+                )
+                return AgentResponse(
+                    text=(
+                        "Recebi sua mensagem mas tive um problema técnico aqui "
+                        "do meu lado. Em instantes alguém da equipe humana entra "
+                        "em contato com você. 🙏"
+                    ),
+                    tools_called=[tool_call_record],
+                    next_action="wait_user",
+                    next_question_intent=next_q,
+                    metadata={"tool_exec_failed": True},
+                )
+
             return AgentResponse(
                 text=text_after,
-                tools_called=[{
-                    "name": tool_name,
-                    "args": tool_args,
-                    "status": "pending_phase_c4",
-                }],
-                next_action="wait_user",
+                tools_called=[tool_call_record],
+                handoff_initiated=(
+                    tool_name == "escalate_to_human_whatsapp"
+                    and tool_result.ok
+                    and not tool_result.idempotent_skip
+                ),
+                handoff_reason=(
+                    safe_args.get("reason")
+                    if tool_name == "escalate_to_human_whatsapp"
+                    else None
+                ),
+                next_action=(
+                    "wait_human"
+                    if tool_name == "escalate_to_human_whatsapp" and tool_result.ok
+                    else "wait_user"
+                ),
                 next_question_intent=next_q,
-                metadata={"phase_c_version": "v1_dry_run"},
+                metadata={
+                    "tool_executed": True,
+                    "tool_idempotent_skip": tool_result.idempotent_skip,
+                },
             )
         # action == 'text'
         text = decision.get("text") or ""
