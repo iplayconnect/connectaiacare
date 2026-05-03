@@ -544,8 +544,79 @@ class CommercialSofiaAgent(BaseSofiaAgent):
                     "tool_idempotent_skip": tool_result.idempotent_skip,
                 },
             )
-        # action == 'text'
+        # action == 'text' — mas validator semântico pega o caso em que
+        # o LLM "mente": narra promessa de escalate ("vou avisar a equipe…")
+        # sem ter chamado a tool. Auto-recovery: dispara
+        # escalate_to_human_whatsapp com defaults seguros pra cumprir o
+        # que foi prometido. Zero falso positivo (só dispara quando o
+        # próprio LLM produziu texto de promessa).
         text = decision.get("text") or ""
+        from src.services.sofia_agents.escalate_output_validator import (
+            detect_escalate_promise, build_recovery_summary,
+        )
+
+        validation = detect_escalate_promise(text)
+        if validation.promised_escalate:
+            from src.services.sofia_tools import execute_tool
+
+            recovery_args = {
+                "phone": ctx.phone,
+                "reason": (
+                    "[AUTO-RECOVERY] Sofia narrou escalate sem chamar tool — "
+                    f"validador detectou promessa: '{validation.matched_pattern}'"
+                ),
+                "summary": build_recovery_summary(
+                    ctx.inbound_text or "",
+                    text,
+                    validation.matched_pattern or "",
+                ),
+                # P2 default — não inflar P1 sem confirmação semântica clínica.
+                # Operador pode reclassificar no chat se contexto exigir.
+                "urgency": "P2",
+                "conversation_log": list(ctx.active_context_messages or []),
+            }
+            tool_result = execute_tool(
+                "escalate_to_human_whatsapp",
+                recovery_args,
+                tenant_id=ctx.tenant.id,
+                trace_id=ctx.trace_id,
+                session_id=ctx.session_id,
+            )
+            logger.warning(
+                "commercial_escalate_auto_recovered",
+                trace_id=ctx.trace_id,
+                matched_pattern=validation.matched_pattern,
+                tool_ok=tool_result.ok,
+                idempotent_skip=tool_result.idempotent_skip,
+                tool_error=tool_result.error,
+            )
+            tool_call_record = {
+                "name": "escalate_to_human_whatsapp",
+                "args": recovery_args,
+                "ok": tool_result.ok,
+                "idempotent_skip": tool_result.idempotent_skip,
+                "output": tool_result.data,
+                "auto_recovery": True,
+                "matched_pattern": validation.matched_pattern,
+            }
+            if tool_result.error:
+                tool_call_record["error"] = tool_result.error
+            return AgentResponse(
+                text=text,
+                tools_called=[tool_call_record],
+                handoff_initiated=(
+                    tool_result.ok and not tool_result.idempotent_skip
+                ),
+                handoff_reason=recovery_args["reason"],
+                next_action="wait_human",
+                next_question_intent=next_q,
+                metadata={
+                    "auto_escalate_recovery": True,
+                    "tool_executed": True,
+                    "tool_idempotent_skip": tool_result.idempotent_skip,
+                },
+            )
+
         return AgentResponse(
             text=text,
             next_action="wait_user",

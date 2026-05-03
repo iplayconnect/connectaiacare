@@ -182,10 +182,29 @@ tasks:
     criticality: high
 
   sofia_chat_tool_decision:
-    description: "Sofia decide se chama tool antes de texto livre. Saída JSON {action: text|tool, tool_name?, args?, text_after|text}. Haiku 4.5 primary (2026-05-02) — tool calling rigoroso + suporta cache_control nativo (aproveita cacheable_system do LLMRouter). Trocou de DeepSeek depois que test E2E F3 (Escalate humano) mostrou que DeepSeek NÃO chamava escalate_to_human_whatsapp mesmo com user pedindo 'quero falar com humano agora' explicitamente — agente ficava só em texto. GPT-5.4 mini fallback (function calling robusto + auto cache). Gemini Flash último recurso (mais barato, tool calling menos consistente)."
-    primary: anthropic/claude-haiku-4-5-20251001
+    description: |
+      Sofia decide se chama tool antes de texto livre. Saída segue schema
+      Anthropic-style {action: text|tool, tool_name?, args?, text_after|text}
+      mesmo via OpenAI (router converte tool_calls → mesmo schema).
+
+      Histórico:
+        - Pre 2026-05-02: DeepSeek primary (tool-use via JSON-em-string).
+          Bug E2E F3: DeepSeek não chamava escalate_to_human_whatsapp mesmo
+          com pedido explícito.
+        - 2026-05-02: trocado pra Haiku 4.5 (tool-use NATIVO Anthropic ativado
+          em PR #90). Melhorou mas ainda em ~10-30% dos casos LLM narra
+          a promessa em vez de chamar tool ("vou avisar a equipe…" sem
+          tool_call) — bug observado em prod 2026-05-03 com lead em emergência.
+        - 2026-05-03: trocado pra GPT-5.4 mini primary (function calling
+          tem reputação mais "tool-eager" que Haiku, especialmente com
+          schemas claros). Haiku 4.5 vira fallback. Tool-use OpenAI nativo
+          implementado no mesmo PR (param `tools=` + `tool_choice=` da
+          Chat Completions API). Validador semântico como rede de
+          segurança final (escalate_output_validator.py) auto-recovery
+          se LLM ainda mentir.
+    primary: openai/gpt-5.4-mini
     fallbacks:
-      - openai/gpt-5.4-mini
+      - anthropic/claude-haiku-4-5-20251001
       - google/gemini-2.5-flash
     temperature: 0.0
     max_tokens: 1024
