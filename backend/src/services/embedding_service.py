@@ -39,9 +39,20 @@ logger = get_logger(__name__)
 
 EMBEDDING_DIM = 768
 
-# Override via env var pra rollback emergencial OU testar gemini-embedding-001
-# (alpha experimental) quando GA. Default text-embedding-004 (GA estável).
-GEMINI_EMBED_MODEL = os.getenv("GEMINI_EMBED_MODEL", "text-embedding-004")
+# Default: gemini-embedding-2 (GA recente, suporta Matryoshka 768d via
+# outputDimensionality, único com saldo+permission garantida na key
+# atual). Disponível APENAS em api_version=v1beta — v1 não tem nenhum
+# embedding model listado pra projects standard.
+#
+# Histórico saga 2026-05-03 (descoberto via curl ListModels):
+#   - text-embedding-004: NÃO está disponível pra projects standard
+#     (404 NOT_FOUND em v1 E v1beta)
+#   - models/embedding-001: NÃO está disponível (404)
+#   - gemini-embedding-001 (alpha): só funciona com saldo OK
+#   - gemini-embedding-2 (GA): ✓ funciona, escolhido como default
+#
+# Override via env var GEMINI_EMBED_MODEL pra rollback ou testar variantes.
+GEMINI_EMBED_MODEL = os.getenv("GEMINI_EMBED_MODEL", "gemini-embedding-2")
 
 
 class EmbeddingService:
@@ -56,12 +67,13 @@ class EmbeddingService:
         if self.provider == "gemini":
             if not settings.google_api_key:
                 raise RuntimeError("GOOGLE_API_KEY não configurada para embeddings Gemini.")
-            # New SDK google-genai. http_options={"api_version": "v1"} é
-            # OBRIGATÓRIO pra suportar text-embedding-004 via embedContent —
-            # default v1beta NÃO aceita esse modelo (404 NOT_FOUND).
-            # Bug observado em prod 2026-05-03 na migração inicial.
+            # New SDK google-genai. api_version=v1beta é OBRIGATÓRIO pra
+            # acessar gemini-embedding-2 (e os outros gemini-embedding-*).
+            # v1 estável NÃO lista nenhum embedding model pra projects
+            # standard (descoberto 2026-05-03 via curl ListModels).
+            # Override via env GENAI_API_VERSION quando v1 ganhar suporte.
             from google import genai
-            api_version = os.getenv("GENAI_API_VERSION", "v1")
+            api_version = os.getenv("GENAI_API_VERSION", "v1beta")
             self._client = genai.Client(
                 api_key=settings.google_api_key,
                 http_options={"api_version": api_version},
