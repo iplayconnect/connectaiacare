@@ -47,7 +47,6 @@ from src.services.csm import (
 from src.services.event_bus import Streams, get_event_bus
 from src.services.identity_resolver import get_identity_resolver
 from src.services.sofia_agents import AgentContext, get_agent_for
-from src.services.sofia_tools import execute_tool
 from src.services.tenant_resolver import get_tenant_resolver
 from src.services.whatsapp_intent_classifier import (
     get_whatsapp_intent_classifier,
@@ -399,9 +398,12 @@ class SuperSofiaOrchestrator:
         #     ("seus pais com 90 e 92 anos..." → fallback genérico)
         # Bug fix 2026-05-02: removido pra commercial/support.
         # Mantido pra futuros sub-agents clinical_* (Phase C v2).
+        # tool_call_record (gerado pelos agents commercial/support a partir
+        # de 2026-05-03) tem keys: name, args, ok, idempotent_skip, output, error.
+        # Antes de PR #97 podia vir status="pending_phase_c4" — agente registrava
+        # intent mas tool não rodava. Esse caminho está morto desde então.
         had_valid_tool = any(
-            t.get("status") not in ("pending_phase_c4",)
-            and (t.get("ok") in (True, None))
+            t.get("ok") in (True, None)
             for t in response.tools_called
         )
         CLINICAL_AGENTS = ("clinical", "caregiver", "family")  # futuros
@@ -446,26 +448,25 @@ class SuperSofiaOrchestrator:
                     pattern=clinical_pattern,
                 )
 
-        # Execute tools chamadas pelo agent (Phase C v1: in-process)
-        tool_results: list[dict] = []
-        for tool_call in response.tools_called:
-            tool_name = tool_call.get("name")
-            tool_args = tool_call.get("args") or {}
-            if tool_call.get("status") == "pending_phase_c4":
-                # v1: actually execute now since registry está pronto
-                tr = execute_tool(
-                    tool_name,
-                    tool_args,
-                    tenant_id=tenant.id,
-                    trace_id=trace_id,
-                )
-                tool_results.append({
-                    "name": tool_name,
-                    "ok": tr.ok,
-                    "idempotent_skip": tr.idempotent_skip,
-                    "data": tr.data,
-                    "error": tr.error,
-                })
+        # Tool execution: agents (commercial/support) executam tools direto
+        # via execute_tool() desde PR #97 (2026-05-03). Antes era stub
+        # "pending_phase_c4" e o orchestrator fazia execute aqui — bug,
+        # tool nunca rodava porque agents/orchestrator usavam args sem
+        # validação consistente (faltava session_id, phone podia vir do
+        # LLM em vez do ctx). Hoje o tool_call_record do response.tools_called
+        # já tem ok/idempotent_skip/output/error preenchidos pelo agent.
+        # Aqui apenas convertemos pra formato consumido por audit (linha 583)
+        # e active_context (linha 530).
+        tool_results: list[dict] = [
+            {
+                "name": t.get("name"),
+                "ok": t.get("ok"),
+                "idempotent_skip": t.get("idempotent_skip", False),
+                "data": t.get("output") or {},
+                "error": t.get("error"),
+            }
+            for t in response.tools_called
+        ]
 
         # ─── CSM v2: registra pergunta do bot + persiste state ─────
         # Se agent gerou texto e indicou next_question_intent, registra
