@@ -103,17 +103,17 @@ services:
       REDIS_URL: redis://redis:6379/5
       WORKER_BLOCK_MS: ${WORKER_BLOCK_MS:-5000}
       WORKER_BATCH: ${WORKER_BATCH:-10}
-    # Override do healthcheck herdado do Dockerfile (que tenta
-    # curl localhost:5055/health = API). Worker NÃO tem servidor HTTP,
-    # healthcheck herdado sempre falhava → containers ficavam "unhealthy"
-    # mesmo funcionando. Bug fix 2026-05-03 (audit).
-    # pgrep checa só que o processo Python tá vivo. Não detecta loop
-    # de timeout no Redis (workers já cobrem isso via restart automático
-    # do orchestrator do Docker quando processo morre). Heartbeat-based
-    # healthcheck é evolução futura (worker escreve timestamp em arquivo
-    # a cada loop, healthcheck checa idade < 30s).
+    # Override do healthcheck herdado do Dockerfile (curl localhost:5055/health
+    # da API). Worker não tem HTTP server. PR #102 tentou pgrep mas a
+    # imagem slim não tem procps (pgrep/ps/top) → exit 127 sempre,
+    # workers continuavam "unhealthy".
+    # Fix 2026-05-03 (PR #109): usa python (sempre presente) pra checar
+    # PID 1 (o próprio worker é PID 1 no container). os.kill(pid, 0) NÃO
+    # envia signal — só verifica se o processo existe (exception=morto,
+    # sucesso=vivo). Não detecta loop de timeout no Redis (Docker restart
+    # cobre worker morto), mas pelo menos não mente "unhealthy".
     healthcheck:
-      test: ["CMD-SHELL", "pgrep -f sofia_inbound_worker > /dev/null"]
+      test: ["CMD-SHELL", "python -c 'import os; os.kill(1, 0)' || exit 1"]
       interval: 30s
       timeout: 3s
       retries: 3
@@ -148,7 +148,7 @@ services:
       WORKER_BLOCK_MS: ${WORKER_BLOCK_MS:-5000}
       WORKER_BATCH: ${WORKER_BATCH:-10}
     healthcheck:
-      test: ["CMD-SHELL", "pgrep -f delivery_worker > /dev/null"]
+      test: ["CMD-SHELL", "python -c 'import os; os.kill(1, 0)' || exit 1"]
       interval: 30s
       timeout: 3s
       retries: 3
