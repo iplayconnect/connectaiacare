@@ -109,19 +109,78 @@ class SupportSofiaAgent(BaseSofiaAgent):
 
         action = decision.get("action") or "text"
         if action == "tool":
-            tool_name = decision.get("tool_name")
-            tool_args = decision.get("args") or {}
+            # Executa de fato via TOOL_REGISTRY. Antes ficava como
+            # "pending_phase_c4" e dependia do orchestrator pra rodar
+            # (sem session_id e com args crus do LLM, podia falhar
+            # silenciosamente). Mesmo bug de commercial.py — ver
+            # commit anterior.
+            from src.services.sofia_tools import execute_tool
+
+            tool_name = decision.get("tool_name") or ""
+            llm_args = decision.get("args") or {}
             text_after = decision.get("text_after") or ""
+
+            # Sanitiza args: phone do ctx (anti-hijack); LLM mantém
+            # reason/summary/urgency.
+            safe_args = dict(llm_args)
+            safe_args["phone"] = ctx.phone
+            if tool_name == "escalate_to_human_whatsapp":
+                safe_args.setdefault(
+                    "conversation_log",
+                    list(ctx.active_context_messages or []),
+                )
+
+            tool_result = execute_tool(
+                tool_name,
+                safe_args,
+                tenant_id=ctx.tenant.id,
+                trace_id=ctx.trace_id,
+                session_id=ctx.session_id,
+            )
+
+            tool_call_record = {
+                "name": tool_name,
+                "args": safe_args,
+                "ok": tool_result.ok,
+                "idempotent_skip": tool_result.idempotent_skip,
+                "output": tool_result.data,
+            }
+            if tool_result.error:
+                tool_call_record["error"] = tool_result.error
+
+            if not tool_result.ok and not tool_result.idempotent_skip:
+                logger.warning(
+                    "support_tool_failed",
+                    trace_id=ctx.trace_id,
+                    tool=tool_name,
+                    error=tool_result.error,
+                )
+                return AgentResponse(
+                    text=(
+                        "Recebi sua mensagem mas tive um problema técnico aqui. "
+                        "Estou acionando alguém da equipe humana — em até 30min "
+                        "te chamam pela Central 24h. 🙏"
+                    ),
+                    tools_called=[tool_call_record],
+                    handoff_initiated=False,
+                    next_action="wait_human",
+                    metadata={"tool_exec_failed": True},
+                )
+
             return AgentResponse(
                 text=text_after,
-                tools_called=[{
-                    "name": tool_name,
-                    "args": tool_args,
-                    "status": "pending_phase_c4",
-                }],
-                handoff_initiated=(tool_name == "escalate_to_human_whatsapp"),
-                handoff_reason=tool_args.get("reason"),
+                tools_called=[tool_call_record],
+                handoff_initiated=(
+                    tool_name == "escalate_to_human_whatsapp"
+                    and tool_result.ok
+                    and not tool_result.idempotent_skip
+                ),
+                handoff_reason=safe_args.get("reason"),
                 next_action="wait_human",
+                metadata={
+                    "tool_executed": True,
+                    "tool_idempotent_skip": tool_result.idempotent_skip,
+                },
             )
         return AgentResponse(
             text=decision.get("text") or "",
