@@ -1,14 +1,25 @@
 """Embedding service — gera vetores semânticos pra messages histórico
-da Sofia (Gemini text-embedding-004) e habilita recall semântico.
+da Sofia e habilita recall semântico.
 
 Estratégia:
   - Worker batch processa messages com embedding NULL (a cada 60s)
-  - Gera embedding via Gemini text-embedding-004 (768d nativo)
+  - Gera embedding via Gemini text-embedding-005 (Vertex) ou
+    gemini-embedding-2 (Gemini API standard) — ver auth modes abaixo.
   - Persiste em aia_health_sofia_messages.embedding (vector(768))
 
 Tool recall_semantic faz cosine similarity search pra "lembrei quando
 falamos sobre X?" — retorna top-K mensagens passadas relevantes do
 mesmo paciente (ou cross-paciente quando user é profissional).
+
+Auth modes (auto-detectado, prioridade Vertex > Gemini API):
+  1. **Vertex AI** (recomendado pra produção):
+     - Setar GOOGLE_APPLICATION_CREDENTIALS=/path/to/sa.json
+     - Default model: text-embedding-005 (sucessor 004, GA, Matryoshka)
+  2. **Gemini API** (fallback / dev):
+     - Setar GOOGLE_API_KEY=AIza...
+     - Default model: gemini-embedding-2 (GA)
+
+Override via SOFIA_EMBED_MODEL pra forçar modelo específico.
 """
 from __future__ import annotations
 
@@ -16,33 +27,31 @@ import logging
 import os
 import socket
 import threading
+from pathlib import Path
 from typing import Any
 
 from src import persistence
 
 logger = logging.getLogger(__name__)
 
-# text-embedding-004: GA estável, arquitetura Matryoshka nativa pra 768d
-# (informação mais densa nas primeiras dimensões — superior ao
-# models/embedding-001 que era treinado pra dim fixa).
-#
-# Histórico de 2026-05-03 (4 bugs em cascata + decisão estratégica):
-#   1. Default "gemini-embedding-001" (alpha) → 403 PERMISSION_DENIED
-#      em projects sem acesso ao endpoint experimental.
-#   2. Tentativa "text-embedding-004" → 404 NOT_FOUND. Causa: SDK new
-#      `google.genai` default em v1beta, que NÃO suporta embedContent
-#      pra esse modelo GA. Endpoint v1 suporta.
-#   3. Workaround "models/embedding-001" alinhado com backend → 404
-#      mesma coisa (v1beta também não aceita esse modelo legacy).
-#   4. Root cause REAL identificado: api_version=v1 explicit no Client.
-#      _get_genai_client agora força v1.
-#
-# Decisão estratégica: voltar pra text-embedding-004 (Matryoshka nativo
-# + qualidade superior + alinhamento com migração do backend pro mesmo
-# SDK + modelo). Operação cirúrgica: backend e sofia-service agora
-# usam EXATAMENTE a mesma stack (new SDK + v1 + text-embedding-004).
-EMBED_MODEL = os.getenv("SOFIA_EMBED_MODEL") or "gemini-embedding-2"
-EMBED_DIMS = 768  # vector(768) na tabela; gemini-embedding-2 = 3072 nativo,
+
+def _detect_mode() -> str:
+    """Vertex se SA file existir; senão Gemini API."""
+    sa_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+    if sa_path and Path(sa_path).is_file():
+        return "vertex"
+    return "gemini_api"
+
+
+def _default_model_for_mode(mode: str) -> str:
+    if mode == "vertex":
+        return "text-embedding-005"  # GA Vertex, sucessor 004
+    return "gemini-embedding-2"      # GA Gemini API standard
+
+
+_MODE = _detect_mode()
+EMBED_MODEL = os.getenv("SOFIA_EMBED_MODEL") or _default_model_for_mode(_MODE)
+EMBED_DIMS = 768  # vector(768) na tabela; modelos retornam até 3072 nativo,
                   # truncamos pra 768 via outputDimensionality (Matryoshka)
 BATCH_SIZE = int(os.getenv("SOFIA_EMBED_BATCH", "20"))
 TICK_INTERVAL_SEC = int(os.getenv("SOFIA_EMBED_TICK_SEC", "60"))
@@ -50,17 +59,28 @@ LOCK_KEY = 8731029471
 
 
 def _get_genai_client():
-    """Cria client google-genai com api_version explícito.
+    """Cria client google-genai detectando auto entre Vertex e Gemini API.
 
-    v1beta é OBRIGATÓRIO pra acessar gemini-embedding-2 (e os outros
-    gemini-embedding-*). v1 estável NÃO lista nenhum embedding model
-    pra projects standard (descoberto 2026-05-03 via curl ListModels).
-    Override via env GENAI_API_VERSION quando v1 ganhar suporte.
+    Vertex: requer GOOGLE_APPLICATION_CREDENTIALS apontando pra SA JSON.
+    Gemini API: requer GOOGLE_API_KEY (ou GEMINI_API_KEY) — usa v1beta
+    pra acessar gemini-embedding-* via embedContent.
     """
     from google import genai
+
+    if _MODE == "vertex":
+        project = os.getenv("GOOGLE_CLOUD_PROJECT", "connectaiacare-prod")
+        location = os.getenv("VERTEX_LOCATION", "us-central1")
+        return genai.Client(
+            vertexai=True, project=project, location=location,
+        )
+
+    # Gemini API standard fallback
     api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
     if not api_key:
-        raise RuntimeError("GOOGLE_API_KEY required for embeddings")
+        raise RuntimeError(
+            "Sem auth Vertex (GOOGLE_APPLICATION_CREDENTIALS) nem "
+            "GOOGLE_API_KEY. Configurar 1 dos 2 pra usar embeddings."
+        )
     api_version = os.getenv("GENAI_API_VERSION", "v1beta")
     return genai.Client(
         api_key=api_key,
