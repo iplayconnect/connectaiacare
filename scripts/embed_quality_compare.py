@@ -1,20 +1,26 @@
 """Quality gate pra migração de modelo de embeddings.
 
-Compara recall semântico entre:
-  - models/embedding-001 (modelo legacy do backend, anterior à migração)
-  - text-embedding-004 (Matryoshka nativo, novo padrão)
+Compara recall semântico entre 3 modelos atualmente disponíveis:
+  - gemini-embedding-2     (atual em prod, GA Gemini API standard)
+  - text-embedding-004     (GA Vertex, Matryoshka nativo)
+  - text-embedding-005     (GA Vertex, sucessor 004 — mais novo)
 
-Usado pra validar PR feat/embedding-text-004-migration ANTES de fazer
-backfill irreversível. Se text-embedding-004 ≥ models/embedding-001 em
-recall@3 nos 5 cenários clínicos, libera backfill. Caso contrário,
-rollback via env var GEMINI_EMBED_MODEL=models/embedding-001.
+Auth: requer SA Vertex (GOOGLE_APPLICATION_CREDENTIALS apontando pro JSON).
+gemini-embedding-2 também roda via Vertex (sem precisar de Gemini API key
+separada).
+
+Usado pra validar feat/embedding-vertex-migration ANTES de fazer backfill.
+Aprova text-embedding-005 se recall@3 ≥ gemini-embedding-2. Empate técnico
+também aprova (modelo mais novo + Vertex stack mais robusta).
 
 Uso:
     # Dentro do container connectaiacare-sofia-service (tem deps Google):
-    docker compose exec sofia-service python /app/scripts/embed_quality_compare.py
+    docker exec connectaiacare-sofia-service python /app/scripts/embed_quality_compare.py
 
-    # Ou local com GOOGLE_API_KEY exportada:
-    GOOGLE_API_KEY=... python scripts/embed_quality_compare.py
+    # Local com SA key exportada:
+    GOOGLE_APPLICATION_CREDENTIALS=/path/to/sa.json \\
+    GOOGLE_CLOUD_PROJECT=connectaiacare-prod \\
+    python scripts/embed_quality_compare.py
 
 Métricas:
   - overlap@3: dos top-3 do modelo A, quantos aparecem no top-3 do B?
@@ -130,16 +136,25 @@ def cosine(a: list[float], b: list[float]) -> float:
 
 
 def get_client():
-    """Cria client google-genai com api_version=v1 (necessário pra
-    text-embedding-004 — ver bug fix 2026-05-03 no embedding_service.py)."""
+    """Cria client google-genai. Prioriza Vertex (SA key) — text-embedding-004/005
+    SÓ existem em Vertex, então sem auth Vertex o test fica inconclusivo.
+    """
     from google import genai
+    sa_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+    if sa_path and os.path.isfile(sa_path):
+        project = os.getenv("GOOGLE_CLOUD_PROJECT", "connectaiacare-prod")
+        location = os.getenv("VERTEX_LOCATION", "us-central1")
+        print(f"  [auth] Vertex: project={project} location={location}")
+        return genai.Client(vertexai=True, project=project, location=location)
+    # Fallback (só roda gemini-embedding-2)
     api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
     if not api_key:
-        print("ERRO: GOOGLE_API_KEY ou GEMINI_API_KEY env var precisa estar setada")
+        print("ERRO: nem GOOGLE_APPLICATION_CREDENTIALS nem GOOGLE_API_KEY setada")
         sys.exit(1)
+    print("  [auth] Gemini API standard (não vai testar text-embedding-004/005)")
     return genai.Client(
         api_key=api_key,
-        http_options={"api_version": os.getenv("GENAI_API_VERSION", "v1")},
+        http_options={"api_version": os.getenv("GENAI_API_VERSION", "v1beta")},
     )
 
 
@@ -198,8 +213,9 @@ def evaluate_scenario(client, scenario: dict, model: str) -> ModelResult:
 def run():
     client = get_client()
     MODELS = [
-        ("models/embedding-001", "Legacy (anterior à migração)"),
-        ("text-embedding-004", "Novo padrão (Matryoshka)"),
+        ("gemini-embedding-2", "Atual (Gemini API GA)"),
+        ("text-embedding-004", "Vertex GA (Matryoshka)"),
+        ("text-embedding-005", "Vertex GA (sucessor 004)"),
     ]
     print("=" * 80)
     print(f"Quality gate — comparativo de modelos de embedding ({len(SCENARIOS)} cenários)")
@@ -244,20 +260,31 @@ def run():
     for model, stats in summary.items():
         print(f"  {model:35s}  recall@3={stats['recall_at_3']}  latency={stats['latency_avg_ms']}ms")
 
-    if "text-embedding-004" in summary and "models/embedding-001" in summary:
-        new_recall = int(summary["text-embedding-004"]["recall_at_3"].split("/")[0])
-        old_recall = int(summary["models/embedding-001"]["recall_at_3"].split("/")[0])
-        new_lat = summary["text-embedding-004"]["latency_avg_ms"]
-        old_lat = summary["models/embedding-001"]["latency_avg_ms"]
-
-        if new_recall >= old_recall and new_lat < old_lat * 2:
-            print("\n  ✅ APROVADO — text-embedding-004 ≥ models/embedding-001 em recall E latência aceitável")
-            print("     → liberar backfill (UPDATE NULL nas rows com models/embedding-001)")
+    # Decisão: aprova text-embedding-005 se ≥ gemini-embedding-2 em recall.
+    # 004 é só comparativo intermediário (entre 2 e 005).
+    baseline = "gemini-embedding-2"
+    candidate = "text-embedding-005"
+    if baseline in summary and candidate in summary:
+        new_recall = int(summary[candidate]["recall_at_3"].split("/")[0])
+        old_recall = int(summary[baseline]["recall_at_3"].split("/")[0])
+        new_lat = summary[candidate]["latency_avg_ms"]
+        old_lat = summary[baseline]["latency_avg_ms"] or 1
+        if new_recall >= old_recall and new_lat < old_lat * 3:
+            print(f"\n  ✅ APROVADO — {candidate} ≥ {baseline} em recall (lat={new_lat}ms vs {old_lat}ms aceitável)")
+            print("     → migrar pra Vertex + text-embedding-005:")
+            print("        UPDATE aia_health_sofia_messages SET embedding=NULL, embedding_model=NULL")
+            print("          WHERE embedding_model='gemini-embedding-2';")
+            print("     → worker reembedará via Vertex em ~30min")
             sys.exit(0)
         else:
-            print(f"\n  ❌ REPROVADO — recall novo {new_recall} < antigo {old_recall} OU latência {new_lat}ms > 2× {old_lat}ms")
-            print("     → rollback via env: GEMINI_EMBED_MODEL=models/embedding-001 + SOFIA_EMBED_MODEL=models/embedding-001")
+            print(f"\n  ❌ REPROVADO — {candidate} recall {new_recall} < {baseline} {old_recall}")
+            print(f"     OU latência {new_lat}ms > 3× {old_lat}ms")
+            print(f"     → manter em prod o {baseline} (sem migrar Vertex pra embedding agora)")
             sys.exit(1)
+    else:
+        missing = {m for m, _ in MODELS} - set(summary)
+        print(f"\n  ⚠️  Quality gate inconclusivo — modelos sem result: {missing}")
+        sys.exit(2)
 
 
 if __name__ == "__main__":

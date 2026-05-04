@@ -57,3 +57,5 @@ demo-assets/audio_samples/*.mp3
 !.claude/settings.json
 .cursor/
 Temp/
+*-prod-*.json
+secrets/

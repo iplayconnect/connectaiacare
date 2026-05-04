@@ -57,9 +57,18 @@ services:
     environment:
       DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/connectaiacare
       REDIS_URL: redis://redis:6379/5
+      # Vertex AI auth (mode auto-detectado em embedding_service.py:
+      # se GOOGLE_APPLICATION_CREDENTIALS apontar pra arquivo válido,
+      # usa Vertex; senão fallback Gemini API via GOOGLE_API_KEY).
+      GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS:-/secrets/vertex-sa.json}
+      GOOGLE_CLOUD_PROJECT: ${GOOGLE_CLOUD_PROJECT:-connectaiacare-prod}
+      VERTEX_LOCATION: ${VERTEX_LOCATION:-us-central1}
     volumes:
       # Áudios WhatsApp persistidos pra reproduzir no painel (reports audio_url)
       - connectaiacare_audio_storage:/app/storage/audio
+      # SA key Vertex AI (read-only). Path host=/root/connectaiacare/secrets,
+      # path container=/secrets. Apenas leitura — workers nem precisam de write.
+      - ./secrets:/secrets:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -103,6 +112,12 @@ services:
       REDIS_URL: redis://redis:6379/5
       WORKER_BLOCK_MS: ${WORKER_BLOCK_MS:-5000}
       WORKER_BATCH: ${WORKER_BATCH:-10}
+      # Vertex AI auth (ver comentário no service `api`)
+      GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS:-/secrets/vertex-sa.json}
+      GOOGLE_CLOUD_PROJECT: ${GOOGLE_CLOUD_PROJECT:-connectaiacare-prod}
+      VERTEX_LOCATION: ${VERTEX_LOCATION:-us-central1}
+    volumes:
+      - ./secrets:/secrets:ro
     # Override do healthcheck herdado do Dockerfile (curl localhost:5055/health
     # da API). Worker não tem HTTP server. PR #102 tentou pgrep mas a
     # imagem slim não tem procps (pgrep/ps/top) → exit 127 sempre,
@@ -147,6 +162,11 @@ services:
       REDIS_URL: redis://redis:6379/5
       WORKER_BLOCK_MS: ${WORKER_BLOCK_MS:-5000}
       WORKER_BATCH: ${WORKER_BATCH:-10}
+      GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS:-/secrets/vertex-sa.json}
+      GOOGLE_CLOUD_PROJECT: ${GOOGLE_CLOUD_PROJECT:-connectaiacare-prod}
+      VERTEX_LOCATION: ${VERTEX_LOCATION:-us-central1}
+    volumes:
+      - ./secrets:/secrets:ro
     healthcheck:
       test: ["CMD-SHELL", "python -c 'import os; os.kill(1, 0)' || exit 1"]
       interval: 30s
@@ -187,6 +207,12 @@ services:
       # SOFIA_INTERNAL_KEY: shared secret api ↔ sofia-service (.env)
       SOFIA_VOICE_PROVIDER: ${SOFIA_VOICE_PROVIDER:-grok}
       XAI_API_KEY: ${XAI_API_KEY:-}
+      # Vertex AI auth pra embedding worker do sofia-service
+      GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS:-/secrets/vertex-sa.json}
+      GOOGLE_CLOUD_PROJECT: ${GOOGLE_CLOUD_PROJECT:-connectaiacare-prod}
+      VERTEX_LOCATION: ${VERTEX_LOCATION:-us-central1}
+    volumes:
+      - ./secrets:/secrets:ro
     depends_on:
       postgres:
         condition: service_healthy

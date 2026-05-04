@@ -1,27 +1,27 @@
 """Serviço de embeddings semânticos para pattern detection de relatos clínicos.
 
-Gera embeddings vetoriais de 768 dimensões usando o modelo do provider LLM ativo
-(Gemini `text-embedding-004` ou OpenAI `text-embedding-3-small` truncado).
-Usado pelo PatternDetectionService para busca semântica em `aia_health_reports.embedding`.
+Gera embeddings vetoriais de 768 dimensões usando o modelo do provider LLM ativo.
 
-Dimensão: 768 (alinhada com schema `vector(768)` na migration 005).
-Provider atual: Google Gemini (`text-embedding-004` via SDK new google-genai).
+Auth modes (auto-detectado via env, prioridade: Vertex > Gemini API):
+  1. **Vertex AI** (recomendado pra produção):
+     - Setar GOOGLE_APPLICATION_CREDENTIALS=/path/to/sa.json
+     - Acesso a text-embedding-005 (sucessor do 004), text-embedding-large,
+       multilingual-002, multimodalembedding etc.
+     - SA + IAM granular, Cloud Logging audit, suporte enterprise.
+  2. **Gemini API** (fallback / dev):
+     - Setar GOOGLE_API_KEY=AIza...
+     - Acesso limitado: gemini-embedding-{001,2,2-preview} apenas.
+     - Single API key, sem audit log GCP.
 
-Por que 768 e não 3072 (large):
-- 768 é suficiente para detectar similaridade semântica entre relatos clínicos
-  em português (validado em papers de clinical NLP).
-- Índice pgvector HNSW fica 4x menor, buscas mais rápidas.
-- text-embedding-004 tem arquitetura nativa Matryoshka — informação mais
-  crítica concentrada nas primeiras dimensões. Truncação 3072→768 preserva
-  qualidade vs modelos antigos (embedding-001) treinados pra dim fixa.
+Default models por mode:
+  - Vertex:    text-embedding-005 (GA, Matryoshka nativo, mais novo)
+  - Gemini API: gemini-embedding-2 (GA, único Matryoshka disponível na API standard)
 
-SDK migration 2026-05-03:
-- Antes: `google.generativeai` (legacy SDK, default v1) + `models/embedding-001`
-- Agora: `google.genai` (new SDK, explicit v1 via http_options) + `text-embedding-004`
-- Razão: Google está concentrando manutenção/novos recursos no new SDK; legacy
-  está em modo deprecated. text-embedding-004 tem qualidade ~5-10% superior em
-  benchmarks pt-BR clínicos (papers Google + validação interna).
-- Alinhamento: sofia-service usa o mesmo modelo + SDK + version (PR companion).
+Override via env GEMINI_EMBED_MODEL pra forçar modelo específico.
+
+Dimensão: 768 (alinhada com schema vector(768) na migration 005). text-embedding-005
+e gemini-embedding-2 retornam até 3072 nativo — truncamos via outputDimensionality
+(Matryoshka — informação mais densa nas primeiras dimensões, sem perda significativa).
 
 Cache: não há cache intencional aqui — embeddings são gerados uma única vez por
 relato (no ato do salvamento) e persistidos. Buscas subsequentes usam o vetor
@@ -30,7 +30,8 @@ armazenado, não chamam o provider.
 from __future__ import annotations
 
 import os
-from typing import Any
+from pathlib import Path
+from typing import Any, Optional
 
 from config.settings import settings
 from src.utils.logger import get_logger
@@ -39,66 +40,107 @@ logger = get_logger(__name__)
 
 EMBEDDING_DIM = 768
 
-# Default: gemini-embedding-2 (GA recente, suporta Matryoshka 768d via
-# outputDimensionality, único com saldo+permission garantida na key
-# atual). Disponível APENAS em api_version=v1beta — v1 não tem nenhum
-# embedding model listado pra projects standard.
-#
-# Histórico saga 2026-05-03 (descoberto via curl ListModels):
-#   - text-embedding-004: NÃO está disponível pra projects standard
-#     (404 NOT_FOUND em v1 E v1beta)
-#   - models/embedding-001: NÃO está disponível (404)
-#   - gemini-embedding-001 (alpha): só funciona com saldo OK
-#   - gemini-embedding-2 (GA): ✓ funciona, escolhido como default
-#
-# Override via env var GEMINI_EMBED_MODEL pra rollback ou testar variantes.
-GEMINI_EMBED_MODEL = os.getenv("GEMINI_EMBED_MODEL", "gemini-embedding-2")
+
+def _detect_gemini_mode() -> str:
+    """Decide entre 'vertex' e 'gemini_api' baseado em env vars disponíveis.
+
+    Vertex tem prioridade — se houver SA key file válido, usa. Caso contrário,
+    cai pra API key tradicional. Permite migração gradual: você pode setar
+    GOOGLE_APPLICATION_CREDENTIALS num único container pra testar Vertex
+    enquanto outros ficam no Gemini API.
+    """
+    sa_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+    if sa_path and Path(sa_path).is_file():
+        return "vertex"
+    return "gemini_api"
+
+
+# Default model varia por mode. Override via GEMINI_EMBED_MODEL pra forçar.
+def _default_model_for_mode(mode: str) -> str:
+    if mode == "vertex":
+        return "text-embedding-005"  # sucessor do 004, GA, Matryoshka nativo
+    return "gemini-embedding-2"      # único Matryoshka GA na Gemini API standard
+
+
+GEMINI_EMBED_MODEL = os.getenv(
+    "GEMINI_EMBED_MODEL",
+    _default_model_for_mode(_detect_gemini_mode()),
+)
 
 
 class EmbeddingService:
     def __init__(self):
         self.provider = settings.llm_provider
         self._client = None  # lazy init
+        self._mode: Optional[str] = None  # 'vertex' | 'gemini_api' (gemini só)
 
     def _ensure_client(self):
         if self._client is not None:
             return self._client
 
         if self.provider == "gemini":
+            self._init_gemini_client()
+        elif self.provider == "anthropic":
+            self._init_openai_fallback()
+        else:
+            raise RuntimeError(f"Provider desconhecido: {self.provider}")
+
+        return self._client
+
+    def _init_gemini_client(self):
+        """Inicializa client google-genai detectando auto entre Vertex e Gemini API."""
+        from google import genai
+
+        mode = _detect_gemini_mode()
+        if mode == "vertex":
+            project = os.getenv("GOOGLE_CLOUD_PROJECT", "connectaiacare-prod")
+            location = os.getenv("VERTEX_LOCATION", "us-central1")
+            self._client = genai.Client(
+                vertexai=True, project=project, location=location,
+            )
+            self._mode = "vertex"
+            logger.info(
+                "embedding_client_init",
+                provider="gemini", mode="vertex",
+                project=project, location=location,
+                model=GEMINI_EMBED_MODEL,
+            )
+        else:
+            # Gemini API standard (api_version v1beta — única que aceita
+            # gemini-embedding-* via embedContent endpoint)
             if not settings.google_api_key:
-                raise RuntimeError("GOOGLE_API_KEY não configurada para embeddings Gemini.")
-            # New SDK google-genai. api_version=v1beta é OBRIGATÓRIO pra
-            # acessar gemini-embedding-2 (e os outros gemini-embedding-*).
-            # v1 estável NÃO lista nenhum embedding model pra projects
-            # standard (descoberto 2026-05-03 via curl ListModels).
-            # Override via env GENAI_API_VERSION quando v1 ganhar suporte.
-            from google import genai
+                raise RuntimeError(
+                    "Sem auth Vertex (GOOGLE_APPLICATION_CREDENTIALS) nem "
+                    "GOOGLE_API_KEY. Configurar 1 dos 2 pra usar embeddings Gemini."
+                )
             api_version = os.getenv("GENAI_API_VERSION", "v1beta")
             self._client = genai.Client(
                 api_key=settings.google_api_key,
                 http_options={"api_version": api_version},
             )
+            self._mode = "gemini_api"
             logger.info(
                 "embedding_client_init",
-                provider="gemini", model=GEMINI_EMBED_MODEL,
+                provider="gemini", mode="gemini_api",
                 api_version=api_version,
+                model=GEMINI_EMBED_MODEL,
             )
-        elif self.provider == "anthropic":
-            # Anthropic não expõe embeddings; caímos em OpenAI se key estiver presente
-            # (comum em stacks Anthropic — OpenAI usado só pra embeddings).
-            import openai
-            api_key = getattr(settings, "openai_api_key", None) or ""
-            if not api_key:
-                raise RuntimeError(
-                    "LLM_PROVIDER=anthropic não suporta embeddings nativamente. "
-                    "Configurar OPENAI_API_KEY pra embeddings ou trocar pra LLM_PROVIDER=gemini."
-                )
-            self._client = openai.OpenAI(api_key=api_key)
-            logger.info("embedding_client_init", provider="openai", model="text-embedding-3-small")
-        else:
-            raise RuntimeError(f"Provider desconhecido: {self.provider}")
 
-        return self._client
+    def _init_openai_fallback(self):
+        """Anthropic não tem embeddings — cai pra OpenAI quando disponível."""
+        import openai
+        api_key = getattr(settings, "openai_api_key", None) or ""
+        if not api_key:
+            raise RuntimeError(
+                "LLM_PROVIDER=anthropic não suporta embeddings nativamente. "
+                "Configurar OPENAI_API_KEY pra embeddings ou trocar pra LLM_PROVIDER=gemini."
+            )
+        self._client = openai.OpenAI(api_key=api_key)
+        self._mode = "openai"
+        logger.info(
+            "embedding_client_init",
+            provider="openai", model="text-embedding-3-small",
+        )
 
     def embed(self, text: str) -> list[float]:
         """Gera embedding 768-dim do texto.
@@ -125,7 +167,8 @@ class EmbeddingService:
         SEMANTIC_SIMILARITY | CLASSIFICATION | CLUSTERING.
 
         output_dimensionality=768 explicit ativa Matryoshka truncation NATIVA
-        do text-embedding-004 (informação mais densa nas primeiras dimensões).
+        do text-embedding-005 / gemini-embedding-2 (informação mais densa nas
+        primeiras dimensões — preserva qualidade).
         """
         from google.genai import types
         client = self._ensure_client()
@@ -138,7 +181,6 @@ class EmbeddingService:
             contents=text,
             config=config,
         )
-        # New SDK retorna result.embeddings: list[ContentEmbedding]
         embeddings = getattr(result, "embeddings", None) or []
         if not embeddings:
             logger.warning("gemini_embedding_no_result")
@@ -153,7 +195,6 @@ class EmbeddingService:
                 "gemini_embedding_unexpected_dim",
                 got=len(vec), expected=EMBEDDING_DIM,
             )
-            # Truncação defensiva caso modelo retorne >768 (sem Matryoshka)
             if len(vec) > EMBEDDING_DIM:
                 vec = vec[:EMBEDDING_DIM]
                 # Re-normaliza pra preservar cosine similarity
@@ -183,9 +224,9 @@ class EmbeddingService:
     def embed_for_query(self, text: str) -> list[float]:
         """Variante com task_type=RETRIEVAL_QUERY (Gemini) — otimiza busca.
 
-        text-embedding-004 tem prompts otimizados separados pra "indexar
-        documento" vs "buscar por query" — usar o tipo certo melhora recall
-        em ~3-7% (papers Google).
+        text-embedding-005 / gemini-embedding-2 têm prompts otimizados separados
+        pra "indexar documento" vs "buscar por query" — usar o tipo certo melhora
+        recall em ~3-7% (papers Google).
         """
         if not text or not text.strip():
             return []
