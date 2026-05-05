@@ -38,6 +38,7 @@ from typing import Any, Optional
 
 from src.services.active_context import append_turn, load_recent
 from src.services.audit_log_writer import write_audit, redact_phone
+from src.services.conversation_persistence import persist_message
 from src.services.csm import (
     ConversationState,
     QuestionIntent,
@@ -94,6 +95,26 @@ _CLINICAL_PATTERNS_CHAT = [
     (_re.compile(r"\b\d+\s*mg\b", _re.IGNORECASE), "dose"),
     (_re.compile(r"\b(alergia|alérgic[ao])\s+(a|à)\b", _re.IGNORECASE), "alergia"),
 ]
+
+
+def _derive_subject(identity) -> tuple[Optional[str], str]:
+    """Deriva (subject_id, subject_type) pra conversation_messages.
+
+    Prioridade: caregiver_id > patient_id > user_id > anonymous.
+    Type usado consistente com `_COMMON_SUBJECT_TYPES` em
+    conversation_persistence.
+    """
+    if not identity or identity.is_anonymous or not identity.primary:
+        return None, "anonymous"
+    p = identity.primary
+    if p.caregiver_id:
+        return p.caregiver_id, "caregiver"
+    if p.patient_id:
+        return p.patient_id, ("family" if p.profile == "familia" else "patient")
+    if p.user_id:
+        # users.role = medico/enfermeiro/operador/admin/etc → genérico "user"
+        return p.user_id, "user"
+    return None, "anonymous"
 
 
 def _is_clinical_narration(text: str) -> Optional[str]:
@@ -280,6 +301,29 @@ class SuperSofiaOrchestrator:
             },
         )
 
+        # ─── Phase C v2 PR 1: persistência canonical da USER msg ────
+        # Grava em aia_health_conversation_messages ANTES de processar.
+        # Best-effort — falha não bloqueia turn. Garante que mesmo se
+        # agent crashar, a inbound msg fica auditada.
+        # subject_id/type derivados da identity (caregiver/patient/user/etc).
+        _user_subject_id, _user_subject_type = _derive_subject(identity)
+        if text:
+            persist_message(
+                tenant_id=tenant.id,
+                phone=phone,
+                role="user",
+                direction="inbound",
+                content=text,
+                channel="whatsapp",
+                external_id=trace_id,
+                subject_id=_user_subject_id,
+                subject_type=_user_subject_type,
+                metadata={
+                    "profile": (identity.primary.profile if identity.primary else "anonymous"),
+                    "is_anonymous": identity.is_anonymous,
+                },
+            )
+
         # Active context (read-only por enquanto)
         active_msgs = _load_active_context(
             tenant_id=tenant.id,
@@ -373,6 +417,7 @@ class SuperSofiaOrchestrator:
         ctx.sub_agent = agent.name
 
         # Process turn (sub-agent decides texto/tool/handoff)
+        agent_started = time.perf_counter()
         try:
             response = agent.time_turn(agent.process)(ctx)
         except Exception as exc:
@@ -390,6 +435,12 @@ class SuperSofiaOrchestrator:
 
         # Phase C v1: passthrough → worker chama pipeline legado
         if response.next_action == "passthrough_legacy":
+            # NOTE: assistant msg do pipeline legado NÃO é persistida aqui —
+            # é gerada e enviada DENTRO do pipeline.handle_webhook que não
+            # escreve em conversation_messages. Gap conhecido, será coberto
+            # quando Phase C v2 PR 3 substituir passthrough por CareSofiaAgent.
+            # Por ora a USER msg inbound (já persistida acima) garante
+            # audit trail mínimo.
             return {
                 "status": "passthrough",
                 "agent": agent.name,
@@ -568,6 +619,40 @@ class SuperSofiaOrchestrator:
                     "orchestrator_outbound_publish_failed",
                     trace_id=trace_id, error=str(exc)[:200],
                 )
+
+            # ─── Phase C v2 PR 1: persistência canonical da ASSISTANT msg ────
+            # Grava em conversation_messages com processing_agent + duration.
+            # Hallucination guardrail (replace_replaced) é refletido em
+            # safety_moderated. Best-effort.
+            agent_duration_ms = int(
+                (time.perf_counter() - agent_started) * 1000
+            )
+            persist_message(
+                tenant_id=tenant.id,
+                phone=phone,
+                role="assistant",
+                direction="outbound",
+                content=response.text,
+                channel="whatsapp",
+                external_id=trace_id,
+                subject_id=_user_subject_id,
+                subject_type=_user_subject_type,
+                processing_agent=agent.name,
+                processing_duration_ms=agent_duration_ms,
+                safety_moderated=bool(
+                    response.metadata.get("hallucination_replaced")
+                ),
+                metadata={
+                    "next_action": response.next_action,
+                    "tools_called": [t.get("name") for t in response.tools_called],
+                    "handoff_initiated": response.handoff_initiated,
+                    "handoff_reason": response.handoff_reason,
+                    **(
+                        {"hallucination_pattern": response.metadata["hallucination_replaced"]}
+                        if response.metadata.get("hallucination_replaced") else {}
+                    ),
+                },
+            )
 
         # ─── Phase C v2.7: user memory writeback (LGPD opt-in) ─────
         # Para users identificados, dispara summarize a cada N msgs.
