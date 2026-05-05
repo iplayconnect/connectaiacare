@@ -112,12 +112,77 @@ def parse_dose(text: str | None) -> DoseAmount | None:
 
 # ─── Lookup ───────────────────────────────────────────────
 
+# Tokens "permitidos" ao redor do drug name em prescrição informal pt-BR.
+# Se input contém token fora desse set + fora dos números/dose patterns,
+# resolve_principle_active rejeita (proteção contra falso positivo
+# tipo "Pregabalina-XYZ-Inexistente" → "pregabalina").
+_ALLOWED_EXTRA_TOKENS = frozenset({
+    # Units
+    "mg", "g", "mcg", "ug", "ml", "ui", "iu", "gota", "gotas",
+    "cp", "comp", "comprimido", "comprimidos",
+    # Frequência / horário
+    "x", "vez", "vezes", "por", "dia", "dias", "hora", "horas", "h",
+    "manha", "manhã", "tarde", "noite", "almoço", "almoco", "jantar",
+    "cafe", "café", "refeicao", "refeição", "refeicoes", "refeições",
+    "ao", "antes", "depois", "durante", "junto",
+    "deitar", "dormir", "acordar",
+    # Vias
+    "oral", "sublingual", "topico", "topica", "nasal", "ocular",
+    "subcutaneo", "intramuscular", "intravenoso", "iv", "im", "sc",
+    # Conectores curtos
+    "de", "da", "do", "no", "na", "com", "sem", "em", "a", "o", "e",
+    "pra", "para",
+    # Estados típicos
+    "agora", "hoje", "ontem", "ja", "se", "for", "necessario", "preciso",
+    "dor", "febre", "sintoma",
+    # Frequência clínica abrev.
+    "qd", "bid", "tid", "qid", "sos", "prn",
+})
+
+# Token só com números (ponto/vírgula opcionais) é sempre OK.
+_NUMERIC_TOKEN = re.compile(r"^\d+(?:[.,]\d+)?$")
+# Token "número+unit" colado (ex: "50mg", "1g", "0.5ml", "1cp")
+_DOSE_TOKEN = re.compile(
+    r"^\d+(?:[.,]\d+)?(?:mg|g|mcg|ug|ml|ui|iu|cp|comp|gota|gotas)?$",
+    re.IGNORECASE,
+)
+# Frequência tipo "1x", "2x", "3x" (vezes/dia)
+_FREQ_TOKEN = re.compile(r"^\d+x$", re.IGNORECASE)
+
+
+def _is_allowed_extra(token: str) -> bool:
+    """Token "permitido" ao redor do drug name? (números, units, freq)."""
+    if not token:
+        return True
+    if token in _ALLOWED_EXTRA_TOKENS:
+        return True
+    if (
+        _NUMERIC_TOKEN.match(token)
+        or _DOSE_TOKEN.match(token)
+        or _FREQ_TOKEN.match(token)
+    ):
+        return True
+    return False
+
+
 def resolve_principle_active(name: str) -> str | None:
     """Tenta achar princípio ativo canônico:
       1. Match exato em dose_limits (já é principle_active)
-      2. Match em aliases
-      3. Fuzzy match em principle_active (ILIKE %name%)
+      2. Match em aliases (brand → genérico)
+      3. Fuzzy STRICT: drug name aparece como token EXATO no input,
+         e tokens "extras" só podem ser números, units, frequência ou
+         conectores conhecidos.
+
     Retorna o princípio_active normalizado ou None.
+
+    Bug fix 2026-05-05: a fuzzy v1 fazia
+        `input ILIKE '%' || principle_active || '%'`
+    aceitando match parcial mesmo com lixo no input
+    ("Pregabalina-XYZ-Inexistente" → "pregabalina";
+     "AAA Sertralina BBB"          → "sertralina").
+    Agora exige token completo + extras permitidos. Preserva casos
+    legítimos ("Atenolol 50mg", "Sertralina 25mg 1x/dia") e rejeita
+    strings com palavras estranhas.
     """
     if not name:
         return None
@@ -152,19 +217,54 @@ def resolve_principle_active(name: str) -> str | None:
     if row:
         return row["principle_active"]
 
-    # 3. Fuzzy: principle_active contém ou é contido pelo nome
-    row = pg.fetch_one(
+    # 3. Fuzzy STRICT — drug name aparece como token completo + extras válidos.
+    # Pré-filtro SQL pega candidatos cujo principle_active está como substring
+    # no input. Validamos em Python (token-completo + extras allowed) pra
+    # rejeitar lixo tipo "Pregabalina-XYZ-Inexistente".
+    candidates = pg.fetch_all(
         """
         SELECT principle_active FROM aia_health_drug_dose_limits
         WHERE active = TRUE
-          AND (principle_active ILIKE %s OR %s ILIKE '%%' || principle_active || '%%')
+          AND length(principle_active) >= 4
+          AND %s ILIKE '%%' || principle_active || '%%'
+        GROUP BY principle_active
         ORDER BY length(principle_active) DESC
-        LIMIT 1
         """,
-        (f"%{norm}%", norm),
+        (norm,),
     )
-    if row:
-        return row["principle_active"]
+    if not candidates:
+        return None
+
+    input_tokens = norm.split()
+    if not input_tokens:
+        return None
+
+    # Pra cada candidato (longest first), confere se aparece como token
+    # completo no input E se os tokens extras são todos permitidos.
+    for c in candidates:
+        principle = c["principle_active"]
+        # Drug name pode ter espaço (ex: "ácido acetilsalicílico"). Match
+        # de window contígua de input_tokens.
+        principle_tokens = principle.split()
+        n = len(principle_tokens)
+        if n == 0:
+            continue
+        matched_start = None
+        for i in range(len(input_tokens) - n + 1):
+            if input_tokens[i:i + n] == principle_tokens:
+                matched_start = i
+                break
+        if matched_start is None:
+            continue  # candidato é substring mas não token completo
+        # Valida tokens extras (antes + depois do match)
+        extras = (
+            input_tokens[:matched_start]
+            + input_tokens[matched_start + n:]
+        )
+        if all(_is_allowed_extra(t) for t in extras):
+            return principle
+        # Senão tenta próximo candidato (mais curto)
+
     return None
 
 
