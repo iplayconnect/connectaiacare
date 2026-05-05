@@ -143,7 +143,12 @@ def persist_message(
 
     try:
         db = get_postgres()
-        row = db.fetch_one(
+        # Importante: usar insert_returning (commit=True) — fetch_one
+        # tem commit=False (otimizado pra SELECT) e provoca rollback
+        # silencioso de INSERTs feitos via fetch_one. Bug detectado em
+        # smoke test 2026-05-05: id voltava preenchido mas SELECT
+        # subsequente em outra conexão via 0 rows.
+        row = db.insert_returning(
             """INSERT INTO aia_health_conversation_messages (
                   tenant_id, subject_phone, subject_id, subject_type,
                   session_id, session_context,
