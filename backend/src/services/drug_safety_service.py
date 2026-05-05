@@ -1,359 +1,292 @@
-"""DrugSafetyService — Knowledge Graph farmacológico pra cuidado geriátrico.
+"""DrugSafetyService — API alto-nível de farmacovigilância pra Sofia/agents.
 
-⚠️  AVISO CLÍNICO IMPORTANTE:
-Este serviço é MVP open-source. Cobertura ~30 drugs prioritários (Beers
-2023 + Anvisa top BR). NÃO substitui parecer médico. Sofia DEVE indicar
-quando informação não está no banco e escalar pra humano.
+⚠️  Essa classe é um WRAPPER FINO sobre os módulos canônicos do sistema:
+    - dose_validator.validate()    — 11 checks integrados (dose, alergia,
+                                     duplicate_therapy, polypharmacy, narrow
+                                     therapeutic index, drug_interactions
+                                     com time_separation, condition_contra,
+                                     anticholinergic_burden ACB, fall_risk
+                                     STOPP, renal/hepatic adjustments, vital
+                                     constraints).
+    - cascade_detector.detect_cascades() — dimensão 13 (prescrição em cascata).
 
-API pública:
+Cobertura no DB hoje (auditoria 2026-05-05):
+    142 drugs únicos · 93 interações ativas · 151 dose limits · 51 ACB ·
+    38 fall risk · 45 renal · 166 hepatic · 10 cascatas · 109 aliases.
+    Sources: anvisa, beers_2023, lexicomp, stockleys, fda, sbgg, manual.
+
+Quando NÃO usar este wrapper:
+    - Pra ler/editar regras clínicas diretamente: use endpoints
+      /api/clinical-rules/* (CRUD admin) — clinical_rules_routes.py.
+    - Pra criar prescrição: medication_routes.py já chama validate()
+      automaticamente. Este wrapper é pra contextos consultivos
+      (Sofia conversa com cuidador, sub-agent clínico, etc).
+
+API pública (estável):
+
     svc = get_drug_safety_service()
 
-    # Lookup por nome (genérico ou comercial)
-    drug = svc.lookup_drug("Atenolol")            # ou "Tenoblock"
-    drug = svc.lookup_drug("ATENOLOL")            # case-insensitive
-    drug = svc.lookup_drug("atenolol", record_gap_if_missing=True)
-
-    # Beers Criteria flags pra um drug
-    flags = svc.check_beers_for_drug(drug["id"], patient_age=80, conditions=["dementia"])
-
-    # Interações entre N drugs (canonicaliza par a par)
-    interactions = svc.check_interactions([drug_a_id, drug_b_id, drug_c_id])
-
-    # Review completo de uma lista de medicamentos
-    review = svc.safety_review(
-        ["Atenolol 50mg", "Diazepam 5mg", "Sertralina 50mg"],
-        patient_age=82, conditions=["dementia", "falls_history"],
+    # 1. Review uma prescrição candidate (single med + paciente)
+    result = svc.evaluate_prescription(
+        medication_name="Atenolol",
+        dose="50mg",
+        times_of_day=["08:00"],
+        route="oral",
+        patient={"id": "...", "age": 82, "allergies": [...], ...},
     )
-    # → {flags: [...], interactions: [...], gaps: [...], summary: "..."}
+    # → ValidationResult com 11 checks rodados
 
-Policy de gaps:
-    Quando lookup_drug() não acha o medicamento, opcional record_gap=True
-    salva em aia_health_drug_lookup_gaps pra priorizar curadoria.
-    Sofia deve responder com hedge ("não tenho info confiável sobre X")
-    e escalar pra humano se relato envolve drug não-cadastrado em
-    contexto crítico.
+    # 2. Review uma LISTA de meds candidate juntas (cuidador relata)
+    review = svc.safety_review_prescriptions(
+        prescriptions=[
+            {"medication_name": "Atenolol", "dose": "50mg", "times_of_day": ["08:00"]},
+            {"medication_name": "Diazepam", "dose": "5mg", "times_of_day": ["22:00"]},
+        ],
+        patient={"id": "...", "age": 82, "conditions": ["dementia"]},
+    )
+    # → dict {results: [...], cascades: [...], max_severity: "warning_strong",
+    #         requires_human_review: True/False}
+
+    # 3. Detectar cascatas pra paciente já em tratamento
+    cascades = svc.detect_cascades_for_patient(patient_id)
+    # → idêntico a cascade_detector.detect_cascades()
+
+Esse wrapper NÃO duplica lógica clínica — apenas oferece superfície
+limpa pra Sofia consumir. Curadoria, fontes e scoring continuam
+em dose_validator + tabelas aia_health_drug_*.
 """
 from __future__ import annotations
 
-import unicodedata
 from typing import Any, Optional
 
-from src.services.postgres import get_postgres
+from src.services import cascade_detector, dose_validator
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 
-def _normalize_drug_name(name: str) -> str:
-    """Lowercase + remove acentos. Pra match resiliente entre 'Atenolol',
-    'ATENOLOL', 'atenolol'. Brand names também passam por isso quando
-    armazenados (mas no array brand_names mantemos forma original)."""
-    if not name:
-        return ""
-    nfkd = unicodedata.normalize("NFKD", name.strip())
-    no_accents = "".join(c for c in nfkd if not unicodedata.combining(c))
-    return no_accents.lower()
-
-
-def _extract_drug_name_from_mention(raw: str) -> str:
-    """Extrai nome de drug de menção informal.
-
-    'Atenolol 50mg'              → 'Atenolol'
-    'tomou losartana 25 mg'      → 'losartana'
-    'ela toma diazepam pra dor'  → 'diazepam'
-
-    Heurística simples — primeira palavra com letra maiúscula OU primeiro
-    token >= 4 chars. Pra casos complexos, LLM (Med-Gemini) deveria
-    pré-processar e extrair entidades farmacológicas estruturadas.
-    """
-    if not raw:
-        return ""
-    # Remove dose/unidade pra simplificar
-    import re
-    cleaned = re.sub(r"\b\d+\s*(mg|mcg|g|ml|ui|comp|gota[s]?)\b", "", raw, flags=re.IGNORECASE)
-    # Pega primeira palavra com >=4 chars que parece drug name
-    tokens = [t for t in re.split(r"[\s,;.()]+", cleaned) if len(t) >= 4]
-    return tokens[0] if tokens else raw.strip()
-
-
 class DrugSafetyService:
-    """Knowledge Graph queries pra farmacovigilância em geriatria."""
+    """Wrapper alto-nível sobre o pipeline farmacológico canonical."""
 
-    def __init__(self):
-        self._db = None
+    # ───────────────────────────────────────────────────────────
+    # 1. Validação de UMA prescrição (delega 100% pro dose_validator)
+    # ───────────────────────────────────────────────────────────
 
-    def _get_db(self):
-        if self._db is None:
-            self._db = get_postgres()
-        return self._db
-
-    # ─── LOOKUP ────────────────────────────────────────────────
-
-    def lookup_drug(
+    def evaluate_prescription(
         self,
-        name_or_brand: str,
         *,
-        record_gap_if_missing: bool = False,
-        tenant_id: Optional[str] = None,
-    ) -> Optional[dict]:
-        """Busca drug por generic_name OR brand_names. Case-insensitive.
+        medication_name: str,
+        dose: str,
+        times_of_day: Optional[list] = None,
+        route: str = "oral",
+        patient: Optional[dict] = None,
+        schedule_type: Optional[str] = None,
+    ) -> dose_validator.ValidationResult:
+        """Roda os 11 checks do dose_validator pra uma prescrição candidate.
 
         Args:
-            name_or_brand: pode ser generic ("Atenolol") ou brand ("Atenol",
-                "Tenoblock"). Aceita menção informal ("ela toma atenolol pra pressão")
-                — extrai o nome via heurística simples.
-            record_gap_if_missing: se True E não achar, registra em
-                aia_health_drug_lookup_gaps pra priorização de curadoria.
+            medication_name: nome (genérico ou comercial). Sistema resolve
+                via aia_health_drug_aliases (109 mappings).
+            dose: ex "50mg", "1g", "40UI".
+            times_of_day: lista de horários ["08:00", "20:00"]. Usado pra
+                calcular dose diária + detectar conflitos temporais com
+                outras meds (time_separation_minutes).
+            route: "oral" (default), "iv", "im", "topical", etc.
+            patient: dict com id, age, allergies, conditions, vitals
+                recentes (pra check_vital_constraints), creatinina/Cockcroft.
+            schedule_type: "fixed" | "as_needed" — pra times_per_day calc.
 
         Returns:
-            dict com colunas de aia_health_drug_catalog OR None se não achou.
+            ValidationResult com .ok, .severity, .issues (lista) e
+            metadata (principle_active, limit, source).
         """
-        if not name_or_brand:
-            return None
-
-        # Tenta primeiro nome direto, depois extração heurística
-        candidates = [name_or_brand.strip()]
-        extracted = _extract_drug_name_from_mention(name_or_brand)
-        if extracted and extracted != name_or_brand.strip():
-            candidates.append(extracted)
-
-        db = self._get_db()
-        for candidate in candidates:
-            normalized = _normalize_drug_name(candidate)
-            if not normalized or len(normalized) < 3:
-                continue
-            # Match exato em generic_name_normalized
-            row = db.fetch_one(
-                """SELECT id::text, rxnorm_cui, atc_code, generic_name,
-                          generic_name_normalized, brand_names,
-                          therapeutic_class, pharmacologic_class,
-                          is_psychotropic, is_controlled,
-                          source, source_ref, requires_clinical_review, notes
-                   FROM aia_health_drug_catalog
-                   WHERE generic_name_normalized = %s""",
-                (normalized,),
-            )
-            if row:
-                return row
-            # Match em brand_names (array contains, case-sensitive — brands têm caps)
-            row = db.fetch_one(
-                """SELECT id::text, rxnorm_cui, atc_code, generic_name,
-                          generic_name_normalized, brand_names,
-                          therapeutic_class, pharmacologic_class,
-                          is_psychotropic, is_controlled,
-                          source, source_ref, requires_clinical_review, notes
-                   FROM aia_health_drug_catalog
-                   WHERE EXISTS (
-                       SELECT 1 FROM unnest(brand_names) AS b
-                       WHERE LOWER(b) = LOWER(%s)
-                   )""",
-                (candidate,),
-            )
-            if row:
-                return row
-
-        # Não achou — registra gap se solicitado
-        if record_gap_if_missing:
-            self._record_gap(name_or_brand, tenant_id=tenant_id)
-        return None
-
-    def _record_gap(self, raw_mention: str, *, tenant_id: Optional[str] = None):
-        """Registra ou incrementa contador de drug perguntado mas ausente."""
-        try:
-            normalized = _normalize_drug_name(_extract_drug_name_from_mention(raw_mention))
-            if not normalized or len(normalized) < 2:
-                return
-            self._get_db().execute(
-                """INSERT INTO aia_health_drug_lookup_gaps
-                       (raw_drug_mention, normalized_query, tenant_id)
-                   VALUES (%s, %s, %s)
-                   ON CONFLICT (normalized_query, tenant_id) DO UPDATE
-                     SET occurrences = aia_health_drug_lookup_gaps.occurrences + 1,
-                         last_seen = NOW()""",
-                (raw_mention[:200], normalized, tenant_id),
-            )
-        except Exception as exc:
-            logger.warning("drug_gap_record_failed", error=str(exc)[:120])
-
-    # ─── BEERS CRITERIA ────────────────────────────────────────
-
-    def check_beers_for_drug(
-        self,
-        drug_id: str,
-        *,
-        patient_age: Optional[int] = None,
-        conditions: Optional[list[str]] = None,
-    ) -> list[dict]:
-        """Retorna flags Beers aplicáveis a um drug, filtradas por contexto.
-
-        Args:
-            drug_id: UUID do drug (de lookup_drug)
-            patient_age: pra filtrar (Beers aplica ≥65 — abaixo disso filtra
-                category='avoid_in_elderly'; outras categories continuam relevantes)
-            conditions: lista normalizada (ex: ['dementia', 'CKD', 'falls_history'])
-                — flags com 'avoid_with_condition' são filtradas pra match.
-
-        Returns:
-            list de flags ordenadas por severity (high → low).
-        """
-        flags = self._get_db().fetch_all(
-            """SELECT id::text, category, severity, evidence_quality,
-                      recommendation_strength, rationale, clinical_consequences,
-                      conditions, alternatives, source_ref
-               FROM aia_health_beers_flags
-               WHERE drug_id = %s
-               ORDER BY CASE severity
-                   WHEN 'high' THEN 1
-                   WHEN 'moderate' THEN 2
-                   WHEN 'low' THEN 3
-               END""",
-            (drug_id,),
+        return dose_validator.validate(
+            medication_name=medication_name,
+            dose=dose,
+            times_of_day=times_of_day,
+            route=route,
+            patient=patient,
+            schedule_type=schedule_type,
         )
-        if not flags:
-            return []
 
-        # Filtros contextuais
-        result = []
-        conditions_set = set((conditions or []))
-        for f in flags:
-            cat = f.get("category")
-            # Beers "avoid_in_elderly" só relevante se ≥65 anos
-            if cat == "avoid_in_elderly" and patient_age is not None and patient_age < 65:
-                continue
-            # "avoid_with_condition" — só inclui se paciente tem condition match
-            if cat == "avoid_with_condition" and f.get("conditions"):
-                if not (conditions_set & set(f["conditions"])):
-                    continue
-            result.append(f)
-        return result
+    # ───────────────────────────────────────────────────────────
+    # 2. Review de UMA LISTA de prescrições (orquestrador)
+    # ───────────────────────────────────────────────────────────
 
-    # ─── INTERACTIONS ──────────────────────────────────────────
-
-    def check_interactions(self, drug_ids: list[str]) -> list[dict]:
-        """Retorna interações entre cada par (i, j) com i < j na lista.
-
-        Canonicaliza par a par antes de query (drug_a_id < drug_b_id no schema).
-
-        Args:
-            drug_ids: lista de UUIDs (mín 2 pra ter interações)
-
-        Returns:
-            list de interações com severity, description, clinical_management,
-            ordenadas por severity (contraindicated → minor).
-        """
-        if not drug_ids or len(drug_ids) < 2:
-            return []
-
-        # Gera todos os pares canonicalizados (a < b) sem duplicar
-        pairs: set[tuple[str, str]] = set()
-        for i, a in enumerate(drug_ids):
-            for b in drug_ids[i + 1:]:
-                if a == b:
-                    continue
-                # Canonical: menor UUID primeiro
-                lo, hi = (a, b) if a < b else (b, a)
-                pairs.add((lo, hi))
-        if not pairs:
-            return []
-
-        # Query batch — psycopg2 aceita VALUES com listas
-        rows = []
-        for lo, hi in pairs:
-            r = self._get_db().fetch_one(
-                """SELECT i.id::text, i.severity, i.mechanism_type,
-                          i.description, i.clinical_management, i.onset,
-                          i.documentation, i.source, i.source_ref,
-                          a.generic_name AS drug_a_name,
-                          b.generic_name AS drug_b_name
-                   FROM aia_health_drug_interactions i
-                   JOIN aia_health_drug_catalog a ON a.id = i.drug_a_id
-                   JOIN aia_health_drug_catalog b ON b.id = i.drug_b_id
-                   WHERE i.drug_a_id = %s AND i.drug_b_id = %s""",
-                (lo, hi),
-            )
-            if r:
-                rows.append(r)
-
-        # Ordena por severity
-        sev_order = {"contraindicated": 0, "major": 1, "moderate": 2, "minor": 3}
-        rows.sort(key=lambda r: sev_order.get(r.get("severity"), 99))
-        return rows
-
-    # ─── REVIEW INTEGRADO ──────────────────────────────────────
-
-    def safety_review(
+    def safety_review_prescriptions(
         self,
-        medication_mentions: list[str],
+        prescriptions: list[dict],
         *,
-        patient_age: Optional[int] = None,
-        conditions: Optional[list[str]] = None,
-        tenant_id: Optional[str] = None,
+        patient: Optional[dict] = None,
     ) -> dict:
-        """Review completo de uma lista de medicamentos (mentions informais).
+        """Avalia N prescrições candidatas + cascatas do paciente.
 
-        Faz lookup → Beers flags → interações de uma vez. Resultado pronto
-        pra prompt da Sofia (alimentar contexto antes de gerar resposta).
+        Útil quando cuidador relata múltiplas medicações de uma vez
+        (foto da caixa, lista oral). Sofia usa esse método pra obter
+        visão consolidada antes de responder ao cuidador.
 
         Args:
-            medication_mentions: lista de strings informais
-                (ex: ['Atenolol 50mg', 'tomou diazepam ontem'])
-            patient_age: opcional, melhora filtros Beers
-            conditions: lista normalizada (ex: ['dementia'])
-            tenant_id: pra registro de gaps por tenant
+            prescriptions: lista de dicts com keys:
+                medication_name (req), dose (req),
+                times_of_day, route, schedule_type (opcionais).
+            patient: contexto do paciente (id, age, allergies, conditions,
+                vitals). patient.id é usado pra detect_cascades.
 
         Returns:
-            dict {
-                'recognized': [...drugs encontrados],
-                'gaps': [...mentions que não bateram em nada],
-                'beers_flags': [...com drug name],
-                'interactions': [...],
-                'has_high_severity': bool,
-                'requires_human_review': bool,
-            }
+            dict com:
+              results: [ValidationResult.to_dict() pra cada prescription]
+              cascades: list de cascatas detectadas (vazio se sem patient.id)
+              max_severity: maior severity entre todos os issues
+                (block > warning_strong > warning > info)
+              has_block_or_strong: bool — tem issue crítico que justifica
+                handoff humano imediato
+              requires_human_review: bool — Sofia deve sempre alertar
+                + escalar quando True (block, warning_strong, ou cascata
+                contraindicated/major)
+              meta: contagens pra observabilidade
         """
-        recognized = []
-        gaps = []
-        for mention in medication_mentions:
-            drug = self.lookup_drug(
-                mention, record_gap_if_missing=True, tenant_id=tenant_id,
-            )
-            if drug:
-                recognized.append({"mention": mention, **drug})
-            else:
-                gaps.append(mention)
+        results = []
+        for p in prescriptions or []:
+            try:
+                vr = self.evaluate_prescription(
+                    medication_name=p.get("medication_name") or "",
+                    dose=p.get("dose") or "",
+                    times_of_day=p.get("times_of_day"),
+                    route=p.get("route") or "oral",
+                    patient=patient,
+                    schedule_type=p.get("schedule_type"),
+                )
+                results.append(vr.to_dict())
+            except Exception as exc:
+                logger.warning(
+                    "drug_safety_review_failed_one",
+                    medication=p.get("medication_name"),
+                    error=str(exc)[:200],
+                )
+                results.append({
+                    "ok": False,
+                    "severity": "warning",
+                    "principle_active": None,
+                    "limit_found": False,
+                    "issues": [{
+                        "severity": "warning",
+                        "code": "evaluation_error",
+                        "message": (
+                            f"Não consegui avaliar '{p.get('medication_name')}' "
+                            f"agora. Recomendo revisão clínica."
+                        ),
+                        "detail": {"input": p, "error": str(exc)[:120]},
+                    }],
+                })
 
-        # Beers flags (pra cada drug recognized)
-        beers = []
-        for d in recognized:
-            flags = self.check_beers_for_drug(
-                d["id"], patient_age=patient_age, conditions=conditions,
-            )
-            for f in flags:
-                beers.append({"drug_name": d["generic_name"], **f})
+        # Cascatas só fazem sentido com paciente identificado
+        cascades = []
+        patient_id = (patient or {}).get("id")
+        if patient_id:
+            try:
+                cascade_result = cascade_detector.detect_cascades(str(patient_id))
+                if cascade_result.get("ok"):
+                    cascades = cascade_result.get("cascades_detected") or []
+            except Exception as exc:
+                logger.warning(
+                    "drug_safety_cascades_failed",
+                    patient_id=patient_id, error=str(exc)[:200],
+                )
 
-        # Interactions (entre os drugs recognized)
-        interactions = self.check_interactions([d["id"] for d in recognized])
-
-        # Severity bookkeeping
-        has_high = (
-            any(f["severity"] == "high" for f in beers)
-            or any(i["severity"] in ("contraindicated", "major") for i in interactions)
-        )
-        # Sempre precisa review humano em MVP — flag forte
+        # Severidade máxima agregada
+        max_sev = self._max_severity_overall(results, cascades)
+        has_block_or_strong = max_sev in ("block", "warning_strong")
+        # Política conservadora: SEMPRE escalar se tem cascade major+ ou
+        # qualquer issue >= warning_strong em prescription nova
         requires_review = (
-            has_high
-            or len(gaps) > 0  # gap = drug desconhecido = precisa humano
-            or any(d.get("requires_clinical_review") for d in recognized)
+            has_block_or_strong
+            or any(c.get("severity") in ("contraindicated", "major") for c in cascades)
         )
 
         return {
-            "recognized": recognized,
-            "gaps": gaps,
-            "beers_flags": beers,
-            "interactions": interactions,
-            "has_high_severity": has_high,
+            "results": results,
+            "cascades": cascades,
+            "max_severity": max_sev,
+            "has_block_or_strong": has_block_or_strong,
             "requires_human_review": requires_review,
+            "meta": {
+                "prescriptions_evaluated": len(results),
+                "cascades_detected": len(cascades),
+                "patient_id": patient_id,
+            },
         }
+
+    # ───────────────────────────────────────────────────────────
+    # 3. Cascatas pra paciente em tratamento (delega 100%)
+    # ───────────────────────────────────────────────────────────
+
+    def detect_cascades_for_patient(self, patient_id: str) -> dict:
+        """Detecta cascatas de prescrição pro paciente.
+
+        Equivalente direto a cascade_detector.detect_cascades(patient_id).
+        Mantido aqui pra Sofia ter API uniforme (1 service em vez de 2).
+
+        Returns:
+            dict com cascades_detected, meds_count, etc.
+            Ver cascade_detector.detect_cascades() pra schema completo.
+        """
+        return cascade_detector.detect_cascades(patient_id)
+
+    # ───────────────────────────────────────────────────────────
+    # Helpers internos
+    # ───────────────────────────────────────────────────────────
+
+    _SEV_RANK = {
+        None: -1,
+        "info": 0,
+        "warning": 1,
+        "warning_strong": 2,
+        "block": 3,
+    }
+    _CASCADE_SEV_RANK = {
+        None: -1,
+        "minor": 0,
+        "moderate": 1,
+        "major": 2,
+        "contraindicated": 3,
+    }
+
+    def _max_severity_overall(
+        self,
+        results: list[dict],
+        cascades: list[dict],
+    ) -> Optional[str]:
+        """Severidade máxima entre todos os issues + cascatas.
+
+        Retorna em escala dose_validator (block > warning_strong > warning > info)
+        — mapeia cascade severity pra esse domínio:
+          contraindicated → block
+          major           → warning_strong
+          moderate        → warning
+          minor           → info
+        """
+        max_rank = -1
+        max_sev = None
+        for r in results:
+            for issue in r.get("issues", []) or []:
+                rank = self._SEV_RANK.get(issue.get("severity"), -1)
+                if rank > max_rank:
+                    max_rank = rank
+                    max_sev = issue.get("severity")
+        for c in cascades:
+            csev = c.get("severity")
+            mapped = {
+                "contraindicated": "block",
+                "major": "warning_strong",
+                "moderate": "warning",
+                "minor": "info",
+            }.get(csev)
+            if mapped:
+                rank = self._SEV_RANK.get(mapped, -1)
+                if rank > max_rank:
+                    max_rank = rank
+                    max_sev = mapped
+        return max_sev
 
 
 _instance: Optional[DrugSafetyService] = None
