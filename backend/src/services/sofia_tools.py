@@ -552,12 +552,26 @@ def register_caregiver_report(
         )
 
     needs_attention = severity in ("attention", "urgent")
+    # `classification` no schema = criticalidade clínica (CHECK:
+    # routine|attention|urgent|critical), NÃO é tipo de relato.
+    # Map severity → classification:
+    #   severity=info     → classification='routine'
+    #   severity=attention→ classification='attention'
+    #   severity=urgent   → classification='urgent'
+    classification = (
+        "routine" if severity == "info"
+        else severity  # 'attention' ou 'urgent' batem direto
+    )
+    # report_type vai pra metadata (audit) e extracted_entities
+    # (painel mostra)
     metadata_blob = {
         "report_type": report_type,
         "severity": severity,
         "source_channel": "whatsapp",
         "trace_id": trace_id,
     }
+    extracted_blob = dict(details or {})
+    extracted_blob.setdefault("report_type", report_type)
 
     db = get_postgres()
     try:
@@ -573,8 +587,8 @@ def register_caregiver_report(
             RETURNING id::text AS id""",
             (
                 tenant_id, caregiver_id, caregiver_phone, patient_id,
-                summary[:5000], report_type,
-                json.dumps(details or {}),
+                summary[:5000], classification,
+                json.dumps(extracted_blob),
                 needs_attention,
                 json.dumps(metadata_blob),
             ),
