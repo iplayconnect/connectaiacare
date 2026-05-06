@@ -33,7 +33,8 @@ export type Role =
   | "familia"
   | "parceiro"
   | "paciente_b2c"
-  | "clinical_reviewer";
+  | "clinical_reviewer"
+  | "comercial";
 
 export type AuthUser = {
   id: string;

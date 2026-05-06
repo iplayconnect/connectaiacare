@@ -25,6 +25,9 @@ import {
   Building2,
   HeartHandshake,
   ServerCog,
+  KanbanSquare,
+  Calendar,
+  Package,
 } from "lucide-react";
 
 import { useAuth } from "@/context/auth-context";
@@ -203,9 +206,31 @@ const NAV_ITEMS: NavItem[] = [
   },
   {
     href: "/admin/system/operations/leads",
-    label: "Leads · Funil",
+    label: "Leads · Lista (legado)",
     icon: Sparkles,
     roles: ["super_admin", "admin_tenant"],
+    group: "system",
+  },
+  // ─── Phase D Comercial — funil completo ───
+  {
+    href: "/admin/system/operations/comercial/funil",
+    label: "Comercial · Funil (kanban)",
+    icon: KanbanSquare,
+    roles: ["super_admin", "admin_tenant", "comercial"],
+    group: "system",
+  },
+  {
+    href: "/admin/system/operations/comercial/agenda",
+    label: "Comercial · Agenda",
+    icon: Calendar,
+    roles: ["super_admin", "admin_tenant", "comercial"],
+    group: "system",
+  },
+  {
+    href: "/admin/system/operations/comercial/planos",
+    label: "Comercial · Planos",
+    icon: Package,
+    roles: ["super_admin", "admin_tenant", "comercial"],
     group: "system",
   },
   {
