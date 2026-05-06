@@ -453,11 +453,18 @@ _LOCAL_TOOLS = {
     "dial_phone": "_tool_dial_phone",
     # Phase C v2.x — unificação canal: drug safety review canônico
     # delegado pro backend api:5055/api/internal/drug-safety/review.
-    # Mesma fonte que CareSofiaAgent no WhatsApp (DrugSafetyService
-    # → 11 checks dose_validator + cascade_detector). Substitui as
-    # 3 tools antigas (query_drug_rules + check_drug_interaction +
-    # check_medication_safety) que ficam como aliases delegando aqui.
     "safety_review_prescriptions": "_tool_safety_review_prescriptions",
+    # Phase D Comercial — 8 tools delegam pro backend HTTP via
+    # _call_commercial_backend. Mesmo wrapper que CareSofiaAgent
+    # no WhatsApp usa.
+    "query_plans": "_tool_query_plans",
+    "schedule_demo_with_calendar": "_tool_schedule_demo_with_calendar",
+    "schedule_callback_call": "_tool_schedule_callback_call",
+    "register_lead_activity": "_tool_register_lead_activity",
+    "send_proposal": "_tool_send_proposal",
+    "get_lead_status": "_tool_get_lead_status",
+    "update_lead_qualification": "_tool_update_lead_qualification",
+    "capture_lead": "_tool_capture_lead",
 }
 
 # Tools que delegamos via HTTP pro sofia-service (motor de cruzamentos
@@ -1090,34 +1097,9 @@ def _tool_safety_review_prescriptions(
     **_: Any,
 ) -> dict:
     """Avalia prescrição(ões) contra knowledge graph farmacológico
-    (142 drugs, 93 interações, dose limits, ACB, fall risk, renal/
-    hepatic, cascatas) via DrugSafetyService no backend.
-
-    Sincroniza com o que CareSofiaAgent usa no WhatsApp — mesmo
-    wrapper, mesmas regras, mesmo output. UMA fonte de verdade pra
-    Sofia em qualquer canal (WhatsApp/Voice/VoIP).
-
-    Substitui (deprecando gradualmente) as 3 tools antigas:
-      - query_drug_rules
-      - check_drug_interaction
-      - check_medication_safety
-    Que continuam funcionando via _execute_remote_tool antigo, mas
-    novas conversas devem usar safety_review_prescriptions.
-
-    Args:
-        persona_ctx: contexto da ligação (tenant_id, patient_id default).
-        prescriptions: lista de {medication_name, dose, times_of_day, route}.
-            dose pode vir como "não informado" — pipeline ainda dispara
-            Beers/STOPP/interactions (fix dose-independent).
-        patient_id: UUID. Se omitido, tenta usar persona_ctx.patient_id.
-
-    Returns:
-        dict com:
-          ok: bool
-          review: {results, cascades, max_severity, requires_human_review, meta}
-          _message_for_sofia: instrução pra Sofia processar o resultado
-          _disclaimer: clinical disclaimer
-    """
+    via DrugSafetyService no backend. Substitui (deprecando) as 3
+    tools antigas (query_drug_rules + check_drug_interaction +
+    check_medication_safety)."""
     if not prescriptions or not isinstance(prescriptions, list):
         return {
             "ok": False, "error": "prescriptions_required_list",
@@ -1127,7 +1109,6 @@ def _tool_safety_review_prescriptions(
             ),
         }
 
-    # patient_id: arg explícito vence; senão usa persona_ctx.patient_id
     pid = patient_id or (persona_ctx or {}).get("patient_id")
     tenant_id = (persona_ctx or {}).get("tenant_id") or "connectaiacare_demo"
     trace_id = (persona_ctx or {}).get("session_id") or (persona_ctx or {}).get("trace_id")
@@ -1138,7 +1119,6 @@ def _tool_safety_review_prescriptions(
         "tenant_id": tenant_id,
         "trace_id": trace_id,
     }
-
     headers = {"Content-Type": "application/json"}
     import os as _os
     internal_key = _os.getenv("SOFIA_INTERNAL_KEY", "")
@@ -1168,8 +1148,6 @@ def _tool_safety_review_prescriptions(
             }
         body = r.json() or {}
         review = body.get("review") or {}
-
-        # Mensagem orientativa pra Sofia narrar de acordo com severity
         max_sev = review.get("max_severity") or "info"
         requires_review = bool(review.get("requires_human_review"))
         if requires_review or max_sev in ("block", "warning_strong"):
@@ -1189,7 +1167,6 @@ def _tool_safety_review_prescriptions(
                 "Sistema farmacológico não identificou problema crítico. "
                 "Pode prosseguir com cuidado normal."
             )
-
         return {
             "ok": True,
             "review": review,
@@ -1208,3 +1185,141 @@ def _tool_safety_review_prescriptions(
                 "pedir o time clínico revisar manualmente."
             ),
         }
+
+
+# ─────────────────────────────────────────────────────────────────
+# Phase D Comercial — proxy genérico pras 8 tools comerciais.
+# Cada handler abaixo é wrapper fino que delega via HTTP pro backend
+# /api/internal/commercial/execute-tool. Backend tem a lógica completa
+# (idempotência, audit, persistência cross-tabela).
+# ─────────────────────────────────────────────────────────────────
+
+def _call_commercial_backend(
+    tool_name: str, args: dict, persona_ctx: dict,
+) -> dict:
+    """Chama endpoint backend pra executar tool comercial.
+
+    Best-effort — falha retorna dict com ok=False + _message_for_sofia
+    pra modelo orientar resposta ao user.
+    """
+    import os as _os
+    payload = {
+        "tool_name": tool_name,
+        "args": args or {},
+        "tenant_id": (persona_ctx or {}).get("tenant_id"),
+        "trace_id": (persona_ctx or {}).get("session_id")
+                    or (persona_ctx or {}).get("trace_id"),
+    }
+    headers = {"Content-Type": "application/json"}
+    internal_key = _os.getenv("SOFIA_INTERNAL_KEY", "")
+    if internal_key:
+        headers["X-Internal-Key"] = internal_key
+
+    try:
+        import httpx
+        url = f"{Config.BACKEND_API_URL}/api/internal/commercial/execute-tool"
+        r = httpx.post(url, json=payload, headers=headers, timeout=8.0)
+        if r.status_code == 401:
+            return {
+                "ok": False, "error": "internal_auth_failed",
+                "_message_for_sofia": (
+                    "Tive problema técnico interno acessando o sistema. "
+                    "Vou pedir o time humano olhar."
+                ),
+            }
+        if r.status_code != 200:
+            return {
+                "ok": False, "error": f"commercial_http_{r.status_code}",
+                "body": r.text[:300],
+                "_message_for_sofia": (
+                    "Tive uma demora técnica. Posso tentar de novo ou "
+                    "passar pra atendente humano?"
+                ),
+            }
+        body = r.json() or {}
+        result = body.get("result") or {}
+        out = {
+            "ok": result.get("ok", False),
+            **(result.get("data") or {}),
+        }
+        if result.get("error"):
+            out["error"] = result["error"]
+        if result.get("idempotent_skip"):
+            out["idempotent_skip"] = True
+        return out
+    except Exception as exc:
+        logger.exception("commercial_backend_call_failed tool=%s", tool_name)
+        return {
+            "ok": False, "error": "commercial_unreachable",
+            "detail": str(exc)[:200],
+            "_message_for_sofia": (
+                "Tive problema técnico. Vou pedir o time humano olhar."
+            ),
+        }
+
+
+def _tool_query_plans(*, persona_ctx: dict, **args: Any) -> dict:
+    """Sofia consulta planos disponíveis pra apresentar ao lead."""
+    return _call_commercial_backend("query_plans", args, persona_ctx)
+
+
+def _tool_schedule_demo_with_calendar(*, persona_ctx: dict, **args: Any) -> dict:
+    """Sofia agenda demo COM data/hora explícita (não placeholder)."""
+    if "phone" not in args:
+        args["phone"] = (persona_ctx or {}).get("phone")
+    return _call_commercial_backend(
+        "schedule_demo_with_calendar", args, persona_ctx,
+    )
+
+
+def _tool_schedule_callback_call(*, persona_ctx: dict, **args: Any) -> dict:
+    """Sofia agenda ligação de retorno."""
+    if "phone" not in args:
+        args["phone"] = (persona_ctx or {}).get("phone")
+    return _call_commercial_backend(
+        "schedule_callback_call", args, persona_ctx,
+    )
+
+
+def _tool_register_lead_activity(*, persona_ctx: dict, **args: Any) -> dict:
+    """Sofia anota observação no timeline do lead."""
+    if "phone" not in args:
+        args["phone"] = (persona_ctx or {}).get("phone")
+    return _call_commercial_backend(
+        "register_lead_activity", args, persona_ctx,
+    )
+
+
+def _tool_send_proposal(*, persona_ctx: dict, **args: Any) -> dict:
+    """Sofia registra envio de proposta (com plano + valor + validade)."""
+    if "phone" not in args:
+        args["phone"] = (persona_ctx or {}).get("phone")
+    return _call_commercial_backend("send_proposal", args, persona_ctx)
+
+
+def _tool_get_lead_status(*, persona_ctx: dict, **args: Any) -> dict:
+    """Sofia consulta status atual do lead pelo phone."""
+    if "phone" not in args:
+        args["phone"] = (persona_ctx or {}).get("phone")
+    return _call_commercial_backend("get_lead_status", args, persona_ctx)
+
+
+def _tool_update_lead_qualification(*, persona_ctx: dict, **args: Any) -> dict:
+    """Sofia atualiza score de qualificação baseado em sinais."""
+    if "phone" not in args:
+        args["phone"] = (persona_ctx or {}).get("phone")
+    return _call_commercial_backend(
+        "update_lead_qualification", args, persona_ctx,
+    )
+
+
+def _tool_capture_lead(*, persona_ctx: dict, **args: Any) -> dict:
+    """Sofia captura lead novo (cria/atualiza row em aia_health_leads).
+
+    Voice-call-service NÃO tinha capture_lead antes — Sofia VoIP
+    recebia ligações comerciais e não tinha onde gravar. Phase D
+    Comercial fecha esse gap.
+    """
+    if "phone" not in args:
+        args["phone"] = (persona_ctx or {}).get("phone")
+    return _call_commercial_backend("capture_lead", args, persona_ctx)

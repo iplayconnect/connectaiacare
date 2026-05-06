@@ -260,6 +260,175 @@ COMMERCIAL_TOOLS_SCHEMA: list[dict] = [
             "required": ["phone", "reason", "summary", "urgency"],
         },
     },
+    # ─── Phase D Comercial — funil completo (migration 068) ────────
+    {
+        "name": "query_plans",
+        "description": (
+            "Consulta o catálogo de planos vendáveis. USE quando lead "
+            "pergunta 'quanto custa', 'quais planos têm', 'tem opção mais "
+            "barata'. Retorna sku/name/preço/features/pitch_short. Filtra "
+            "por target_persona se passado (individual/familia/ilpi/"
+            "clinica/hospital)."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "target_persona": {
+                    "type": "string",
+                    "enum": ["individual", "familia", "ilpi", "clinica",
+                             "hospital", "parceiro"],
+                },
+            },
+        },
+    },
+    {
+        "name": "schedule_demo_with_calendar",
+        "description": (
+            "Agenda demo COM data/hora explícita. Use quando lead aceita "
+            "demo e dá horário específico. Cria row em lead_demos. "
+            "Idempotente por (lead, dia). PREFIRA esta sobre schedule_demo "
+            "(que é placeholder antigo)."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "phone": {"type": "string"},
+                "scheduled_at": {
+                    "type": "string",
+                    "description": "ISO 8601 com timezone, ex: '2026-05-09T14:00:00-03:00'",
+                },
+                "duration_minutes": {"type": "integer"},
+                "full_name": {"type": "string"},
+                "organization": {"type": "string"},
+                "plan_focus_sku": {
+                    "type": "string",
+                    "description": "SKU do plano focal (de query_plans)",
+                },
+                "notes": {"type": "string"},
+            },
+            "required": ["phone", "scheduled_at"],
+        },
+    },
+    {
+        "name": "schedule_callback_call",
+        "description": (
+            "Agenda ligação de retorno. Use quando lead diz 'me liga depois', "
+            "'amanhã às 14h tô livre'. Cria row em lead_calls. "
+            "Time comercial vê em /comercial/agenda."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "phone": {"type": "string"},
+                "scheduled_at": {"type": "string"},
+                "call_type": {
+                    "type": "string",
+                    "enum": ["discovery", "follow_up", "callback", "proposal",
+                             "closing", "qualification"],
+                },
+                "full_name": {"type": "string"},
+                "notes": {"type": "string"},
+            },
+            "required": ["phone", "scheduled_at"],
+        },
+    },
+    {
+        "name": "register_lead_activity",
+        "description": (
+            "Anota observação no timeline do lead. Use pra capturar sinais "
+            "que NÃO disparam outras tools: objeção levantada, sentimento, "
+            "preferência de canal, indicação de orçamento/decisor. "
+            "Aparece na UI /comercial/leads/<id>."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "phone": {"type": "string"},
+                "activity_type": {
+                    "type": "string",
+                    "enum": ["note_added", "qualification_signal",
+                             "objection_raised", "positive_feedback",
+                             "concern_raised"],
+                },
+                "summary": {"type": "string"},
+                "importance": {
+                    "type": "string",
+                    "enum": ["minor", "normal", "important", "critical"],
+                },
+            },
+            "required": ["phone", "activity_type", "summary"],
+        },
+    },
+    {
+        "name": "send_proposal",
+        "description": (
+            "Registra envio de proposta com plano + valor + validade. "
+            "Use APÓS lead confirmar interesse. Cria row em lead_proposals "
+            "+ atualiza lead.status='proposal_sent'. Idempotente por "
+            "(lead, plano)."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "phone": {"type": "string"},
+                "plan_sku": {
+                    "type": "string",
+                    "description": "SKU do plano (obtenha via query_plans)",
+                },
+                "custom_price_monthly_cents": {"type": "integer"},
+                "discount_percent": {"type": "number"},
+                "valid_until": {
+                    "type": "string",
+                    "description": "Data ISO YYYY-MM-DD",
+                },
+                "sent_via": {
+                    "type": "string",
+                    "enum": ["email", "whatsapp", "in_demo", "voice_call"],
+                },
+                "notes": {"type": "string"},
+            },
+            "required": ["phone", "plan_sku"],
+        },
+    },
+    {
+        "name": "get_lead_status",
+        "description": (
+            "Consulta status atual do lead pelo phone. USE NO INÍCIO da "
+            "sessão se quiser saber se ele já é lead conhecido (com demo "
+            "agendada, proposta ativa, etc.) — você continua de onde "
+            "parou em vez de começar do zero."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "phone": {"type": "string"},
+            },
+            "required": ["phone"],
+        },
+    },
+    {
+        "name": "update_lead_qualification",
+        "description": (
+            "Atualiza score de qualificação (0-100). Heurística: "
+            "0-30 frio (curiosidade); 30-60 morno (interesse); "
+            "60-80 quente (orçamento+urgência+decisor); 80+ pronto pra "
+            "fechar. Pode também avançar status (qualified/lost/etc)."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "phone": {"type": "string"},
+                "qualification_score": {"type": "integer"},
+                "new_status": {
+                    "type": "string",
+                    "enum": ["new", "qualified", "demo_scheduled", "in_demo",
+                             "proposal_sent", "converted", "lost"],
+                },
+                "reason": {"type": "string"},
+            },
+            "required": ["phone", "qualification_score"],
+        },
+    },
 ]
 
 
@@ -394,9 +563,20 @@ class CommercialSofiaAgent(BaseSofiaAgent):
 
     def allowed_tools(self, ctx: AgentContext) -> list[str]:
         return [
+            # Legado (Phase C v1) — capture_lead aqui é o original em
+            # sofia_tools.py que cria/atualiza row em aia_health_leads.
+            # Continua funcionando pra Sofia gravar nome/intent/etc.
             "capture_lead",
-            "schedule_demo",
+            "schedule_demo",                # placeholder genérico, mantido pra compat
             "escalate_to_human_whatsapp",
+            # Phase D Comercial (migration 068) — funil completo
+            "query_plans",
+            "schedule_demo_with_calendar",
+            "schedule_callback_call",
+            "register_lead_activity",
+            "send_proposal",
+            "get_lead_status",
+            "update_lead_qualification",
         ]
 
     def process(self, ctx: AgentContext) -> AgentResponse:

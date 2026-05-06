@@ -746,18 +746,796 @@ def escalate_to_human_clinical(
 
 
 # ──────────────────────────────────────────────────────────────────
+# Commercial funnel tools (migration 068) — Sofia comercial completa
+#
+# Ferramentas pra Sofia conduzir lead do primeiro contato até a venda:
+# consultar planos, agendar demo com data/hora, agendar ligação de
+# retorno, registrar atividade no timeline, enviar proposta, consultar
+# status, atualizar score de qualificação.
+#
+# Todas operam sobre as 5 tabelas da migration 068 + aia_health_leads
+# (migration 061). Idempotência onde faz sentido (avoid duplicate demo
+# scheduling pro mesmo dia, avoid duplicate proposal pra mesmo plano).
+# ──────────────────────────────────────────────────────────────────
+
+
+def query_plans(
+    *,
+    target_persona: Optional[str] = None,
+    public_only: bool = True,
+    tenant_id: Optional[str] = None,
+    trace_id: Optional[str] = None,
+) -> ToolResult:
+    """Consulta catálogo de planos pra Sofia apresentar a leads.
+
+    Args:
+        target_persona: filtro 'individual'|'familia'|'ilpi'|'clinica'|
+            'hospital'|'parceiro'. Se None, retorna todos ativos.
+        public_only: só planos publicáveis (default True). super_admin
+            pode passar False pra ver enterprise não-públicos.
+
+    Returns:
+        ToolResult.data com:
+          plans: [{sku, name, target_persona, target_segment,
+                   price_monthly_cents, price_setup_cents, currency,
+                   billing_period, max_patients, max_caregivers,
+                   max_messages_month, max_voice_minutes_month,
+                   features, pitch_short, pitch_full, differentials}]
+          count: int
+    """
+    db = get_postgres()
+    where = ["active = TRUE"]
+    params: list = []
+    if public_only:
+        where.append("public = TRUE")
+    if target_persona:
+        where.append("target_persona = %s")
+        params.append(target_persona)
+
+    try:
+        rows = db.fetch_all(
+            f"""SELECT id::text AS id, sku, name, target_persona, target_segment,
+                       price_monthly_cents, price_setup_cents, currency,
+                       billing_period, max_patients, max_caregivers,
+                       max_messages_month, max_voice_minutes_month,
+                       features, pitch_short, pitch_full, differentials,
+                       active, public
+                FROM aia_health_plans
+                WHERE {' AND '.join(where)}
+                ORDER BY price_monthly_cents NULLS LAST, name""",
+            tuple(params),
+        )
+        return ToolResult(ok=True, data={
+            "plans": rows,
+            "count": len(rows),
+        })
+    except Exception as exc:
+        logger.exception("query_plans_failed", trace_id=trace_id)
+        return ToolResult(ok=False, data={}, error=str(exc)[:200])
+
+
+def schedule_demo_with_calendar(
+    *,
+    phone: str,
+    scheduled_at: str,                  # ISO 8601 com timezone (ex: '2026-05-08T14:00:00-03:00')
+    duration_minutes: int = 30,
+    full_name: Optional[str] = None,
+    organization: Optional[str] = None,
+    plan_focus_sku: Optional[str] = None,
+    notes: Optional[str] = None,
+    meeting_provider: str = "connectalive",
+    timezone: str = "America/Sao_Paulo",
+    tenant_id: Optional[str] = None,
+    trace_id: Optional[str] = None,
+) -> ToolResult:
+    """Agenda demo COM data/hora. Substitui schedule_demo placeholder
+    (que só setava status sem horário real).
+
+    - Garante que existe lead (cria minimal se phone não bate)
+    - Cria row em aia_health_lead_demos com scheduled_at + duration
+    - Atualiza lead.status='demo_scheduled' + demo_scheduled_at
+    - Idempotência: 1 demo por (lead, mesmo dia) — evita Sofia agendar
+      2x se LLM repetir tool call
+
+    Phase D futuro: integrar com Google Calendar API pra criar evento
+    real + invite pro lead. Hoje cria placeholder no DB e time humano
+    confirma + manda link real.
+    """
+    if not phone or not scheduled_at:
+        return ToolResult(
+            ok=False, data={}, error="phone_and_scheduled_at_required",
+        )
+
+    db = get_postgres()
+    try:
+        # Resolve plan_id se SKU passada
+        plan_id = None
+        if plan_focus_sku:
+            row = db.fetch_one(
+                "SELECT id::text AS id FROM aia_health_plans WHERE sku = %s AND active = TRUE",
+                (plan_focus_sku,),
+            )
+            if row:
+                plan_id = row["id"]
+
+        # Garante lead
+        existing = db.fetch_one(
+            """SELECT id::text AS id FROM aia_health_leads
+               WHERE phone = %s AND created_at > NOW() - INTERVAL '90 days'
+               ORDER BY created_at DESC LIMIT 1""",
+            (phone,),
+        )
+        if existing:
+            lead_id = existing["id"]
+            db.execute(
+                """UPDATE aia_health_leads
+                      SET status = 'demo_scheduled',
+                          demo_scheduled_at = %s::timestamptz,
+                          full_name = COALESCE(%s, full_name),
+                          organization = COALESCE(%s, organization),
+                          last_contact_at = NOW(),
+                          updated_at = NOW()
+                    WHERE id = %s""",
+                (scheduled_at, full_name, organization, lead_id),
+            )
+        else:
+            row = db.insert_returning(
+                """INSERT INTO aia_health_leads (
+                    phone, full_name, organization, intent,
+                    source_channel, status, demo_scheduled_at,
+                    last_contact_at
+                ) VALUES (%s, %s, %s, 'agendar_demo', 'whatsapp',
+                          'demo_scheduled', %s::timestamptz, NOW())
+                RETURNING id::text AS id""",
+                (phone, full_name, organization, scheduled_at),
+            )
+            lead_id = row["id"] if row else None
+
+        if not lead_id:
+            return ToolResult(
+                ok=False, data={}, error="failed_to_create_or_find_lead",
+            )
+
+        # Idempotência: já tem demo scheduled na MESMA data pra esse lead?
+        same_day = db.fetch_one(
+            """SELECT id::text AS id FROM aia_health_lead_demos
+               WHERE lead_id = %s
+                 AND scheduled_at::date = %s::timestamptz::date
+                 AND status IN ('scheduled', 'confirmed')""",
+            (lead_id, scheduled_at),
+        )
+        if same_day:
+            logger.info(
+                "schedule_demo_idempotent_skip_same_day",
+                lead_id=lead_id, trace_id=trace_id,
+            )
+            return ToolResult(
+                ok=True, data={
+                    "lead_id": lead_id,
+                    "demo_id": same_day["id"],
+                    "scheduled_at": scheduled_at,
+                    "message_for_sofia": (
+                        "Já tinha uma demo agendada pra esse mesmo dia. "
+                        "Confirme com o lead que mantemos esse horário, "
+                        "e o time humano vai confirmar o link em até 24h."
+                    ),
+                },
+                idempotent_skip=True,
+            )
+
+        # Cria demo
+        demo_row = db.insert_returning(
+            """INSERT INTO aia_health_lead_demos (
+                lead_id, scheduled_by_actor, scheduled_at,
+                duration_minutes, timezone, meeting_provider,
+                plan_focus_id, notes, status
+            ) VALUES (%s, 'sofia', %s::timestamptz, %s, %s, %s,
+                      %s, %s, 'scheduled')
+            RETURNING id::text AS id""",
+            (lead_id, scheduled_at, duration_minutes, timezone,
+             meeting_provider, plan_id, notes),
+        )
+        demo_id = demo_row["id"] if demo_row else None
+
+        # Activity timeline
+        db.execute(
+            """INSERT INTO aia_health_lead_activities (
+                lead_id, activity_type, actor_type, actor_name,
+                summary, details, related_demo_id, importance
+            ) VALUES (%s, 'demo_scheduled', 'sofia',
+                      'Sofia (capture_lead)', %s,
+                      %s::jsonb, %s, 'important')""",
+            (
+                lead_id,
+                f"Demo agendada pra {scheduled_at} ({duration_minutes}min, {meeting_provider})",
+                json.dumps({
+                    "scheduled_at": scheduled_at,
+                    "duration_minutes": duration_minutes,
+                    "plan_focus_sku": plan_focus_sku,
+                    "notes": notes,
+                }),
+                demo_id,
+            ),
+        )
+
+        write_audit(
+            action="demo_scheduled_with_calendar",
+            actor="sofia",
+            tenant_id=tenant_id,
+            trace_id=trace_id,
+            resource_type="lead_demo",
+            resource_id=demo_id,
+            payload={
+                "lead_id": lead_id,
+                "scheduled_at": scheduled_at,
+                "plan_focus_sku": plan_focus_sku,
+            },
+        )
+        return ToolResult(ok=True, data={
+            "lead_id": lead_id,
+            "demo_id": demo_id,
+            "scheduled_at": scheduled_at,
+            "duration_minutes": duration_minutes,
+            "message_for_sofia": (
+                f"Demo agendada pra {scheduled_at} ({duration_minutes}min). "
+                "Avise o lead que vai receber confirmação por WhatsApp/email "
+                "em até 24h com o link da reunião."
+            ),
+        })
+    except Exception as exc:
+        logger.exception(
+            "schedule_demo_with_calendar_failed", trace_id=trace_id,
+        )
+        return ToolResult(ok=False, data={}, error=str(exc)[:200])
+
+
+def schedule_callback_call(
+    *,
+    phone: str,
+    scheduled_at: str,                  # ISO 8601
+    call_type: str = "follow_up",
+    full_name: Optional[str] = None,
+    notes: Optional[str] = None,
+    tenant_id: Optional[str] = None,
+    trace_id: Optional[str] = None,
+) -> ToolResult:
+    """Agenda ligação de retorno. Quando lead pede 'me liga depois' ou
+    Sofia decide que precisa follow-up — cria row em lead_calls com
+    next_action_at preenchido, sem outcome ainda (será preenchido
+    quando ligação rolar).
+
+    auto_dialer/comercial humano lê /api/admin/leads/calls/upcoming pra
+    saber o que ligar.
+
+    Idempotência: 1 callback agendado por (lead, dia).
+    """
+    if not phone or not scheduled_at:
+        return ToolResult(
+            ok=False, data={}, error="phone_and_scheduled_at_required",
+        )
+    valid_types = (
+        "discovery", "follow_up", "callback", "proposal", "closing",
+        "support", "qualification",
+    )
+    if call_type not in valid_types:
+        call_type = "follow_up"
+
+    db = get_postgres()
+    try:
+        existing = db.fetch_one(
+            """SELECT id::text AS id FROM aia_health_leads
+               WHERE phone = %s AND created_at > NOW() - INTERVAL '90 days'
+               ORDER BY created_at DESC LIMIT 1""",
+            (phone,),
+        )
+        if not existing:
+            row = db.insert_returning(
+                """INSERT INTO aia_health_leads (
+                    phone, full_name, intent, source_channel, status,
+                    last_contact_at
+                ) VALUES (%s, %s, 'duvida_geral', 'whatsapp',
+                          'qualified', NOW())
+                RETURNING id::text AS id""",
+                (phone, full_name),
+            )
+            lead_id = row["id"] if row else None
+        else:
+            lead_id = existing["id"]
+
+        if not lead_id:
+            return ToolResult(
+                ok=False, data={}, error="lead_not_resolved",
+            )
+
+        # Idempotência por dia + tipo
+        same_day = db.fetch_one(
+            """SELECT id::text AS id FROM aia_health_lead_calls
+               WHERE lead_id = %s
+                 AND next_action_at::date = %s::timestamptz::date
+                 AND call_type = %s
+                 AND outcome IS NULL""",
+            (lead_id, scheduled_at, call_type),
+        )
+        if same_day:
+            return ToolResult(
+                ok=True, data={
+                    "lead_id": lead_id,
+                    "call_id": same_day["id"],
+                    "message_for_sofia": "Já tem callback agendado pra esse dia.",
+                },
+                idempotent_skip=True,
+            )
+
+        call_row = db.insert_returning(
+            """INSERT INTO aia_health_lead_calls (
+                lead_id, direction, called_by_actor,
+                started_at, call_type,
+                summary, next_action, next_action_at
+            ) VALUES (%s, 'outbound', 'auto_dialer',
+                      NOW(), %s,
+                      'Callback agendado pelo Sofia',
+                      %s, %s::timestamptz)
+            RETURNING id::text AS id""",
+            (lead_id, call_type, call_type, scheduled_at),
+        )
+        call_id = call_row["id"] if call_row else None
+
+        db.execute(
+            """INSERT INTO aia_health_lead_activities (
+                lead_id, activity_type, actor_type, actor_name,
+                summary, details, related_call_id, importance
+            ) VALUES (%s, 'callback_scheduled', 'sofia',
+                      'Sofia', %s, %s::jsonb, %s, 'normal')""",
+            (
+                lead_id,
+                f"Callback agendado pra {scheduled_at} ({call_type})",
+                json.dumps({"scheduled_at": scheduled_at, "type": call_type, "notes": notes}),
+                call_id,
+            ),
+        )
+
+        return ToolResult(ok=True, data={
+            "lead_id": lead_id,
+            "call_id": call_id,
+            "scheduled_at": scheduled_at,
+            "message_for_sofia": (
+                f"Callback registrado. Nosso time vai te ligar em "
+                f"{scheduled_at}. Quer que eu mande lembrete por WhatsApp "
+                "uma hora antes?"
+            ),
+        })
+    except Exception as exc:
+        logger.exception("schedule_callback_failed", trace_id=trace_id)
+        return ToolResult(ok=False, data={}, error=str(exc)[:200])
+
+
+def register_lead_activity(
+    *,
+    phone: str,
+    activity_type: str,
+    summary: str,
+    details: Optional[dict] = None,
+    importance: str = "normal",
+    tenant_id: Optional[str] = None,
+    trace_id: Optional[str] = None,
+) -> ToolResult:
+    """Anota observação no timeline do lead. Sofia usa pra registrar
+    pontos relevantes que não disparam outras tools (ex: "lead pediu
+    pra ver caso de uso similar", "mencionou que já avalia outro
+    fornecedor").
+
+    Args:
+        activity_type: 'note_added' (default), 'qualification_signal',
+            'objection_raised', 'positive_feedback', 'concern_raised'
+        importance: 'minor'|'normal'|'important'|'critical'
+    """
+    if not phone or not summary:
+        return ToolResult(
+            ok=False, data={}, error="phone_and_summary_required",
+        )
+    valid_imp = ("minor", "normal", "important", "critical")
+    if importance not in valid_imp:
+        importance = "normal"
+
+    db = get_postgres()
+    try:
+        existing = db.fetch_one(
+            """SELECT id::text AS id FROM aia_health_leads
+               WHERE phone = %s AND created_at > NOW() - INTERVAL '90 days'
+               ORDER BY created_at DESC LIMIT 1""",
+            (phone,),
+        )
+        if not existing:
+            return ToolResult(
+                ok=False, data={}, error="lead_not_found",
+            )
+        lead_id = existing["id"]
+
+        db.execute(
+            """INSERT INTO aia_health_lead_activities (
+                lead_id, activity_type, actor_type, actor_name,
+                summary, details, importance
+            ) VALUES (%s, %s, 'sofia', 'Sofia (note)',
+                      %s, %s::jsonb, %s)""",
+            (
+                lead_id, activity_type, summary[:500],
+                json.dumps(details or {}), importance,
+            ),
+        )
+        # Atualiza last_contact_at
+        db.execute(
+            "UPDATE aia_health_leads SET last_contact_at = NOW() WHERE id = %s",
+            (lead_id,),
+        )
+        return ToolResult(ok=True, data={
+            "lead_id": lead_id,
+            "activity_type": activity_type,
+            "message_for_sofia": "Anotei aqui no histórico do lead.",
+        })
+    except Exception as exc:
+        logger.exception("register_lead_activity_failed", trace_id=trace_id)
+        return ToolResult(ok=False, data={}, error=str(exc)[:200])
+
+
+def send_proposal(
+    *,
+    phone: str,
+    plan_sku: str,
+    custom_price_monthly_cents: Optional[int] = None,
+    custom_price_setup_cents: Optional[int] = None,
+    discount_percent: Optional[float] = None,
+    valid_until: Optional[str] = None,    # ISO date YYYY-MM-DD
+    sent_via: str = "whatsapp",
+    notes: Optional[str] = None,
+    tenant_id: Optional[str] = None,
+    trace_id: Optional[str] = None,
+) -> ToolResult:
+    """Envia proposta comercial. Cria row em aia_health_lead_proposals
+    + atualiza lead.status='proposal_sent' + dispara mensagem WhatsApp
+    pro lead com link da proposta (Phase D: gera PDF; hoje placeholder).
+
+    Idempotência: 1 proposta ativa por (lead, plano) — se tentar enviar
+    de novo o mesmo plano, retorna a existente.
+
+    Phase D futuro:
+      - Gerar PDF via template + dados negociados
+      - Mandar email com PDF anexo
+      - Track abertura via pixel/UTM
+    """
+    if not phone or not plan_sku:
+        return ToolResult(
+            ok=False, data={}, error="phone_and_plan_sku_required",
+        )
+    if sent_via not in ("email", "whatsapp", "in_demo", "voice_call"):
+        sent_via = "whatsapp"
+
+    db = get_postgres()
+    try:
+        # Resolve plan
+        plan = db.fetch_one(
+            """SELECT id::text AS id, name, price_monthly_cents,
+                      price_setup_cents
+               FROM aia_health_plans
+               WHERE sku = %s AND active = TRUE""",
+            (plan_sku,),
+        )
+        if not plan:
+            return ToolResult(
+                ok=False, data={}, error=f"plan_not_found:{plan_sku}",
+            )
+        plan_id = plan["id"]
+
+        existing = db.fetch_one(
+            """SELECT id::text AS id FROM aia_health_leads
+               WHERE phone = %s AND created_at > NOW() - INTERVAL '90 days'
+               ORDER BY created_at DESC LIMIT 1""",
+            (phone,),
+        )
+        if not existing:
+            return ToolResult(
+                ok=False, data={}, error="lead_not_found",
+            )
+        lead_id = existing["id"]
+
+        # Idempotência: já tem proposta ativa pra esse plano?
+        existing_prop = db.fetch_one(
+            """SELECT id::text AS id, status, valid_until
+               FROM aia_health_lead_proposals
+               WHERE lead_id = %s AND plan_id = %s
+                 AND status IN ('sent', 'viewed')
+               ORDER BY sent_at DESC LIMIT 1""",
+            (lead_id, plan_id),
+        )
+        if existing_prop:
+            return ToolResult(
+                ok=True, data={
+                    "lead_id": lead_id,
+                    "proposal_id": existing_prop["id"],
+                    "message_for_sofia": (
+                        "Já tinha proposta enviada pra esse plano. "
+                        "Mantenha contato e confirme se o lead recebeu."
+                    ),
+                },
+                idempotent_skip=True,
+            )
+
+        # Defaults
+        from datetime import date, timedelta
+        if not valid_until:
+            valid_until = (date.today() + timedelta(days=30)).isoformat()
+
+        prop_row = db.insert_returning(
+            """INSERT INTO aia_health_lead_proposals (
+                lead_id, plan_id, sent_by_actor,
+                custom_price_monthly_cents, custom_price_setup_cents,
+                discount_percent, valid_until,
+                sent_via, status
+            ) VALUES (%s, %s, 'sofia', %s, %s, %s, %s::date,
+                      %s, 'sent')
+            RETURNING id::text AS id""",
+            (
+                lead_id, plan_id,
+                custom_price_monthly_cents, custom_price_setup_cents,
+                discount_percent, valid_until,
+                sent_via,
+            ),
+        )
+        proposal_id = prop_row["id"] if prop_row else None
+
+        db.execute(
+            """UPDATE aia_health_leads SET
+                  status = 'proposal_sent',
+                  last_contact_at = NOW(),
+                  updated_at = NOW()
+               WHERE id = %s""",
+            (lead_id,),
+        )
+
+        db.execute(
+            """INSERT INTO aia_health_lead_activities (
+                lead_id, activity_type, actor_type, actor_name,
+                summary, details, related_proposal_id, importance
+            ) VALUES (%s, 'proposal_sent', 'sofia', 'Sofia',
+                      %s, %s::jsonb, %s, 'important')""",
+            (
+                lead_id,
+                f"Proposta enviada: {plan['name']} (validade {valid_until})",
+                json.dumps({
+                    "plan_sku": plan_sku,
+                    "custom_price_monthly_cents": custom_price_monthly_cents,
+                    "discount_percent": discount_percent,
+                    "valid_until": valid_until,
+                    "notes": notes,
+                }),
+                proposal_id,
+            ),
+        )
+
+        write_audit(
+            action="proposal_sent",
+            actor="sofia",
+            tenant_id=tenant_id,
+            trace_id=trace_id,
+            resource_type="proposal",
+            resource_id=proposal_id,
+            payload={"lead_id": lead_id, "plan_sku": plan_sku},
+        )
+
+        return ToolResult(ok=True, data={
+            "lead_id": lead_id,
+            "proposal_id": proposal_id,
+            "plan_sku": plan_sku,
+            "valid_until": valid_until,
+            "message_for_sofia": (
+                f"Proposta do plano {plan['name']} foi registrada. "
+                "Avise o lead que recebeu, peça pra revisar e dê prazo "
+                f"até {valid_until}. Time comercial vai entrar em contato."
+            ),
+        })
+    except Exception as exc:
+        logger.exception("send_proposal_failed", trace_id=trace_id)
+        return ToolResult(ok=False, data={}, error=str(exc)[:200])
+
+
+def get_lead_status(
+    *,
+    phone: str,
+    tenant_id: Optional[str] = None,
+    trace_id: Optional[str] = None,
+) -> ToolResult:
+    """Consulta status atual do lead pelo phone. Útil pra Sofia saber:
+        - É um lead novo, qualificado, em demo, com proposta?
+        - Tem demo agendada?
+        - Tem proposta pendente?
+    Sem precisar perguntar isso pro lead.
+    """
+    if not phone:
+        return ToolResult(ok=False, data={}, error="phone_required")
+
+    db = get_postgres()
+    try:
+        lead = db.fetch_one(
+            """SELECT id::text AS id, full_name, organization,
+                      role_self_declared, intent, status,
+                      qualification_score, demo_scheduled_at,
+                      converted_to_tenant_id, last_contact_at,
+                      created_at,
+                      jsonb_array_length(COALESCE(notes, '[]'::jsonb)) AS notes_count
+               FROM aia_health_leads
+               WHERE phone = %s AND created_at > NOW() - INTERVAL '180 days'
+               ORDER BY created_at DESC LIMIT 1""",
+            (phone,),
+        )
+        if not lead:
+            return ToolResult(ok=True, data={
+                "found": False,
+                "message_for_sofia": (
+                    "Phone não bate com nenhum lead recente — é um novo "
+                    "contato. Comece capturando nome e contexto."
+                ),
+            })
+
+        # Demo upcoming?
+        upcoming_demo = db.fetch_one(
+            """SELECT id::text AS id, scheduled_at, status, meeting_url
+               FROM aia_health_lead_demos
+               WHERE lead_id = %s AND status IN ('scheduled', 'confirmed')
+                 AND scheduled_at > NOW()
+               ORDER BY scheduled_at ASC LIMIT 1""",
+            (lead["id"],),
+        )
+
+        # Proposta ativa?
+        active_proposal = db.fetch_one(
+            """SELECT p.id::text AS id, p.status, p.valid_until,
+                      pl.sku AS plan_sku, pl.name AS plan_name
+               FROM aia_health_lead_proposals p
+               JOIN aia_health_plans pl ON pl.id = p.plan_id
+               WHERE p.lead_id = %s AND p.status IN ('sent', 'viewed')
+               ORDER BY p.sent_at DESC LIMIT 1""",
+            (lead["id"],),
+        )
+
+        # Última activity
+        last_activity = db.fetch_one(
+            """SELECT activity_type, summary, occurred_at
+               FROM aia_health_lead_activities
+               WHERE lead_id = %s
+               ORDER BY occurred_at DESC LIMIT 1""",
+            (lead["id"],),
+        )
+
+        return ToolResult(ok=True, data={
+            "found": True,
+            "lead": lead,
+            "upcoming_demo": upcoming_demo,
+            "active_proposal": active_proposal,
+            "last_activity": last_activity,
+            "message_for_sofia": (
+                f"Lead em estágio '{lead['status']}' "
+                f"({'com demo agendada' if upcoming_demo else 'sem demo'}, "
+                f"{'proposta ativa' if active_proposal else 'sem proposta'}). "
+                "Use esse contexto pra continuar a conversa de onde parou."
+            ),
+        })
+    except Exception as exc:
+        logger.exception("get_lead_status_failed", trace_id=trace_id)
+        return ToolResult(ok=False, data={}, error=str(exc)[:200])
+
+
+def update_lead_qualification(
+    *,
+    phone: str,
+    qualification_score: int,           # 0-100
+    new_status: Optional[str] = None,   # avança status se especificado
+    reason: Optional[str] = None,
+    tenant_id: Optional[str] = None,
+    trace_id: Optional[str] = None,
+) -> ToolResult:
+    """Sofia atualiza score de qualificação do lead baseado em sinais
+    captados na conversa (orçamento, urgência, decisão de compra,
+    fit do produto).
+
+    Heurística sugerida pra Sofia (orientação no system prompt):
+      - 0-30: lead frio (curiosidade, sem orçamento, sem urgência)
+      - 30-60: lead morno (interesse claro, sem decisão)
+      - 60-80: lead quente (orçamento+urgência+decisor)
+      - 80+: lead pronto pra fechar (pediu proposta/contrato)
+    """
+    if not phone or qualification_score is None:
+        return ToolResult(
+            ok=False, data={}, error="phone_and_score_required",
+        )
+    score = max(0, min(int(qualification_score), 100))
+    valid_statuses = (
+        "new", "qualified", "demo_scheduled", "in_demo",
+        "proposal_sent", "converted", "lost",
+    )
+
+    db = get_postgres()
+    try:
+        existing = db.fetch_one(
+            """SELECT id::text AS id, qualification_score, status
+               FROM aia_health_leads
+               WHERE phone = %s AND created_at > NOW() - INTERVAL '90 days'
+               ORDER BY created_at DESC LIMIT 1""",
+            (phone,),
+        )
+        if not existing:
+            return ToolResult(
+                ok=False, data={}, error="lead_not_found",
+            )
+        lead_id = existing["id"]
+        old_score = existing.get("qualification_score") or 0
+
+        updates = ["qualification_score = %s", "updated_at = NOW()"]
+        params: list = [score]
+
+        if new_status and new_status in valid_statuses:
+            updates.append("status = %s")
+            params.append(new_status)
+            if new_status == "qualified":
+                updates.append("qualified_at = NOW()")
+
+        params.append(lead_id)
+        db.execute(
+            f"UPDATE aia_health_leads SET {', '.join(updates)} WHERE id = %s",
+            tuple(params),
+        )
+
+        db.execute(
+            """INSERT INTO aia_health_lead_activities (
+                lead_id, activity_type, actor_type, actor_name,
+                summary, details, importance
+            ) VALUES (%s, 'qualification_updated', 'sofia', 'Sofia',
+                      %s, %s::jsonb, %s)""",
+            (
+                lead_id,
+                f"Score: {old_score} → {score}" + (f" (status: {new_status})" if new_status else ""),
+                json.dumps({
+                    "old_score": old_score, "new_score": score,
+                    "new_status": new_status, "reason": reason,
+                }),
+                "important" if score >= 60 else "normal",
+            ),
+        )
+
+        return ToolResult(ok=True, data={
+            "lead_id": lead_id,
+            "old_score": old_score,
+            "new_score": score,
+            "new_status": new_status,
+            "message_for_sofia": (
+                f"Score atualizado de {old_score} pra {score}."
+                + (f" Status agora é '{new_status}'." if new_status else "")
+            ),
+        })
+    except Exception as exc:
+        logger.exception("update_lead_qualification_failed", trace_id=trace_id)
+        return ToolResult(ok=False, data={}, error=str(exc)[:200])
+
+
+# ──────────────────────────────────────────────────────────────────
 # Tool registry
 # ──────────────────────────────────────────────────────────────────
 
 
 TOOL_REGISTRY = {
     "capture_lead": capture_lead,
-    "schedule_demo": schedule_demo,
+    "schedule_demo": schedule_demo,           # legado — placeholder
     "escalate_to_human_whatsapp": escalate_to_human_whatsapp,
     # Care tools (Phase C v2)
     "safety_review_prescriptions": safety_review_prescriptions,
     "register_caregiver_report": register_caregiver_report,
     "escalate_to_human_clinical": escalate_to_human_clinical,
+    # Commercial funnel tools (migration 068 — Phase D Comercial)
+    "query_plans": query_plans,
+    "schedule_demo_with_calendar": schedule_demo_with_calendar,
+    "schedule_callback_call": schedule_callback_call,
+    "register_lead_activity": register_lead_activity,
+    "send_proposal": send_proposal,
+    "get_lead_status": get_lead_status,
+    "update_lead_qualification": update_lead_qualification,
 }
 
 

@@ -63,34 +63,13 @@ def route_action():
 def internal_drug_safety_review():
     """Endpoint interno (sem JWT) chamado por voice-call-service quando
     Sofia voz/voip detecta menção a medicação e precisa rodar o
-    pipeline farmacológico canônico (mesmo wrapper que CareSofiaAgent
-    no WhatsApp usa).
+    pipeline farmacológico canônico.
 
-    Phase C v2.x — unificação canal:
-    Garante que TODOS os canais (WhatsApp/Voice/VoIP) consultam o
-    MESMO knowledge graph (142 drugs, 93 interações, dose limits, ACB,
-    fall risk, renal/hepatic, cascatas) via DrugSafetyService. Sem isso,
-    voice/voip rodavam tools próprias com lógica antiga e drift de
-    regras clínicas era inevitável.
+    Phase C v2.x — unificação canal.
 
-    Auth: header X-Internal-Key opcional (mesmo padrão de outros
-    endpoints internos via SOFIA_INTERNAL_KEY env). Se key configurada
-    e header não bate, retorna 401.
-
-    Body:
-        {
-            "prescriptions": [
-                {"medication_name": "...", "dose": "...",
-                 "times_of_day": [...], "route": "oral"}
-            ],
-            "patient_id": "uuid" (opcional, mas necessário pra cascade
-                                  detection + idade pra Beers),
-            "tenant_id": "..." (opcional, usado pra filtrar patient
-                                load por tenant)
-        }
-
-    Response: {"status": "ok", "review": {...}} idêntico ao output
-        de DrugSafetyService.safety_review_prescriptions.
+    Auth: header X-Internal-Key opcional.
+    Body: {prescriptions[], patient_id, tenant_id, trace_id}
+    Response: {"status":"ok","review":{...}}
     """
     import os
     expected_key = os.getenv("SOFIA_INTERNAL_KEY", "")
@@ -124,8 +103,6 @@ def internal_drug_safety_review():
             prescriptions=prescriptions, patient=patient_ctx,
         )
 
-        # Audit pra observabilidade unificada (mesmo action que
-        # sofia_tools.safety_review_prescriptions emite)
         try:
             audit_log(
                 action="drug_safety_reviewed",
@@ -146,7 +123,7 @@ def internal_drug_safety_review():
                 },
             )
         except Exception:
-            pass  # audit é best-effort
+            pass
 
         return jsonify({"status": "ok", "review": review}), 200
     except Exception as exc:
@@ -160,40 +137,16 @@ def internal_drug_safety_review():
 def internal_conversation_persist_message():
     """Endpoint interno (sem JWT) chamado por voice-call-service e
     sofia-service voice_app pra persistir turnos em
-    aia_health_conversation_messages — mesma tabela que CareSofiaAgent
-    no WhatsApp escreve.
+    aia_health_conversation_messages.
 
-    Phase C v2.x — unificação canal Fase 2:
-    UNIFICA persistência conversational entre WhatsApp/Voz/VoIP. Antes
-    voice gravava só em aia_health_sofia_messages + active_context;
-    WhatsApp gravava em aia_health_conversation_messages. Painel
-    operador via histórico parcial. Agora todos canais escrevem na
-    mesma tabela, channel='voice|voip|whatsapp|web' diferencia.
-
-    Auth: header X-Internal-Key opcional (mesmo padrão).
-
-    Body:
-        {
-            "tenant_id": "...",
-            "phone": "5551...",
-            "role": "user" | "assistant" | "system" | "tool",
-            "direction": "inbound" | "outbound",
-            "content": "...",
-            "channel": "voice" | "voip" | "whatsapp" | "web" (default whatsapp),
-            "message_format": "text" | "audio" | "image" (default text),
-            "external_id": "trace_id ou msg_id externo" (opcional),
-            "session_id": "uuid sofia/voice session" (opcional),
-            "session_context": "discriminator livre" (opcional),
-            "subject_id": "uuid caregiver/patient/user" (opcional),
-            "subject_type": "caregiver|patient|user|family|anonymous" (opcional),
-            "processing_agent": "care|commercial|grok_voice" (opcional),
-            "processing_duration_ms": int (opcional),
-            "metadata": {} (opcional),
-            "safety_moderated": bool (default false)
-        }
-
-    Response: {"status": "ok", "message_id": "uuid"} ou
-              {"status": "error", "reason": "..."}
+    Phase C v2.x — unificação canal Fase 2.
+    Auth: header X-Internal-Key opcional.
+    Body: {tenant_id, phone, role, direction, content, channel,
+           message_format, external_id, session_id, session_context,
+           subject_id, subject_type, processing_agent,
+           processing_duration_ms, metadata, safety_moderated,
+           reply_to_id}
+    Response: {"status":"ok","message_id":"uuid"}
     """
     import os
     expected_key = os.getenv("SOFIA_INTERNAL_KEY", "")
@@ -255,34 +208,12 @@ def internal_identity_resolve():
     sofia-service quando ligação SIP/Voz Web chega — resolve quem
     está ligando.
 
-    Phase C v2.x — unificação canal Fase 3:
-    Substitui voice-call-service/caller_resolver.py próprio. Backend
-    tem identity_resolver com 5 lookups (users, caregivers,
-    patients.proactive_call_phone, patients.responsible, phone_history)
-    + cache Redis. Voice/sofia ganha mesma robustez e mesma resolução
-    que CareSofiaAgent no WhatsApp usa.
-
+    Phase C v2.x — unificação canal Fase 3.
     Auth: header X-Internal-Key opcional.
-
-    Body:
-        {
-            "phone": "5551...",
-            "tenant_id": "connectaiacare_demo" (opcional)
-        }
-
-    Response (formato voice-style pra compatibilidade com
-    caller_resolver.resolve_caller existente — drop-in replacement):
-        {
-            "status": "ok",
-            "patient_id": "uuid"|None,
-            "caregiver_id": "uuid"|None,
-            "user_id": "uuid"|None,
-            "full_name": "...",
-            "persona": "cuidador_pro|paciente_b2c|familia|medico|enfermeiro|anonymous",
-            "phone_type": "personal|shared|unknown",
-            "extra_context": {patient: dict|None, ...},
-            "tenant_id": "..." (do match primary)
-        }
+    Body: {phone, tenant_id}
+    Response (formato voice-style — drop-in caller_resolver):
+        {status, patient_id, caregiver_id, user_id, full_name, persona,
+         phone_type, extra_context, tenant_id, confidence, matches_count}
     """
     import os
     expected_key = os.getenv("SOFIA_INTERNAL_KEY", "")
@@ -306,8 +237,6 @@ def internal_identity_resolve():
         from src.services.identity_resolver import get_identity_resolver
         identity = get_identity_resolver().resolve(phone, tenant_id=tenant_id)
 
-        # Mapeia identity (objeto Identity com matches[]) pro formato
-        # legacy voice-style (1 caller único — usa primary).
         primary = identity.primary
         if not primary:
             return jsonify({
@@ -322,10 +251,7 @@ def internal_identity_resolve():
                 "tenant_id": tenant_id,
             }), 200
 
-        # Persona derivada do profile do primary match
         persona = primary.profile or "anonymous"
-        # Compatibilidade com caller_resolver: 'cuidador' → 'cuidador_pro'
-        # caller_resolver historicamente sempre usou 'cuidador_pro'
         if persona == "cuidador":
             persona = "cuidador_pro"
 
@@ -344,6 +270,74 @@ def internal_identity_resolve():
         }), 200
     except Exception as exc:
         logger.exception("internal_identity_resolve_failed")
+        return jsonify({
+            "status": "error", "reason": str(exc)[:200],
+        }), 500
+
+
+# ──────────── Commercial tools (chamado por voice-call-service) ────────────
+
+@bp.post("/api/internal/commercial/execute-tool")
+def internal_commercial_execute_tool():
+    """Endpoint interno (sem JWT) chamado por voice-call-service /
+    sofia-service quando Sofia em qualquer canal precisa executar
+    uma das 8 tools comerciais (Phase D — migration 068).
+
+    Auth: header X-Internal-Key opcional.
+    Body: {tool_name, args, tenant_id, trace_id}
+    Response: {"status":"ok","result":{ok, data, error, idempotent_skip}}
+    """
+    import os
+    expected_key = os.getenv("SOFIA_INTERNAL_KEY", "")
+    if expected_key:
+        provided = request.headers.get("X-Internal-Key", "")
+        if provided != expected_key:
+            return jsonify({
+                "status": "error", "reason": "unauthorized",
+            }), 401
+
+    body = request.get_json(silent=True) or {}
+    tool_name = body.get("tool_name")
+    args = body.get("args") or {}
+
+    COMMERCIAL_TOOLS_WHITELIST = {
+        "query_plans",
+        "schedule_demo_with_calendar",
+        "schedule_callback_call",
+        "register_lead_activity",
+        "send_proposal",
+        "get_lead_status",
+        "update_lead_qualification",
+        "capture_lead",
+    }
+    if tool_name not in COMMERCIAL_TOOLS_WHITELIST:
+        return jsonify({
+            "status": "error", "reason": f"tool_not_in_commercial_whitelist:{tool_name}",
+        }), 400
+
+    try:
+        from src.services.sofia_tools import execute_tool
+        result = execute_tool(
+            tool_name, args,
+            tenant_id=body.get("tenant_id"),
+            trace_id=body.get("trace_id"),
+        )
+        return jsonify({
+            "status": "ok",
+            "result": {
+                "ok": result.ok,
+                "data": result.data,
+                "error": result.error,
+                "idempotent_skip": result.idempotent_skip,
+            },
+        }), 200
+    except Exception as exc:
+        logger.exception("internal_commercial_execute_tool_failed")
+        return jsonify({
+            "status": "error", "reason": str(exc)[:200],
+        }), 500
+
+
         return jsonify({
             "status": "error", "reason": str(exc)[:200],
         }), 500
