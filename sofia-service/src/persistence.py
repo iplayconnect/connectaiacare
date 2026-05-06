@@ -344,3 +344,78 @@ def usage_for_user(tenant_id: str, user_id: str | None, phone: str | None) -> di
         "toolCalls": int(row["tool_calls_count"]) if row else 0,
         "planSku": row.get("plan_sku") if row else None,
     }
+
+
+# ─────────────────────────────────────────────────────────────────
+# Phase C v2.x — Fase 2: persistência canonical cross-channel
+# ─────────────────────────────────────────────────────────────────
+
+def persist_conversation_message_canonical(
+    *,
+    tenant_id: str,
+    phone: str,
+    role: str,           # 'user' | 'assistant' | 'system' | 'tool'
+    direction: str,      # 'inbound' | 'outbound'
+    content: str,
+    session_id: str | None = None,
+    external_id: str | None = None,
+    subject_id: str | None = None,
+    subject_type: str | None = None,
+    processing_agent: str | None = None,
+    metadata: dict | None = None,
+    channel: str = "voice",
+) -> str | None:
+    """Persiste turno em aia_health_conversation_messages via HTTP
+    /api/internal/conversation/persist-message no backend.
+
+    Mesma tabela canonical que CareSofiaAgent escreve no WhatsApp +
+    voice-call-service escreve em VoIP. UI de operador agora vê
+    histórico cross-channel completo.
+
+    Best-effort. Falha NÃO bloqueia turno (logger.warning + None).
+    """
+    import requests
+
+    if not all([tenant_id, phone, role, direction, content]):
+        return None
+
+    payload = {
+        "tenant_id": tenant_id,
+        "phone": phone,
+        "role": role,
+        "direction": direction,
+        "content": content,
+        "channel": channel,
+        "session_id": session_id,
+        "external_id": external_id,
+        "subject_id": subject_id,
+        "subject_type": subject_type,
+        "processing_agent": processing_agent,
+        "metadata": metadata or {},
+    }
+
+    headers = {"Content-Type": "application/json"}
+    internal_key = os.getenv("SOFIA_INTERNAL_KEY", "")
+    if internal_key:
+        headers["X-Internal-Key"] = internal_key
+
+    api_base = os.getenv("BACKEND_API_URL", "http://api:5055")
+    try:
+        r = requests.post(
+            f"{api_base}/api/internal/conversation/persist-message",
+            json=payload, headers=headers, timeout=3,
+        )
+        if r.status_code != 200:
+            logger.warning(
+                "conv_persist_canonical_http_%d session=%s",
+                r.status_code, session_id,
+            )
+            return None
+        body = r.json() or {}
+        return body.get("message_id")
+    except Exception as exc:
+        logger.warning(
+            "conv_persist_canonical_failed session=%s error=%s",
+            session_id, str(exc)[:200],
+        )
+        return None

@@ -154,6 +154,99 @@ def internal_drug_safety_review():
         return jsonify({"status": "error", "reason": str(exc)[:200]}), 500
 
 
+# ──────────── Conversation persist (chamado por voice-call-service) ────────────
+
+@bp.post("/api/internal/conversation/persist-message")
+def internal_conversation_persist_message():
+    """Endpoint interno (sem JWT) chamado por voice-call-service e
+    sofia-service voice_app pra persistir turnos em
+    aia_health_conversation_messages — mesma tabela que CareSofiaAgent
+    no WhatsApp escreve.
+
+    Phase C v2.x — unificação canal Fase 2:
+    UNIFICA persistência conversational entre WhatsApp/Voz/VoIP. Antes
+    voice gravava só em aia_health_sofia_messages + active_context;
+    WhatsApp gravava em aia_health_conversation_messages. Painel
+    operador via histórico parcial. Agora todos canais escrevem na
+    mesma tabela, channel='voice|voip|whatsapp|web' diferencia.
+
+    Auth: header X-Internal-Key opcional (mesmo padrão).
+
+    Body:
+        {
+            "tenant_id": "...",
+            "phone": "5551...",
+            "role": "user" | "assistant" | "system" | "tool",
+            "direction": "inbound" | "outbound",
+            "content": "...",
+            "channel": "voice" | "voip" | "whatsapp" | "web" (default whatsapp),
+            "message_format": "text" | "audio" | "image" (default text),
+            "external_id": "trace_id ou msg_id externo" (opcional),
+            "session_id": "uuid sofia/voice session" (opcional),
+            "session_context": "discriminator livre" (opcional),
+            "subject_id": "uuid caregiver/patient/user" (opcional),
+            "subject_type": "caregiver|patient|user|family|anonymous" (opcional),
+            "processing_agent": "care|commercial|grok_voice" (opcional),
+            "processing_duration_ms": int (opcional),
+            "metadata": {} (opcional),
+            "safety_moderated": bool (default false)
+        }
+
+    Response: {"status": "ok", "message_id": "uuid"} ou
+              {"status": "error", "reason": "..."}
+    """
+    import os
+    expected_key = os.getenv("SOFIA_INTERNAL_KEY", "")
+    if expected_key:
+        provided = request.headers.get("X-Internal-Key", "")
+        if provided != expected_key:
+            return jsonify({
+                "status": "error", "reason": "unauthorized",
+            }), 401
+
+    body = request.get_json(silent=True) or {}
+    required = ("tenant_id", "phone", "role", "direction", "content")
+    missing = [k for k in required if not body.get(k)]
+    if missing:
+        return jsonify({
+            "status": "error", "reason": "missing_fields", "fields": missing,
+        }), 400
+
+    try:
+        from src.services.conversation_persistence import persist_message
+        msg_id = persist_message(
+            tenant_id=body["tenant_id"],
+            phone=body["phone"],
+            role=body["role"],
+            direction=body["direction"],
+            content=body["content"],
+            channel=body.get("channel") or "whatsapp",
+            message_format=body.get("message_format") or "text",
+            external_id=body.get("external_id"),
+            session_id=body.get("session_id"),
+            session_context=body.get("session_context"),
+            subject_id=body.get("subject_id"),
+            subject_type=body.get("subject_type"),
+            processing_agent=body.get("processing_agent"),
+            processing_duration_ms=body.get("processing_duration_ms"),
+            metadata=body.get("metadata"),
+            safety_moderated=bool(body.get("safety_moderated", False)),
+            reply_to_id=body.get("reply_to_id"),
+        )
+        if msg_id is None:
+            return jsonify({
+                "status": "error", "reason": "persist_failed",
+            }), 500
+        return jsonify({
+            "status": "ok", "message_id": msg_id,
+        }), 200
+    except Exception as exc:
+        logger.exception("internal_conversation_persist_failed")
+        return jsonify({
+            "status": "error", "reason": str(exc)[:200],
+        }), 500
+
+
 # ──────────── Queue: humano decide ────────────
 
 @bp.get("/api/safety/queue")
