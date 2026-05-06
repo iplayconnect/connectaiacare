@@ -377,6 +377,13 @@ _LOCAL_TOOLS = {
     "get_patient_vitals": "_tool_get_patient_vitals",
     "get_patient_responsible_phone": "_tool_get_patient_responsible_phone",
     "dial_phone": "_tool_dial_phone",
+    # Phase C v2.x — unificação canal: drug safety review canônico
+    # delegado pro backend api:5055/api/internal/drug-safety/review.
+    # Mesma fonte que CareSofiaAgent no WhatsApp (DrugSafetyService
+    # → 11 checks dose_validator + cascade_detector). Substitui as
+    # 3 tools antigas (query_drug_rules + check_drug_interaction +
+    # check_medication_safety) que ficam como aliases delegando aqui.
+    "safety_review_prescriptions": "_tool_safety_review_prescriptions",
 }
 
 # Tools que delegamos via HTTP pro sofia-service (motor de cruzamentos
@@ -995,3 +1002,135 @@ def _tool_dial_phone(
     except Exception as exc:
         logger.exception("dial_phone_failed")
         return {"ok": False, "error": "dial_unreachable", "detail": str(exc)}
+
+
+# ─────────────────────────────────────────────────────────────────
+# Phase C v2.x — Drug safety unificado (delega backend api:5055)
+# ─────────────────────────────────────────────────────────────────
+
+def _tool_safety_review_prescriptions(
+    *,
+    persona_ctx: dict,
+    prescriptions: list | None = None,
+    patient_id: str | None = None,
+    **_: Any,
+) -> dict:
+    """Avalia prescrição(ões) contra knowledge graph farmacológico
+    (142 drugs, 93 interações, dose limits, ACB, fall risk, renal/
+    hepatic, cascatas) via DrugSafetyService no backend.
+
+    Sincroniza com o que CareSofiaAgent usa no WhatsApp — mesmo
+    wrapper, mesmas regras, mesmo output. UMA fonte de verdade pra
+    Sofia em qualquer canal (WhatsApp/Voice/VoIP).
+
+    Substitui (deprecando gradualmente) as 3 tools antigas:
+      - query_drug_rules
+      - check_drug_interaction
+      - check_medication_safety
+    Que continuam funcionando via _execute_remote_tool antigo, mas
+    novas conversas devem usar safety_review_prescriptions.
+
+    Args:
+        persona_ctx: contexto da ligação (tenant_id, patient_id default).
+        prescriptions: lista de {medication_name, dose, times_of_day, route}.
+            dose pode vir como "não informado" — pipeline ainda dispara
+            Beers/STOPP/interactions (fix dose-independent).
+        patient_id: UUID. Se omitido, tenta usar persona_ctx.patient_id.
+
+    Returns:
+        dict com:
+          ok: bool
+          review: {results, cascades, max_severity, requires_human_review, meta}
+          _message_for_sofia: instrução pra Sofia processar o resultado
+          _disclaimer: clinical disclaimer
+    """
+    if not prescriptions or not isinstance(prescriptions, list):
+        return {
+            "ok": False, "error": "prescriptions_required_list",
+            "_message_for_sofia": (
+                "Não recebi prescrição válida. Pergunte qual o nome do "
+                "remédio e tente de novo."
+            ),
+        }
+
+    # patient_id: arg explícito vence; senão usa persona_ctx.patient_id
+    pid = patient_id or (persona_ctx or {}).get("patient_id")
+    tenant_id = (persona_ctx or {}).get("tenant_id") or "connectaiacare_demo"
+    trace_id = (persona_ctx or {}).get("session_id") or (persona_ctx or {}).get("trace_id")
+
+    payload = {
+        "prescriptions": prescriptions,
+        "patient_id": pid,
+        "tenant_id": tenant_id,
+        "trace_id": trace_id,
+    }
+
+    headers = {"Content-Type": "application/json"}
+    import os as _os
+    internal_key = _os.getenv("SOFIA_INTERNAL_KEY", "")
+    if internal_key:
+        headers["X-Internal-Key"] = internal_key
+
+    try:
+        import httpx
+        url = f"{Config.BACKEND_API_URL}/api/internal/drug-safety/review"
+        r = httpx.post(url, json=payload, headers=headers, timeout=10.0)
+        if r.status_code == 401:
+            return {
+                "ok": False, "error": "internal_auth_failed",
+                "_message_for_sofia": (
+                    "Tive um problema de autenticação interna. Vou pedir "
+                    "o time clínico revisar essa medicação manualmente."
+                ),
+            }
+        if r.status_code != 200:
+            return {
+                "ok": False, "error": f"drug_safety_http_{r.status_code}",
+                "body": r.text[:300],
+                "_message_for_sofia": (
+                    "Tive uma demora técnica buscando a regra dessa "
+                    "medicação. Vou pedir o time clínico revisar."
+                ),
+            }
+        body = r.json() or {}
+        review = body.get("review") or {}
+
+        # Mensagem orientativa pra Sofia narrar de acordo com severity
+        max_sev = review.get("max_severity") or "info"
+        requires_review = bool(review.get("requires_human_review"))
+        if requires_review or max_sev in ("block", "warning_strong"):
+            msg = (
+                "ATENÇÃO: o sistema farmacológico identificou ponto "
+                "importante nessa medicação. NÃO confirme posologia. "
+                "Avise o usuário que você vai pedir o time clínico revisar "
+                "antes de qualquer ação."
+            )
+        elif max_sev == "warning":
+            msg = (
+                "O sistema farmacológico identificou ponto de atenção. "
+                "Mencione com cuidado e sugira validar com a equipe clínica."
+            )
+        else:
+            msg = (
+                "Sistema farmacológico não identificou problema crítico. "
+                "Pode prosseguir com cuidado normal."
+            )
+
+        return {
+            "ok": True,
+            "review": review,
+            "max_severity": max_sev,
+            "requires_human_review": requires_review,
+            "_message_for_sofia": msg,
+            "_disclaimer": _CLINICAL_DISCLAIMER,
+        }
+    except Exception as exc:
+        logger.exception("safety_review_prescriptions_failed")
+        return {
+            "ok": False, "error": "drug_safety_unreachable",
+            "detail": str(exc)[:200],
+            "_message_for_sofia": (
+                "Tive uma demora técnica buscando essa informação. Vou "
+                "pedir o time clínico revisar manualmente."
+            ),
+        }

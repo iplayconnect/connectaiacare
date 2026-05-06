@@ -1020,12 +1020,73 @@ def _build_tools_for_call(
         # Comercial NÃO pega motor clínico — só leitura básica de paciente.
         # Os profissionais clínicos pegam tudo abaixo.
         pass
-    if persona in ("medico", "enfermeiro", "admin_tenant", "super_admin"):
+    if persona in ("medico", "enfermeiro", "admin_tenant", "super_admin", "cuidador_pro", "cuidador"):
+        # Phase C v2.x — unificação canal: Sofia voz/voip agora usa o
+        # MESMO wrapper farmacológico que CareSofiaAgent no WhatsApp.
+        # Tool canônica safety_review_prescriptions roda 11 checks
+        # (dose_validator) + cascade detection (cascade_detector) sobre
+        # o knowledge graph curado (142 drugs/93 interações/Beers/STOPP).
+        # Cuidadores também ganham acesso (antes só profissionais
+        # clínicos tinham essas tools).
+        base.append({
+            "type": "function",
+            "name": "safety_review_prescriptions",
+            "description": (
+                "TOOL CANÔNICA pra avaliar UMA OU MAIS medicações contra o knowledge "
+                "graph farmacológico (Beers 2023, STOPP fall_risk, 93 interações, "
+                "dose limits, anticholinergic burden, ajustes renal/hepatic, cascatas). "
+                "USE SEMPRE que o usuário mencionar med (nome, dose, prescrição nova, "
+                "intenção de dar). NÃO confirme posologia sem rodar essa tool. "
+                "Se max_severity in (block, warning_strong) ou requires_human_review=True, "
+                "NÃO confirme — escale pra equipe clínica via escalate_to_attendant. "
+                "Aceita dose='não informado' (cuidador relatou med sem dose) — pipeline "
+                "ainda dispara Beers/STOPP/interactions corretamente."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prescriptions": {
+                        "type": "array",
+                        "description": (
+                            "Lista de prescrições candidatas extraídas da conversa. "
+                            "Inclua mesmo med já cadastrada se quer revalidar."
+                        ),
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "medication_name": {"type": "string"},
+                                "dose": {
+                                    "type": "string",
+                                    "description": "Ex: '50mg', '1g'. Se não souber, use 'não informado'.",
+                                },
+                                "times_of_day": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                    "description": "Horários HH:MM, ex: ['08:00','20:00']",
+                                },
+                                "route": {"type": "string"},
+                            },
+                            "required": ["medication_name", "dose"],
+                        },
+                    },
+                    "patient_id": {
+                        "type": "string",
+                        "description": "UUID do paciente (vem em CONTEXTO da ligação).",
+                    },
+                },
+                "required": ["prescriptions"],
+            },
+        })
+
+        # Tools antigas mantidas pra compatibilidade — Sofia pode ainda
+        # chamar pra perguntas específicas (interação par-a-par, regras
+        # detalhadas de 1 droga). Deprecação gradual: nova lógica deve
+        # usar safety_review_prescriptions.
         base.extend([
             {
                 "type": "function",
                 "name": "query_drug_rules",
-                "description": "Devolve TODAS as regras carregadas para um princípio ativo: dose, interações, contraindicações, ajustes renal/hepático, ACB, fall risk, alergias. Use pra 'me conta tudo sobre X' ou 'quais regras temos pra Y'.",
+                "description": "[DEPRECATED — prefira safety_review_prescriptions] Devolve TODAS as regras carregadas para um princípio ativo. Útil pra responder 'me conta tudo sobre X'.",
                 "parameters": {
                     "type": "object",
                     "properties": {"medication_name": {"type": "string"}},
@@ -1035,7 +1096,7 @@ def _build_tools_for_call(
             {
                 "type": "function",
                 "name": "check_drug_interaction",
-                "description": "Valida par de medicamentos: severity, mecanismo, recomendação, time_separation. Use pra 'posso usar X com Y?'.",
+                "description": "[DEPRECATED — prefira safety_review_prescriptions] Valida par de medicamentos: severity, mecanismo, recomendação, time_separation.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -1048,7 +1109,7 @@ def _build_tools_for_call(
             {
                 "type": "function",
                 "name": "check_medication_safety",
-                "description": "Roda o motor de cruzamentos (12 dimensões: dose, Beers, alergias, interações, contraindicações, ACB, fall risk, renal, hepático, vitais) em uma prescrição candidata SEM persistir. Use ANTES de o médico confirmar uma nova prescrição na ligação.",
+                "description": "[DEPRECATED — prefira safety_review_prescriptions] Roda motor de cruzamentos sobre 1 prescrição candidata.",
                 "parameters": {
                     "type": "object",
                     "properties": {

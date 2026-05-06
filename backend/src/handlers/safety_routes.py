@@ -57,6 +57,103 @@ def route_action():
     return jsonify({"status": "ok", **result})
 
 
+# ──────────── Drug safety review (chamado por voice-call-service) ────────────
+
+@bp.post("/api/internal/drug-safety/review")
+def internal_drug_safety_review():
+    """Endpoint interno (sem JWT) chamado por voice-call-service quando
+    Sofia voz/voip detecta menção a medicação e precisa rodar o
+    pipeline farmacológico canônico (mesmo wrapper que CareSofiaAgent
+    no WhatsApp usa).
+
+    Phase C v2.x — unificação canal:
+    Garante que TODOS os canais (WhatsApp/Voice/VoIP) consultam o
+    MESMO knowledge graph (142 drugs, 93 interações, dose limits, ACB,
+    fall risk, renal/hepatic, cascatas) via DrugSafetyService. Sem isso,
+    voice/voip rodavam tools próprias com lógica antiga e drift de
+    regras clínicas era inevitável.
+
+    Auth: header X-Internal-Key opcional (mesmo padrão de outros
+    endpoints internos via SOFIA_INTERNAL_KEY env). Se key configurada
+    e header não bate, retorna 401.
+
+    Body:
+        {
+            "prescriptions": [
+                {"medication_name": "...", "dose": "...",
+                 "times_of_day": [...], "route": "oral"}
+            ],
+            "patient_id": "uuid" (opcional, mas necessário pra cascade
+                                  detection + idade pra Beers),
+            "tenant_id": "..." (opcional, usado pra filtrar patient
+                                load por tenant)
+        }
+
+    Response: {"status": "ok", "review": {...}} idêntico ao output
+        de DrugSafetyService.safety_review_prescriptions.
+    """
+    import os
+    expected_key = os.getenv("SOFIA_INTERNAL_KEY", "")
+    if expected_key:
+        provided = request.headers.get("X-Internal-Key", "")
+        if provided != expected_key:
+            return jsonify({
+                "status": "error", "reason": "unauthorized",
+            }), 401
+
+    body = request.get_json(silent=True) or {}
+    prescriptions = body.get("prescriptions") or []
+    patient_id = body.get("patient_id")
+    tenant_id = body.get("tenant_id")
+    trace_id = body.get("trace_id")
+
+    if not isinstance(prescriptions, list) or not prescriptions:
+        return jsonify({
+            "status": "error", "reason": "prescriptions_required_list",
+        }), 400
+
+    try:
+        from src.services.drug_safety_context import (
+            load_patient_safety_context,
+        )
+        from src.services.drug_safety_service import get_drug_safety_service
+
+        patient_ctx = load_patient_safety_context(patient_id, tenant_id)
+        svc = get_drug_safety_service()
+        review = svc.safety_review_prescriptions(
+            prescriptions=prescriptions, patient=patient_ctx,
+        )
+
+        # Audit pra observabilidade unificada (mesmo action que
+        # sofia_tools.safety_review_prescriptions emite)
+        try:
+            audit_log(
+                action="drug_safety_reviewed",
+                actor="voice_call_service",
+                tenant_id=tenant_id,
+                trace_id=trace_id,
+                resource_type="patient",
+                resource_id=patient_id,
+                payload={
+                    "prescriptions_count": len(prescriptions),
+                    "max_severity": review.get("max_severity"),
+                    "requires_human_review": review.get("requires_human_review"),
+                    "cascades_detected": len(review.get("cascades") or []),
+                    "principles": [
+                        r.get("principle_active") for r in review.get("results", [])
+                    ],
+                    "channel": "voice",
+                },
+            )
+        except Exception:
+            pass  # audit é best-effort
+
+        return jsonify({"status": "ok", "review": review}), 200
+    except Exception as exc:
+        logger.exception("internal_drug_safety_review_failed")
+        return jsonify({"status": "error", "reason": str(exc)[:200]}), 500
+
+
 # ──────────── Queue: humano decide ────────────
 
 @bp.get("/api/safety/queue")
