@@ -211,25 +211,12 @@ const NAV_ITEMS: NavItem[] = [
     roles: ["super_admin", "admin_tenant"],
     group: "system",
   },
-  // ─── Phase D Comercial — funil completo ───
+  // ─── Phase D Comercial — único item, abre /comercial/funil
+  // (com tabs Funil / Agenda / Planos no layout interno)
   {
     href: "/admin/system/operations/comercial/funil",
-    label: "Comercial · Funil (kanban)",
+    label: "Comercial",
     icon: KanbanSquare,
-    roles: ["super_admin", "admin_tenant", "comercial"],
-    group: "system",
-  },
-  {
-    href: "/admin/system/operations/comercial/agenda",
-    label: "Comercial · Agenda",
-    icon: Calendar,
-    roles: ["super_admin", "admin_tenant", "comercial"],
-    group: "system",
-  },
-  {
-    href: "/admin/system/operations/comercial/planos",
-    label: "Comercial · Planos",
-    icon: Package,
     roles: ["super_admin", "admin_tenant", "comercial"],
     group: "system",
   },

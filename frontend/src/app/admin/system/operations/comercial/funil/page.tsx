@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import {
-  Sparkles,
   RefreshCw,
   Loader2,
   Phone,
@@ -21,18 +20,12 @@ import {
   type LeadStatus,
 } from "@/lib/api-commercial";
 
-// ─── /admin/system/operations/comercial/funil ───
-//
-// Kanban do funil comercial: leads agrupados por status
-// (new → qualified → demo_scheduled → in_demo → proposal_sent).
-// Status converted/lost ficam fora do kanban (são finais).
-
-const COLUMNS: { key: LeadStatus; label: string; color: string }[] = [
-  { key: "new", label: "Novos", color: "bg-slate-50 border-slate-200" },
-  { key: "qualified", label: "Qualificados", color: "bg-cyan-50 border-cyan-200" },
-  { key: "demo_scheduled", label: "Demo agendada", color: "bg-blue-50 border-blue-200" },
-  { key: "in_demo", label: "Em demo", color: "bg-indigo-50 border-indigo-200" },
-  { key: "proposal_sent", label: "Proposta enviada", color: "bg-violet-50 border-violet-200" },
+const COLUMNS: { key: LeadStatus; label: string; accent: string }[] = [
+  { key: "new", label: "Novos", accent: "bg-slate-500/20 text-slate-200" },
+  { key: "qualified", label: "Qualificados", accent: "bg-cyan-500/20 text-cyan-200" },
+  { key: "demo_scheduled", label: "Demo agendada", accent: "bg-blue-500/20 text-blue-200" },
+  { key: "in_demo", label: "Em demo", accent: "bg-indigo-500/20 text-indigo-200" },
+  { key: "proposal_sent", label: "Proposta enviada", accent: "bg-violet-500/20 text-violet-200" },
 ];
 
 function brDate(iso: string | null): string {
@@ -42,16 +35,15 @@ function brDate(iso: string | null): string {
 }
 
 function daysSince(iso: string): number {
-  const ms = Date.now() - new Date(iso).getTime();
-  return Math.floor(ms / (1000 * 60 * 60 * 24));
+  return Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
 }
 
-function scoreColor(score: number | null): string {
-  if (score === null) return "text-slate-500 bg-slate-100";
-  if (score >= 80) return "text-emerald-700 bg-emerald-100";
-  if (score >= 60) return "text-amber-700 bg-amber-100";
-  if (score >= 30) return "text-orange-700 bg-orange-100";
-  return "text-red-700 bg-red-100";
+function scoreBadge(score: number | null): string {
+  if (score === null) return "bg-white/[0.04] text-slate-400";
+  if (score >= 80) return "bg-emerald-500/20 text-emerald-300";
+  if (score >= 60) return "bg-amber-500/20 text-amber-300";
+  if (score >= 30) return "bg-orange-500/20 text-orange-300";
+  return "bg-red-500/20 text-red-300";
 }
 
 function LeadCard({ lead }: { lead: FunnelLead }) {
@@ -59,37 +51,35 @@ function LeadCard({ lead }: { lead: FunnelLead }) {
   return (
     <Link
       href={`/admin/system/operations/comercial/leads/${lead.id}`}
-      className="block bg-white rounded-lg border border-slate-200 p-3 hover:border-cyan-400 hover:shadow-sm transition"
+      className="block bg-white/[0.04] hover:bg-white/[0.07] border border-white/10 hover:border-cyan-500/40 rounded-lg p-3 transition"
     >
       <div className="flex items-start justify-between gap-2">
-        <div className="font-medium text-slate-900 text-sm leading-tight">
+        <div className="text-sm font-medium text-slate-100 leading-tight truncate">
           {lead.full_name || "(sem nome)"}
         </div>
-        <span
-          className={`text-xs px-2 py-0.5 rounded font-medium ${scoreColor(lead.qualification_score)}`}
-        >
+        <span className={`text-xs px-2 py-0.5 rounded font-medium shrink-0 ${scoreBadge(lead.qualification_score)}`}>
           {lead.qualification_score ?? "—"}
         </span>
       </div>
       {lead.organization && (
-        <div className="text-xs text-slate-600 mt-1 flex items-center gap-1">
-          <Building2 className="w-3 h-3" />
+        <div className="text-xs text-slate-400 mt-1 flex items-center gap-1 truncate">
+          <Building2 className="w-3 h-3 shrink-0" />
           <span className="truncate">{lead.organization}</span>
         </div>
       )}
-      <div className="text-xs text-slate-500 mt-1 flex items-center gap-1">
-        <Phone className="w-3 h-3" />
-        <span>{lead.phone}</span>
+      <div className="text-xs text-slate-500 mt-1 flex items-center gap-1 truncate">
+        <Phone className="w-3 h-3 shrink-0" />
+        <span className="truncate">{lead.phone}</span>
       </div>
       {lead.demo_scheduled_at && (
-        <div className="text-xs text-blue-700 mt-1.5 flex items-center gap-1">
+        <div className="text-xs text-blue-300 mt-1.5 flex items-center gap-1">
           <Calendar className="w-3 h-3" />
           <span>{brDate(lead.demo_scheduled_at)}</span>
         </div>
       )}
-      <div className="text-[11px] text-slate-400 mt-1.5 flex justify-between">
+      <div className="text-[11px] text-slate-500 mt-1.5 flex justify-between items-center">
         <span>há {days}d</span>
-        <span>{lead.intent}</span>
+        <span className="font-mono opacity-70">{lead.intent}</span>
       </div>
     </Link>
   );
@@ -119,36 +109,34 @@ export default function FunilPage() {
     if (!authLoading && hasRole(user, "super_admin", "admin_tenant", "comercial")) {
       load();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authLoading, user, days]);
 
   if (authLoading) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
-        <Loader2 className="w-6 h-6 animate-spin text-slate-400" />
+        <Loader2 className="w-6 h-6 animate-spin text-slate-500" />
       </div>
     );
   }
 
   if (!hasRole(user, "super_admin", "admin_tenant", "comercial")) {
     return (
-      <div className="p-8 max-w-2xl">
-        <h1 className="text-xl font-semibold mb-2">Acesso negado</h1>
-        <p className="text-slate-600">
-          Você precisa ser super_admin, admin_tenant ou comercial.
-        </p>
+      <div className="p-8">
+        <h1 className="text-xl font-semibold text-slate-100">Acesso negado</h1>
+        <p className="text-slate-400 mt-1">super_admin, admin_tenant ou comercial.</p>
       </div>
     );
   }
 
   return (
-    <div className="p-6 lg:p-8">
-      <header className="mb-6 flex flex-wrap items-center justify-between gap-4">
+    <div className="px-6 lg:px-8 pt-6 pb-8">
+      <header className="mb-5 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold text-slate-900 flex items-center gap-2">
-            <Sparkles className="w-6 h-6 text-cyan-500" />
+          <h1 className="text-xl font-semibold text-slate-100">
             Funil Comercial
           </h1>
-          <p className="text-sm text-slate-600 mt-1">
+          <p className="text-xs text-slate-400 mt-0.5">
             {data
               ? `${data.total} leads ativos · agrupados por estágio`
               : "Carregando…"}
@@ -158,7 +146,7 @@ export default function FunilPage() {
           <select
             value={days}
             onChange={(e) => setDays(parseInt(e.target.value))}
-            className="text-sm border border-slate-300 rounded px-2 py-1 bg-white"
+            className="text-xs bg-white/[0.04] border border-white/10 text-slate-200 rounded px-2 py-1.5 hover:bg-white/[0.06]"
           >
             <option value={30}>Últimos 30 dias</option>
             <option value={60}>Últimos 60 dias</option>
@@ -168,45 +156,41 @@ export default function FunilPage() {
           <button
             onClick={load}
             disabled={loading}
-            className="text-sm bg-white border border-slate-300 rounded px-3 py-1.5 hover:bg-slate-50 disabled:opacity-50 flex items-center gap-1.5"
+            className="text-xs bg-white/[0.04] border border-white/10 text-slate-200 rounded px-3 py-1.5 hover:bg-white/[0.07] disabled:opacity-50 flex items-center gap-1.5"
           >
-            {loading ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <RefreshCw className="w-4 h-4" />
-            )}
+            {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
             Atualizar
           </button>
         </div>
       </header>
 
       {error && (
-        <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded text-sm text-red-700 flex items-center gap-2">
+        <div className="mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded text-sm text-red-300 flex items-center gap-2">
           <AlertCircle className="w-4 h-4" />
           {error}
         </div>
       )}
 
       {data && (
-        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-3">
           {COLUMNS.map((col) => {
             const items = data.columns[col.key] || [];
             return (
               <div
                 key={col.key}
-                className={`rounded-lg border p-3 ${col.color}`}
+                className="rounded-lg border border-white/10 bg-white/[0.02] p-3"
               >
                 <div className="flex items-center justify-between mb-3">
-                  <h3 className="text-sm font-semibold text-slate-700">
+                  <h3 className="text-sm font-semibold text-slate-200">
                     {col.label}
                   </h3>
-                  <span className="text-xs font-medium text-slate-600 bg-white px-2 py-0.5 rounded">
+                  <span className={`text-xs px-2 py-0.5 rounded font-medium ${col.accent}`}>
                     {items.length}
                   </span>
                 </div>
-                <div className="space-y-2 max-h-[70vh] overflow-y-auto">
+                <div className="space-y-2 max-h-[70vh] overflow-y-auto pr-1">
                   {items.length === 0 ? (
-                    <div className="text-xs text-slate-400 text-center py-8">
+                    <div className="text-xs text-slate-600 text-center py-8 italic">
                       Vazio
                     </div>
                   ) : (
@@ -219,19 +203,19 @@ export default function FunilPage() {
         </div>
       )}
 
-      <footer className="mt-6 pt-4 border-t border-slate-200 flex items-center justify-between text-xs text-slate-500">
+      <footer className="mt-6 pt-4 border-t border-white/10 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
         <span>
-          Status `converted` e `lost` não aparecem aqui — ver{" "}
+          Status `converted` e `lost` ficam fora —{" "}
           <Link
             href="/admin/system/operations/leads"
-            className="text-cyan-600 hover:underline"
+            className="text-cyan-400 hover:underline"
           >
-            Leads (lista completa)
+            ver lista completa
           </Link>
         </span>
-        <span>
-          <TrendingUp className="w-3 h-3 inline mr-1" />
-          score 0-100 · {">"}=80 quente, {">"}=60 morno, {">"}=30 frio
+        <span className="flex items-center gap-1">
+          <TrendingUp className="w-3 h-3" />
+          score: ≥80 quente · ≥60 morno · ≥30 frio
         </span>
       </footer>
     </div>
