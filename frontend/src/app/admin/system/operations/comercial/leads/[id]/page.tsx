@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, use } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -81,9 +81,9 @@ const STATUS_CLS: Record<string, string> = {
 export default function LeadDetailPage({
   params,
 }: {
-  params: Promise<{ id: string }>;
+  params: { id: string };
 }) {
-  const { id: leadId } = use(params);
+  const leadId = params.id;
   const { user, loading: authLoading } = useAuth();
   const [data, setData] = useState<LeadTimeline | null>(null);
   const [loading, setLoading] = useState(true);
