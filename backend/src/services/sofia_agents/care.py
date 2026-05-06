@@ -611,32 +611,36 @@ REGRAS DESTE TURNO:
         llm_args = decision.get("args") or {}
         text_after = decision.get("text_after") or ""
 
-        # Sanitiza args: usa caregiver_id/phone/patient_id do CTX
-        # (anti-hijack — LLM não pode injetar IDs arbitrários).
+        # Sanitiza args POR TOOL: injeta IDs do CTX só nos params que a
+        # tool aceita. Antes injetava 'phone' em TODAS (copy de
+        # commercial.py) — quebrava safety_review_prescriptions e
+        # register_caregiver_report (TypeError: unexpected keyword 'phone').
         safe_args = dict(llm_args)
-        safe_args["phone"] = ctx.phone
-
         caregiver_id = (
             ctx.identity_match.caregiver_id if ctx.identity_match else None
         )
-        if caregiver_id and tool_name in (
-            "register_caregiver_report", "escalate_to_human_clinical",
-        ):
-            safe_args["caregiver_id"] = caregiver_id
-
-        if tool_name == "register_caregiver_report":
-            safe_args["caregiver_phone"] = ctx.phone
-
-        # patient_id: se LLM não preencheu, usa primary do caregiver
-        if "patient_id" not in safe_args or not safe_args.get("patient_id"):
-            patient_id = self._get_patient_id_for_caregiver(caregiver_id)
-            if patient_id:
-                safe_args["patient_id"] = patient_id
+        primary_patient_id = self._get_patient_id_for_caregiver(caregiver_id)
 
         if tool_name == "escalate_to_human_clinical":
+            safe_args["phone"] = ctx.phone
+            if caregiver_id:
+                safe_args["caregiver_id"] = caregiver_id
+            if not safe_args.get("patient_id") and primary_patient_id:
+                safe_args["patient_id"] = primary_patient_id
             safe_args.setdefault(
                 "conversation_log", list(ctx.active_context_messages or []),
             )
+        elif tool_name == "register_caregiver_report":
+            if caregiver_id:
+                safe_args["caregiver_id"] = caregiver_id
+            safe_args["caregiver_phone"] = ctx.phone
+            if not safe_args.get("patient_id") and primary_patient_id:
+                safe_args["patient_id"] = primary_patient_id
+        elif tool_name == "safety_review_prescriptions":
+            # Só patient_id (pra cascade detection); prescriptions
+            # vêm 100% do LLM
+            if not safe_args.get("patient_id") and primary_patient_id:
+                safe_args["patient_id"] = primary_patient_id
 
         result = execute_tool(
             tool_name, safe_args,
