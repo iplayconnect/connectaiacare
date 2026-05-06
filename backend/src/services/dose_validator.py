@@ -1395,26 +1395,35 @@ def validate(
         )
 
     parsed_dose = parse_dose(dose)
-    if not parsed_dose:
+    dose_parseable = parsed_dose is not None
+    if not dose_parseable:
+        # Bug fix 2026-05-06: ANTES retornávamos early aqui, skipando
+        # Beers/STOPP/interactions/ACB/allergies/duplicate_therapy que
+        # NÃO dependem de dose. Cuidador relatando "diazepam pra dormir"
+        # (sem dose) deveria triggerar Beers `avoid_in_elderly`
+        # warning_strong, mas caía em warning genérico de dose.
+        # Fix: registra issue dose_unparseable e CONTINUA — checks
+        # dose-independent rodam normalmente; checks dose-dependent
+        # (max_daily_dose ratio, narrow_therapeutic_index) ficam skipados.
         issues.append(DoseIssue(
             severity="warning",
             code="dose_unparseable",
             message=f"Não consegui interpretar a dose '{dose}'. Use formato '500mg', '1g', '40UI'.",
             detail={"input_dose": dose},
         ))
-        return ValidationResult(
-            ok=False, severity="warning",
-            principle_active=principle, limit_found=False,
-            computed_daily_dose=None, max_daily_dose=None, ratio=None,
-            issues=issues,
-        )
 
+    # Daily só existe se dose foi parseable
     times = _times_per_day(times_of_day, schedule_type)
-    daily = DoseAmount(value=parsed_dose.value * times, unit=parsed_dose.unit)
+    daily = (
+        DoseAmount(value=parsed_dose.value * times, unit=parsed_dose.unit)
+        if dose_parseable else None
+    )
 
     limit = get_dose_limit(principle, route, age)
 
-    # Cruzamentos de contexto (rodam mesmo sem limit registrado pra essa via)
+    # Cruzamentos de contexto — TODOS dose-independent EXCETO
+    # narrow_therapeutic_index (precisa do limit/dose pra calcular range
+    # estreito). Os outros usam só principle + patient context.
     therapeutic_class = (limit or {}).get("therapeutic_class")
     patient_id = (patient or {}).get("id")
     patient_allergies = (patient or {}).get("allergies") or []
@@ -1422,7 +1431,9 @@ def validate(
     issues.extend(check_allergies(principle, therapeutic_class, patient_allergies))
     issues.extend(check_duplicate_therapy(principle, therapeutic_class, patient_id))
     issues.extend(check_polypharmacy(patient_id))
-    issues.extend(check_narrow_therapeutic_index(limit))
+    if dose_parseable:
+        # narrow_therapeutic_index requer dose pra calcular range
+        issues.extend(check_narrow_therapeutic_index(limit))
     issues.extend(check_drug_interactions(
         principle, therapeutic_class, medication_name, patient_id,
         new_times_of_day=times_of_day,
@@ -1433,6 +1444,22 @@ def validate(
     issues.extend(check_renal_adjustment(principle, patient))
     issues.extend(check_hepatic_adjustment(principle, patient))
     issues.extend(check_vital_constraints(principle, therapeutic_class, patient))
+
+    # Se dose foi unparseable, retorna agora com TODOS os issues coletados
+    # (incluindo Beers/STOPP/interactions rodados acima). Pula apenas
+    # cálculo de ratio max_daily_dose que requer daily.value.
+    if not dose_parseable:
+        max_sev = "info"
+        for iss in issues:
+            if _SEVERITY_RANK.get(iss.severity, 0) > _SEVERITY_RANK.get(max_sev, 0):
+                max_sev = iss.severity
+        return ValidationResult(
+            ok=max_sev not in ("warning_strong", "block"),
+            severity=max_sev,
+            principle_active=principle, limit_found=bool(limit),
+            computed_daily_dose=None, max_daily_dose=None, ratio=None,
+            issues=issues,
+        )
 
     if not limit:
         issues.append(DoseIssue(
