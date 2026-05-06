@@ -267,6 +267,28 @@ export const commercialApi = {
   leadTimeline: (leadId: string) =>
     request<LeadTimeline>(`/api/admin/leads/${leadId}/timeline`),
 
+  // ─── Update lead (drag-drop kanban, etc.) ───
+  updateLead: (
+    leadId: string,
+    payload: Partial<{
+      status: LeadStatus;
+      qualification_score: number;
+      demo_scheduled_at: string;
+      demo_link: string;
+      lost_reason: string;
+      full_name: string;
+      email: string;
+      organization: string;
+      role_self_declared: string;
+      intent: string;
+      last_contact_at: string;
+    }>,
+  ) =>
+    request<{ status: "ok" }>(`/api/admin/leads/${leadId}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+
   createLeadManual: (payload: {
     phone: string;
     full_name?: string;
