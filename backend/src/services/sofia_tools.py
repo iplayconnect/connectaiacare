@@ -468,22 +468,6 @@ def safety_review_prescriptions(
                     patient_id=patient_id, error=str(exc)[:200],
                 )
 
-        # DEBUG temporário: loga estado do patient_ctx pra entender
-        # por que warning_strong de Beers não dispara em prod
-        # (isolated debug retorna correto, em-agent retorna warning).
-        logger.info(
-            "safety_review_input_state",
-            trace_id=trace_id,
-            patient_id_received=patient_id,
-            patient_ctx_loaded=patient_ctx is not None,
-            patient_ctx_age=(patient_ctx or {}).get("age"),
-            patient_ctx_keys=list((patient_ctx or {}).keys()),
-            prescriptions_in=[
-                {"med": p.get("medication_name"), "dose": p.get("dose")}
-                for p in prescriptions
-            ],
-        )
-
         review = svc.safety_review_prescriptions(
             prescriptions=prescriptions, patient=patient_ctx,
         )
@@ -503,8 +487,6 @@ def safety_review_prescriptions(
                 "principles": [
                     r.get("principle_active") for r in review.get("results", [])
                 ],
-                "patient_ctx_age": (patient_ctx or {}).get("age"),
-                "patient_ctx_loaded": patient_ctx is not None,
             },
         )
         return ToolResult(ok=True, data=review)
