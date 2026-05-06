@@ -375,6 +375,399 @@ def escalate_to_human_whatsapp(
 
 
 # ──────────────────────────────────────────────────────────────────
+# Care tools (Phase C v2 PR 2) — pharmacovigilância + report clínico
+#
+# Wrappers finos sobre serviços canônicos. Não duplicam regras —
+# delegam pra dose_validator/cascade_detector via DrugSafetyService.
+# ──────────────────────────────────────────────────────────────────
+
+
+def safety_review_prescriptions(
+    *,
+    prescriptions: list,
+    patient_id: Optional[str] = None,
+    tenant_id: Optional[str] = None,
+    trace_id: Optional[str] = None,
+) -> ToolResult:
+    """Avalia uma ou mais prescrições contra o knowledge graph
+    farmacológico (142 drugs, 93 interações, 151 dose limits, 51 ACB,
+    38 fall risk, 45 renal, 166 hepatic, 10 cascatas).
+
+    Pipeline interno (DrugSafetyService):
+        - dose_validator.validate() — 11 checks integrados pra cada med
+        - cascade_detector.detect_cascades() — dimensão 13 (cascatas
+          de prescrição)
+
+    Idempotência: NÃO aplica — review é puramente consultiva, sem efeito
+    colateral em DB. Pode ser chamada N vezes por turno.
+
+    Args:
+        prescriptions: lista de dicts {medication_name, dose, times_of_day}.
+        patient_id: UUID do paciente (necessário pra cascade detection).
+        tenant_id: scope multi-tenant.
+
+    Returns:
+        ToolResult.data com:
+          results[]: ValidationResult.to_dict pra cada prescription
+          cascades[]: cascatas detectadas (vazio se sem patient_id)
+          max_severity: 'block' | 'warning_strong' | 'warning' | 'info' | None
+          requires_human_review: bool — se True, agent DEVE alertar +
+            escalar pra Henrique/médico
+          meta: contagens
+    """
+    if not prescriptions or not isinstance(prescriptions, list):
+        return ToolResult(
+            ok=False, data={}, error="prescriptions_required_list",
+        )
+
+    try:
+        from src.services.drug_safety_service import get_drug_safety_service
+        svc = get_drug_safety_service()
+        # Carrega patient context (age, allergies, conditions,
+        # creatinina) — afeta TODOS os 11 checks.
+        patient_ctx: Optional[dict] = None
+        if patient_id:
+            try:
+                row = get_postgres().fetch_one(
+                    """SELECT id::text AS id, full_name, birth_date,
+                              gender, conditions, medications, allergies,
+                              serum_creatinine_mg_dl, weight_kg,
+                              height_cm
+                       FROM aia_health_patients
+                       WHERE id = %s AND tenant_id = %s""",
+                    (patient_id, tenant_id),
+                )
+                if row:
+                    from datetime import date
+                    age = None
+                    if row.get("birth_date"):
+                        today = date.today()
+                        bd = row["birth_date"]
+                        age = today.year - bd.year - (
+                            (today.month, today.day) < (bd.month, bd.day)
+                        )
+                    patient_ctx = {
+                        "id": row["id"],
+                        "age": age,
+                        "gender": row.get("gender"),
+                        "conditions": row.get("conditions") or [],
+                        "current_medications": row.get("medications") or [],
+                        "allergies": row.get("allergies") or [],
+                        "creatinine_mgdl": (
+                            float(row["serum_creatinine_mg_dl"])
+                            if row.get("serum_creatinine_mg_dl") else None
+                        ),
+                        "weight_kg": (
+                            float(row["weight_kg"])
+                            if row.get("weight_kg") else None
+                        ),
+                    }
+            except Exception as exc:
+                logger.warning(
+                    "safety_review_patient_load_failed",
+                    patient_id=patient_id, error=str(exc)[:200],
+                )
+
+        review = svc.safety_review_prescriptions(
+            prescriptions=prescriptions, patient=patient_ctx,
+        )
+
+        write_audit(
+            action="drug_safety_reviewed",
+            actor="sofia",
+            tenant_id=tenant_id,
+            trace_id=trace_id,
+            resource_type="patient",
+            resource_id=patient_id,
+            payload={
+                "prescriptions_count": len(prescriptions),
+                "max_severity": review.get("max_severity"),
+                "requires_human_review": review.get("requires_human_review"),
+                "cascades_detected": len(review.get("cascades") or []),
+                "principles": [
+                    r.get("principle_active") for r in review.get("results", [])
+                ],
+            },
+        )
+        return ToolResult(ok=True, data=review)
+    except Exception as exc:
+        logger.exception(
+            "safety_review_failed",
+            trace_id=trace_id, error=str(exc)[:200],
+        )
+        return ToolResult(ok=False, data={}, error=str(exc)[:200])
+
+
+def register_caregiver_report(
+    *,
+    caregiver_id: str,
+    caregiver_phone: str,
+    patient_id: str,
+    report_type: str,
+    summary: str,
+    details: Optional[dict] = None,
+    severity: str = "info",
+    tenant_id: Optional[str] = None,
+    trace_id: Optional[str] = None,
+) -> ToolResult:
+    """Registra report do cuidador em aia_health_reports.
+
+    Schema atual é orientado a relatos de áudio (transcription/analysis)
+    mas aceita texto também. Pra report textual sem áudio:
+        - transcription = summary (texto enviado pelo cuidador)
+        - extracted_entities = details (dados estruturados extraídos)
+        - classification = report_type
+        - needs_medical_attention = severity in ('attention','urgent')
+        - metadata armazena severity + report_type pra retrieval rápido
+
+    Tipos comuns: 'rotina_diaria', 'mudanca_comportamento', 'queda',
+    'sinal_vital', 'recusa_medicacao', 'agitacao', 'medicacao_administrada',
+    'outro'.
+
+    Severity: 'info' | 'attention' | 'urgent'. `urgent` força
+    needs_medical_attention=TRUE pra alertar equipe clínica.
+
+    Idempotência: 1 report do mesmo caregiver+patient+type por hora
+    (anti-spam — cuidador mandar 5x "tudo bem" não cria 5 reports).
+    """
+    if not all([caregiver_id, caregiver_phone, patient_id, report_type, summary]):
+        return ToolResult(
+            ok=False, data={}, error="missing_required_fields",
+        )
+    if severity not in ("info", "attention", "urgent"):
+        severity = "info"
+
+    idem_key = f"{caregiver_id}:{patient_id}:{report_type}"
+    if not is_first_occurrence("caregiver_report", idem_key, ttl_seconds=3600):
+        logger.info(
+            "caregiver_report_idempotent_skip",
+            caregiver_id=caregiver_id,
+            patient_id=patient_id,
+            report_type=report_type,
+            trace_id=trace_id,
+        )
+        return ToolResult(
+            ok=True, data={}, idempotent_skip=True,
+            error="similar_report_in_last_hour",
+        )
+
+    needs_attention = severity in ("attention", "urgent")
+    metadata_blob = {
+        "report_type": report_type,
+        "severity": severity,
+        "source_channel": "whatsapp",
+        "trace_id": trace_id,
+    }
+
+    db = get_postgres()
+    try:
+        row = db.insert_returning(
+            """INSERT INTO aia_health_reports (
+                tenant_id, caregiver_id, caregiver_phone, patient_id,
+                transcription, classification, extracted_entities,
+                needs_medical_attention, status,
+                metadata, received_at, reporter_person_type
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb,
+                      %s, 'received',
+                      %s::jsonb, NOW(), 'caregiver')
+            RETURNING id::text AS id""",
+            (
+                tenant_id, caregiver_id, caregiver_phone, patient_id,
+                summary[:5000], report_type,
+                json.dumps(details or {}),
+                needs_attention,
+                json.dumps(metadata_blob),
+            ),
+        )
+        report_id = (row or {}).get("id")
+        write_audit(
+            action="caregiver_report_registered",
+            actor="sofia",
+            tenant_id=tenant_id,
+            trace_id=trace_id,
+            resource_type="report",
+            resource_id=report_id,
+            payload={
+                "caregiver_id": caregiver_id,
+                "patient_id": patient_id,
+                "type": report_type,
+                "severity": severity,
+                "needs_medical_attention": needs_attention,
+            },
+        )
+        return ToolResult(ok=True, data={
+            "report_id": report_id,
+            "severity": severity,
+            "needs_medical_attention": needs_attention,
+        })
+    except Exception as exc:
+        logger.exception(
+            "caregiver_report_failed",
+            caregiver_id=caregiver_id, patient_id=patient_id,
+            trace_id=trace_id, error=str(exc)[:200],
+        )
+        return ToolResult(ok=False, data={}, error=str(exc)[:200])
+
+
+def escalate_to_human_clinical(
+    *,
+    phone: str,
+    reason: str,
+    summary: str,
+    patient_id: Optional[str] = None,
+    caregiver_id: Optional[str] = None,
+    drug_safety_findings: Optional[dict] = None,
+    urgency: str = "P2",
+    tenant_id: Optional[str] = None,
+    trace_id: Optional[str] = None,
+    session_id: Optional[str] = None,
+    conversation_log: Optional[list] = None,
+) -> ToolResult:
+    """Variant clínica do escalate_to_human_whatsapp.
+
+    Diferença: campos extras pra contexto clínico (drug_safety_findings,
+    patient_id, caregiver_id) que vão pro contexto de quem reivindicar
+    o handoff. Notifica grupo de plantão CLÍNICO (Henrique/médico) em
+    vez do comercial.
+
+    Idempotência: 1 handoff clínico por phone+patient por 30min.
+    """
+    if not phone or not reason or not summary:
+        return ToolResult(ok=False, data={}, error="missing_required_fields")
+
+    from src.services.identity_resolver import normalize_phone_e164_br
+    canonical_phone = normalize_phone_e164_br(phone) or phone
+
+    idem_key = f"{canonical_phone}:{patient_id or 'no_patient'}:clinical_handoff"
+    if not is_first_occurrence("escalate_clinical", idem_key, ttl_seconds=1800):
+        logger.info(
+            "clinical_escalate_idempotent_skip",
+            phone=canonical_phone,
+            patient_id=patient_id,
+            trace_id=trace_id,
+        )
+        return ToolResult(
+            ok=True, data={}, idempotent_skip=True,
+            error="similar_clinical_escalate_in_last_30min",
+        )
+
+    valid_urgency = urgency if urgency in ("P1", "P2", "P3") else "P2"
+    sla_seconds = {"P1": 300, "P2": 1800, "P3": 7200}[valid_urgency]
+
+    # Enriquece summary com findings clínicas (cuidador clica e vê tudo
+    # de uma vez no painel — sem precisar abrir N abas).
+    enriched_summary = summary
+    if drug_safety_findings:
+        ds = drug_safety_findings
+        max_sev = ds.get("max_severity") or "?"
+        principles = []
+        for r in ds.get("results", []) or []:
+            p = r.get("principle_active")
+            sev = r.get("severity")
+            if p:
+                principles.append(f"{p}({sev})")
+        cascades = len(ds.get("cascades") or [])
+        enriched_summary += (
+            f"\n\n[DRUG SAFETY] max_severity={max_sev}; "
+            f"meds={', '.join(principles) or 'n/a'}; "
+            f"cascades={cascades}"
+        )
+
+    db = get_postgres()
+    try:
+        phone = canonical_phone
+        row = db.insert_returning(
+            """INSERT INTO aia_health_human_handoff_queue (
+                trace_id, phone, tenant_id, channel, reason,
+                context_summary, conversation_log,
+                triggered_by, priority, status, sla_target_seconds,
+                handoff_type, patient_id, caregiver_id
+            ) VALUES (%s, %s, %s, 'whatsapp', %s, %s, %s::jsonb,
+                      'sofia', %s, 'pending', %s,
+                      'clinical', %s, %s)
+            RETURNING id""",
+            (
+                trace_id, phone, tenant_id, reason, enriched_summary,
+                json.dumps(conversation_log or []),
+                valid_urgency, sla_seconds,
+                patient_id, caregiver_id,
+            ),
+        )
+        handoff_id = str(row["id"]) if row else "?"
+
+        # Dispara notificação pra Central 24h CLÍNICA (mesmo phone do
+        # comercial por enquanto — Phase C v2.x criará canal clínico
+        # dedicado quando Henrique tiver número operacional).
+        try:
+            central_text = (
+                f"[HANDOFF CLÍNICO · {valid_urgency}]\n\n"
+                f"Phone do cuidador: {phone}\n"
+                f"Motivo: {reason}\n"
+                f"Tenant: {tenant_id}\n"
+                f"Patient: {patient_id or 'n/a'}\n"
+                f"Caregiver: {caregiver_id or 'n/a'}\n"
+                f"Trace: {trace_id}\n\n"
+                f"Resumo:\n{enriched_summary[:1500]}\n\n"
+                f"Reivindique em /admin/system/operations/handoff "
+                f"(handoff_id={handoff_id}).\n\n"
+                "— Sofia · ConnectaIACare (Care)"
+            )
+            get_event_bus().publish(Streams.OUTBOUND, {
+                "tenant_id": tenant_id,
+                "trace_id": trace_id,
+                "phone": CENTRAL_24H_PHONE,
+                "message_type": "text",
+                "text": central_text,
+                "metadata": {
+                    "reason": "central_24h_clinical_handoff_notify",
+                    "handoff_id": handoff_id,
+                    "handoff_type": "clinical",
+                },
+            })
+            db.execute(
+                "UPDATE aia_health_human_handoff_queue "
+                "SET notified_central_at = NOW() WHERE id = %s",
+                (handoff_id,),
+            )
+        except Exception as exc:
+            logger.warning(
+                "clinical_central_notify_failed",
+                handoff_id=handoff_id, error=str(exc)[:200],
+            )
+
+        write_audit(
+            action="clinical_handoff_initiated",
+            actor="sofia",
+            tenant_id=tenant_id,
+            trace_id=trace_id,
+            session_id=session_id,
+            resource_type="handoff",
+            resource_id=handoff_id,
+            payload={
+                "reason": reason,
+                "urgency": valid_urgency,
+                "patient_id": patient_id,
+                "caregiver_id": caregiver_id,
+                "drug_safety_max_severity": (
+                    (drug_safety_findings or {}).get("max_severity")
+                ),
+            },
+        )
+        return ToolResult(ok=True, data={
+            "handoff_id": handoff_id,
+            "handoff_type": "clinical",
+            "urgency": valid_urgency,
+            "central_notified_via_stream": True,
+        })
+    except Exception as exc:
+        logger.exception(
+            "clinical_escalate_failed", trace_id=trace_id,
+            error=str(exc)[:200],
+        )
+        return ToolResult(ok=False, data={}, error=str(exc)[:200])
+
+
+# ──────────────────────────────────────────────────────────────────
 # Tool registry
 # ──────────────────────────────────────────────────────────────────
 
@@ -383,6 +776,10 @@ TOOL_REGISTRY = {
     "capture_lead": capture_lead,
     "schedule_demo": schedule_demo,
     "escalate_to_human_whatsapp": escalate_to_human_whatsapp,
+    # Care tools (Phase C v2)
+    "safety_review_prescriptions": safety_review_prescriptions,
+    "register_caregiver_report": register_caregiver_report,
+    "escalate_to_human_clinical": escalate_to_human_clinical,
 }
 
 
