@@ -465,7 +465,11 @@ class SuperSofiaOrchestrator:
             t.get("ok") in (True, None)
             for t in response.tools_called
         )
-        CLINICAL_AGENTS = ("clinical", "caregiver", "family")  # futuros
+        # 'care' = CareSofiaAgent (Phase C v2 PR 2). Ativa guardrail
+        # anti-hallucination clínico: se LLM narrar PA/medicação/dose
+        # que NÃO está em tools chamadas E NÃO foi mencionado pelo user,
+        # text é substituído por fallback genérico.
+        CLINICAL_AGENTS = ("care", "clinical", "caregiver", "family")
         if response.text and agent.name in CLINICAL_AGENTS:
             clinical_pattern = _is_clinical_narration(response.text)
             user_already_mentioned = False
