@@ -40,12 +40,16 @@ def install_inbound_handler() -> None:
             caller_phone, call_id,
         )
 
-        # Resolve quem está ligando — busca em caregivers, users e
-        # patients pelo phone. Sem isso a Sofia atende em branco
-        # (sem memória/contexto), o que mata o valor da plataforma.
-        from services.caller_resolver import resolve_caller
+        # Resolve quem está ligando. Phase C v2.x Fase 3:
+        # resolve_caller_unified prefere backend identity_resolver
+        # (5 lookups + cache Redis, mesma lógica que CareSofiaAgent
+        # no WhatsApp), com fallback automático pra resolve_caller
+        # local se backend indisponível.
+        from services.caller_resolver import resolve_caller_unified
         try:
-            resolved = resolve_caller(caller_phone, Config.DEFAULT_TENANT)
+            resolved = resolve_caller_unified(
+                caller_phone, Config.DEFAULT_TENANT,
+            )
         except Exception as exc:
             logger.warning("caller_resolve_failed: %s", exc)
             resolved = {

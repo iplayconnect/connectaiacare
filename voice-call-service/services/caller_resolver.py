@@ -311,3 +311,58 @@ def _enrich_patient_context(pat: dict) -> dict:
         pass
 
     return base
+
+
+# ─────────────────────────────────────────────────────────────────
+# Phase C v2.x — Fase 3: identity resolution unificada
+# ─────────────────────────────────────────────────────────────────
+
+def resolve_caller_unified(
+    caller_phone: str, tenant_id: str,
+) -> dict[str, Any]:
+    """Resolve caller via backend identity_resolver (5 lookups + cache
+    Redis), com fallback pra resolve_caller local (4 lookups) se backend
+    indisponível.
+
+    Drop-in replacement do resolve_caller — mesmo dict-shape de retorno.
+    Vantagem: cuidador/médico/enfermeiro/familia resolvidos com mesma
+    lógica que CareSofiaAgent no WhatsApp + cache Redis 60s automático.
+
+    Phase C v2.x Fase 3: voice-call-service migra pra essa função.
+    Função antiga resolve_caller fica como fallback de emergência.
+    """
+    from config import Config
+    import os
+
+    # Tenta backend primeiro
+    try:
+        import httpx
+        url = f"{Config.BACKEND_API_URL}/api/internal/identity/resolve"
+        headers = {"Content-Type": "application/json"}
+        internal_key = os.getenv("SOFIA_INTERNAL_KEY", "")
+        if internal_key:
+            headers["X-Internal-Key"] = internal_key
+        r = httpx.post(
+            url,
+            json={"phone": caller_phone, "tenant_id": tenant_id},
+            headers=headers,
+            timeout=2.5,  # ligação tocando — não pode demorar
+        )
+        if r.status_code == 200:
+            body = r.json() or {}
+            if body.get("status") == "ok":
+                body.pop("status", None)
+                return body
+        logger.warning(
+            "identity_resolve_backend_http_%d phone=%s",
+            r.status_code, caller_phone,
+        )
+    except Exception as exc:
+        logger.warning(
+            "identity_resolve_backend_failed phone=%s error=%s",
+            caller_phone, str(exc)[:200],
+        )
+
+    # Fallback: resolve_caller local (lookups direto no DB)
+    logger.info("identity_resolve_falling_back_to_local phone=%s", caller_phone)
+    return resolve_caller(caller_phone, tenant_id)

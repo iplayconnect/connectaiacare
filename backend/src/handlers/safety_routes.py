@@ -247,6 +247,108 @@ def internal_conversation_persist_message():
         }), 500
 
 
+# ──────────── Identity resolve (chamado por voice-call-service) ────────────
+
+@bp.post("/api/internal/identity/resolve")
+def internal_identity_resolve():
+    """Endpoint interno (sem JWT) chamado por voice-call-service /
+    sofia-service quando ligação SIP/Voz Web chega — resolve quem
+    está ligando.
+
+    Phase C v2.x — unificação canal Fase 3:
+    Substitui voice-call-service/caller_resolver.py próprio. Backend
+    tem identity_resolver com 5 lookups (users, caregivers,
+    patients.proactive_call_phone, patients.responsible, phone_history)
+    + cache Redis. Voice/sofia ganha mesma robustez e mesma resolução
+    que CareSofiaAgent no WhatsApp usa.
+
+    Auth: header X-Internal-Key opcional.
+
+    Body:
+        {
+            "phone": "5551...",
+            "tenant_id": "connectaiacare_demo" (opcional)
+        }
+
+    Response (formato voice-style pra compatibilidade com
+    caller_resolver.resolve_caller existente — drop-in replacement):
+        {
+            "status": "ok",
+            "patient_id": "uuid"|None,
+            "caregiver_id": "uuid"|None,
+            "user_id": "uuid"|None,
+            "full_name": "...",
+            "persona": "cuidador_pro|paciente_b2c|familia|medico|enfermeiro|anonymous",
+            "phone_type": "personal|shared|unknown",
+            "extra_context": {patient: dict|None, ...},
+            "tenant_id": "..." (do match primary)
+        }
+    """
+    import os
+    expected_key = os.getenv("SOFIA_INTERNAL_KEY", "")
+    if expected_key:
+        provided = request.headers.get("X-Internal-Key", "")
+        if provided != expected_key:
+            return jsonify({
+                "status": "error", "reason": "unauthorized",
+            }), 401
+
+    body = request.get_json(silent=True) or {}
+    phone = body.get("phone")
+    tenant_id = body.get("tenant_id")
+
+    if not phone:
+        return jsonify({
+            "status": "error", "reason": "phone_required",
+        }), 400
+
+    try:
+        from src.services.identity_resolver import get_identity_resolver
+        identity = get_identity_resolver().resolve(phone, tenant_id=tenant_id)
+
+        # Mapeia identity (objeto Identity com matches[]) pro formato
+        # legacy voice-style (1 caller único — usa primary).
+        primary = identity.primary
+        if not primary:
+            return jsonify({
+                "status": "ok",
+                "patient_id": None,
+                "caregiver_id": None,
+                "user_id": None,
+                "full_name": "",
+                "persona": "anonymous",
+                "phone_type": "unknown",
+                "extra_context": {},
+                "tenant_id": tenant_id,
+            }), 200
+
+        # Persona derivada do profile do primary match
+        persona = primary.profile or "anonymous"
+        # Compatibilidade com caller_resolver: 'cuidador' → 'cuidador_pro'
+        # caller_resolver historicamente sempre usou 'cuidador_pro'
+        if persona == "cuidador":
+            persona = "cuidador_pro"
+
+        return jsonify({
+            "status": "ok",
+            "patient_id": primary.patient_id,
+            "caregiver_id": primary.caregiver_id,
+            "user_id": primary.user_id,
+            "full_name": primary.full_name or "",
+            "persona": persona,
+            "phone_type": primary.extra.get("phone_type", "unknown") if primary.extra else "unknown",
+            "extra_context": primary.extra or {},
+            "tenant_id": primary.tenant_id,
+            "confidence": primary.confidence,
+            "matches_count": len(identity.matches),
+        }), 200
+    except Exception as exc:
+        logger.exception("internal_identity_resolve_failed")
+        return jsonify({
+            "status": "error", "reason": str(exc)[:200],
+        }), 500
+
+
 # ──────────── Queue: humano decide ────────────
 
 @bp.get("/api/safety/queue")
