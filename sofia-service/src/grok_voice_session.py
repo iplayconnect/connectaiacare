@@ -397,6 +397,35 @@ class GrokVoiceSession:
                     model=DEFAULT_GROK_MODEL,
                     metadata={"channel": "voice", "provider": "grok"},
                 )
+                # Phase C v2.x — Fase 2: persistência canonical
+                # cross-channel em aia_health_conversation_messages.
+                # Best-effort, paralelo a sofia_messages legada.
+                try:
+                    persistence.persist_conversation_message_canonical(
+                        tenant_id=self.tenant_id,
+                        phone=self.persona_ctx.get("phone") or "",
+                        role="assistant",
+                        direction="outbound",
+                        content=full,
+                        session_id=self.session_id,
+                        external_id=self.session_id,
+                        subject_id=(
+                            self.persona_ctx.get("caregiver_id")
+                            or self.persona_ctx.get("patient_id")
+                            or self.persona_ctx.get("user_id")
+                        ),
+                        subject_type=(
+                            "caregiver" if self.persona_ctx.get("caregiver_id")
+                            else "patient" if self.persona_ctx.get("patient_id")
+                            else "user" if self.persona_ctx.get("user_id")
+                            else "anonymous"
+                        ),
+                        processing_agent="grok_voice",
+                        channel="voice",
+                        metadata={"model": DEFAULT_GROK_MODEL},
+                    )
+                except Exception:
+                    pass
             return
 
         # ── Transcript user (input STT pelo Grok/Whisper) ──
@@ -415,6 +444,32 @@ class GrokVoiceSession:
                     content=full,
                     metadata={"channel": "voice", "provider": "grok"},
                 )
+                # Phase C v2.x — Fase 2: persistência canonical
+                try:
+                    persistence.persist_conversation_message_canonical(
+                        tenant_id=self.tenant_id,
+                        phone=self.persona_ctx.get("phone") or "",
+                        role="user",
+                        direction="inbound",
+                        content=full,
+                        session_id=self.session_id,
+                        external_id=self.session_id,
+                        subject_id=(
+                            self.persona_ctx.get("caregiver_id")
+                            or self.persona_ctx.get("patient_id")
+                            or self.persona_ctx.get("user_id")
+                        ),
+                        subject_type=(
+                            "caregiver" if self.persona_ctx.get("caregiver_id")
+                            else "patient" if self.persona_ctx.get("patient_id")
+                            else "user" if self.persona_ctx.get("user_id")
+                            else "anonymous"
+                        ),
+                        channel="voice",
+                        metadata={"stt_provider": "grok"},
+                    )
+                except Exception:
+                    pass
             return
 
         # ── VAD events ──

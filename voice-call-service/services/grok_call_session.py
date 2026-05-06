@@ -681,6 +681,45 @@ class GrokCallSession:
                         content=text,
                         model=Config.GROK_VOICE_MODEL,
                     )
+                    # Phase C v2.x — Fase 2: persistência canonical
+                    # cross-channel em conversation_messages. Mesma
+                    # tabela que CareSofiaAgent escreve no WhatsApp.
+                    # Best-effort, não bloqueia turno.
+                    try:
+                        from services.persistence import (
+                            persist_conversation_message_canonical,
+                        )
+                        persist_conversation_message_canonical(
+                            tenant_id=self.tenant_id,
+                            phone=self.persona_ctx.get("phone") or "",
+                            role="assistant",
+                            direction="outbound",
+                            content=text,
+                            session_id=self.session_id,
+                            external_id=self.session_id,
+                            subject_id=(
+                                self.persona_ctx.get("caregiver_id")
+                                or self.persona_ctx.get("patient_id")
+                                or self.persona_ctx.get("user_id")
+                            ),
+                            subject_type=(
+                                "caregiver" if self.persona_ctx.get("caregiver_id")
+                                else "patient" if self.persona_ctx.get("patient_id")
+                                else "user" if self.persona_ctx.get("user_id")
+                                else "anonymous"
+                            ),
+                            processing_agent="grok_voice",
+                            channel=(
+                                "voip" if self.persona_ctx.get("via_sip")
+                                else "voice"
+                            ),
+                            metadata={
+                                "model": Config.GROK_VOICE_MODEL,
+                                "had_valid_tool": self._current_response_had_valid_tool,
+                            },
+                        )
+                    except Exception:
+                        pass
             return
 
         # Transcript usuário (STT do Grok/Whisper)
@@ -707,6 +746,42 @@ class GrokCallSession:
                     role="user",
                     content=text,
                 )
+                # Phase C v2.x — Fase 2: persistência canonical
+                # cross-channel em conversation_messages.
+                try:
+                    from services.persistence import (
+                        persist_conversation_message_canonical,
+                    )
+                    persist_conversation_message_canonical(
+                        tenant_id=self.tenant_id,
+                        phone=self.persona_ctx.get("phone") or "",
+                        role="user",
+                        direction="inbound",
+                        content=text,
+                        session_id=self.session_id,
+                        external_id=self.session_id,
+                        subject_id=(
+                            self.persona_ctx.get("caregiver_id")
+                            or self.persona_ctx.get("patient_id")
+                            or self.persona_ctx.get("user_id")
+                        ),
+                        subject_type=(
+                            "caregiver" if self.persona_ctx.get("caregiver_id")
+                            else "patient" if self.persona_ctx.get("patient_id")
+                            else "user" if self.persona_ctx.get("user_id")
+                            else "anonymous"
+                        ),
+                        channel=(
+                            "voip" if self.persona_ctx.get("via_sip")
+                            else "voice"
+                        ),
+                        metadata={
+                            "stt_provider": "grok_voice",
+                            "persona": self.persona,
+                        },
+                    )
+                except Exception:
+                    pass
             return
 
         # Tool call args completos

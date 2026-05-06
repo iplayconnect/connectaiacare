@@ -204,6 +204,80 @@ def close_session(session_id: str | None) -> None:
     )
 
 
+def persist_conversation_message_canonical(
+    *,
+    tenant_id: str,
+    phone: str,
+    role: str,           # 'user' | 'assistant' | 'system' | 'tool'
+    direction: str,      # 'inbound' | 'outbound'
+    content: str,
+    session_id: str | None = None,
+    external_id: str | None = None,
+    subject_id: str | None = None,
+    subject_type: str | None = None,
+    processing_agent: str | None = None,
+    processing_duration_ms: int | None = None,
+    metadata: dict | None = None,
+    channel: str = "voice_call",
+) -> str | None:
+    """Persiste turno em aia_health_conversation_messages via HTTP
+    /api/internal/conversation/persist-message no backend api:5055.
+
+    Phase C v2.x — unificação canal Fase 2:
+    Mesma tabela canonical que CareSofiaAgent escreve no WhatsApp.
+    Painel operador agora vê histórico cross-channel completo.
+
+    Best-effort: falha não bloqueia turno (logger.warning + None).
+    Chamadas existentes em append_active_context + append_message_voice_call
+    continuam funcionando — esse persist é ADITIVO.
+    """
+    if not all([tenant_id, phone, role, direction, content]):
+        return None
+
+    payload = {
+        "tenant_id": tenant_id,
+        "phone": phone,
+        "role": role,
+        "direction": direction,
+        "content": content,
+        "channel": channel,
+        "session_id": session_id,
+        "external_id": external_id,
+        "subject_id": subject_id,
+        "subject_type": subject_type,
+        "processing_agent": processing_agent,
+        "processing_duration_ms": processing_duration_ms,
+        "metadata": metadata or {},
+    }
+
+    headers = {"Content-Type": "application/json"}
+    import os as _os
+    internal_key = _os.getenv("SOFIA_INTERNAL_KEY", "")
+    if internal_key:
+        headers["X-Internal-Key"] = internal_key
+
+    try:
+        import httpx
+        url = f"{Config.BACKEND_API_URL}/api/internal/conversation/persist-message"
+        # Timeout curto — voice é latency-sensitive. Falha rápida em
+        # rede ruim, mas active_context já cuida da memória mínima.
+        r = httpx.post(url, json=payload, headers=headers, timeout=3.0)
+        if r.status_code != 200:
+            logger.warning(
+                "conv_persist_canonical_http_%d session=%s body=%s",
+                r.status_code, session_id, r.text[:200],
+            )
+            return None
+        body = r.json() or {}
+        return body.get("message_id")
+    except Exception as exc:
+        logger.warning(
+            "conv_persist_canonical_failed session=%s error=%s",
+            session_id, str(exc)[:200],
+        )
+        return None
+
+
 def append_message_voice_call(
     *, session_id: str, tenant_id: str, role: str, content: str | None = None,
     tool_name: str | None = None, tool_input: dict | None = None,
