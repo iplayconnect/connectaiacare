@@ -1203,6 +1203,148 @@ def _build_tools_for_call(
             },
         ])
 
+    # ─── Phase D Comercial: tools do funil pra Sofia comercial/voip
+    # operar lead → demo → proposta → conversão. Habilitadas pra
+    # personas comerciais E pra admin/super_admin que podem testar
+    # ou operar manualmente. Cuidador comum NÃO tem (não é trabalho
+    # dele captar lead).
+    if persona in (
+        "comercial", "anonymous", "admin_tenant", "super_admin",
+    ):
+        base.extend([
+            {
+                "type": "function",
+                "name": "query_plans",
+                "description": "Consulta o catálogo de planos vendáveis pra apresentar ao lead. Use quando lead pergunta 'quanto custa', 'quais planos têm', 'tem opção mais barata'. Retorna plans com sku/name/preço/features/pitch.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "target_persona": {
+                            "type": "string",
+                            "enum": ["individual", "familia", "ilpi", "clinica", "hospital", "parceiro"],
+                            "description": "Filtra por perfil do lead. Ex: 'ilpi' se lead é gestor de lar de idosos.",
+                        },
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "name": "capture_lead",
+                "description": "Captura/atualiza dados do lead em aia_health_leads. CHAME ASSIM QUE souber o NOME do lead, mesmo que faltem dados. É IDEMPOTENTE — pode chamar de novo nos turnos seguintes pra adicionar org/role/notes. NUNCA termine ligação sem chamar isso se sabe o nome.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "phone": {"type": "string", "description": "Phone E.164 (vem em CONTEXTO)"},
+                        "intent": {
+                            "type": "string",
+                            "enum": ["interesse_servico_b2c", "interesse_servico_b2b", "agendar_demo", "duvida_geral", "outro"],
+                        },
+                        "full_name": {"type": "string"},
+                        "email": {"type": "string"},
+                        "organization": {"type": "string"},
+                        "role_self_declared": {"type": "string"},
+                        "notes": {"type": "string", "description": "Resumo da dor/contexto do lead."},
+                    },
+                    "required": ["intent", "full_name"],
+                },
+            },
+            {
+                "type": "function",
+                "name": "schedule_demo_with_calendar",
+                "description": "Agenda demo COM data/hora explícita. Use quando lead aceita demo e dá horário. Cria row em lead_demos. Idempotente por dia.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "scheduled_at": {"type": "string", "description": "ISO 8601 com timezone, ex: '2026-05-09T14:00:00-03:00'"},
+                        "duration_minutes": {"type": "integer", "description": "Default 30."},
+                        "full_name": {"type": "string"},
+                        "organization": {"type": "string"},
+                        "plan_focus_sku": {"type": "string", "description": "SKU do plano que vamos demonstrar (de query_plans)"},
+                        "notes": {"type": "string"},
+                    },
+                    "required": ["scheduled_at"],
+                },
+            },
+            {
+                "type": "function",
+                "name": "schedule_callback_call",
+                "description": "Agenda ligação de retorno. Use quando lead diz 'me liga depois', 'amanhã às 14h tô livre'. Cria row em lead_calls com next_action_at.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "scheduled_at": {"type": "string", "description": "ISO 8601 com timezone."},
+                        "call_type": {
+                            "type": "string",
+                            "enum": ["discovery", "follow_up", "callback", "proposal", "closing", "qualification"],
+                        },
+                        "full_name": {"type": "string"},
+                        "notes": {"type": "string"},
+                    },
+                    "required": ["scheduled_at"],
+                },
+            },
+            {
+                "type": "function",
+                "name": "register_lead_activity",
+                "description": "Anota observação no timeline do lead. Use pra capturar sinais que não disparam outras tools: objeção levantada, sentimento positivo/negativo, preferência mencionada, indicação de orçamento/decisor.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "activity_type": {
+                            "type": "string",
+                            "enum": ["note_added", "qualification_signal", "objection_raised", "positive_feedback", "concern_raised"],
+                        },
+                        "summary": {"type": "string", "description": "1 linha pra timeline"},
+                        "importance": {"type": "string", "enum": ["minor", "normal", "important", "critical"]},
+                    },
+                    "required": ["activity_type", "summary"],
+                },
+            },
+            {
+                "type": "function",
+                "name": "send_proposal",
+                "description": "Registra envio de proposta (com plano + valor + validade). Use APÓS lead confirmar interesse. Cria row em lead_proposals + atualiza lead.status='proposal_sent'. Idempotente por (lead, plano).",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "plan_sku": {"type": "string", "description": "SKU do plano (de query_plans)"},
+                        "custom_price_monthly_cents": {"type": "integer", "description": "Override do preço do plano (se negociado)"},
+                        "discount_percent": {"type": "number", "description": "Desconto % (negociação)"},
+                        "valid_until": {"type": "string", "description": "Data ISO YYYY-MM-DD validade da proposta"},
+                        "sent_via": {"type": "string", "enum": ["email", "whatsapp", "in_demo", "voice_call"]},
+                        "notes": {"type": "string"},
+                    },
+                    "required": ["plan_sku"],
+                },
+            },
+            {
+                "type": "function",
+                "name": "get_lead_status",
+                "description": "Consulta status atual do lead pelo phone. USE NO INÍCIO da ligação se phone já bate com lead conhecido — você descobre se ele é novo, qualificado, em demo, com proposta ativa, e pode continuar de onde parou.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {},
+                },
+            },
+            {
+                "type": "function",
+                "name": "update_lead_qualification",
+                "description": "Atualiza score de qualificação (0-100) baseado em sinais captados. Heurística: 0-30 frio, 30-60 morno, 60-80 quente, 80+ pronto pra fechar. Pode também avançar o status (qualified, proposal_sent, lost).",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "qualification_score": {"type": "integer", "description": "0-100"},
+                        "new_status": {
+                            "type": "string",
+                            "enum": ["new", "qualified", "demo_scheduled", "in_demo", "proposal_sent", "converted", "lost"],
+                        },
+                        "reason": {"type": "string", "description": "Por que o score mudou (sinal captado)"},
+                    },
+                    "required": ["qualification_score"],
+                },
+            },
+        ])
+
     # Filtro final: se scenario passou allowed, intersecciona
     if allowed:
         allowed_set = set(allowed)
