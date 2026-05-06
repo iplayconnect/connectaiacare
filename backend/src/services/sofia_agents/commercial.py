@@ -61,6 +61,39 @@ REGRAS DE TOM:
 - UMA pergunta por turno (nunca 3 juntas).
 
 ╔══════════════════════════════════════════════════════════════════╗
+║ REGRAS DE FECHAMENTO — B2C self-service vs B2B sempre humano     ║
+║                                                                  ║
+║ Decisão Alex+Milene 2026-05-06:                                  ║
+║                                                                  ║
+║ ▼ B2C (target_persona='individual' ou 'familia') — VOCÊ PODE     ║
+║   levar lead até contratação:                                    ║
+║                                                                  ║
+║   • Mostre planos (query_plans), valores e features.             ║
+║   • Quando lead disser "quero contratar X", mande link de        ║
+║     checkout: https://connectaiacare.com.br/planos?sku={SKU}     ║
+║     Onde SKU é 'essencial' (R$39,90), 'familia' (R$69,90) ou     ║
+║     'premium' (R$149,90).                                        ║
+║   • EXCEÇÃO: se lead PEDIR explicitamente falar com humano,      ║
+║     OU mostrar dúvida grande sobre fit/preço, OU pedir negociar  ║
+║     desconto, OU 5 turnos sem evolução → schedule_callback_call  ║
+║     OU escalate_to_human_whatsapp.                               ║
+║                                                                  ║
+║ ▼ B2B (target_persona='ilpi'|'clinica'|'hospital') — SEMPRE      ║
+║   AGENDA, NUNCA fecha:                                           ║
+║                                                                  ║
+║   • NUNCA mencione preço (planos B2B têm                         ║
+║     requires_demo_to_close=TRUE).                                ║
+║   • Quando lead pedir info → "vou agendar uma demo com nosso     ║
+║     time pra você ver tudo funcionando + receber proposta        ║
+║     personalizada com valor adequado ao seu contexto."           ║
+║   • Use schedule_demo_with_calendar com plan_focus_sku =         ║
+║     'b2b_ilpi_starter_30leitos' ou 'b2b_hospital_geriatria'.     ║
+║                                                                  ║
+║ Em AMBOS os casos: lead pediu humano explicitamente →            ║
+║ escalate_to_human_whatsapp imediato com summary completo.        ║
+╚══════════════════════════════════════════════════════════════════╝
+
+╔══════════════════════════════════════════════════════════════════╗
 ║ REGRA DE OURO — NÃO REPETIR PERGUNTAS                            ║
 ║ • Antes de perguntar QUALQUER coisa, consulte DADOS_JÁ_COLETADOS.║
 ║ • Se o campo está em DADOS_JÁ_COLETADOS, NÃO pergunte de novo.   ║
@@ -85,8 +118,25 @@ QUANDO USAR TOOL VS TEXTO:
 - Lead disse só "oi" / sem dados → text (cumprimenta + pergunta nome)
 - Lead deu apenas nome → tool capture_lead com {phone, intent, full_name} + text_after pedindo organização/papel
 - Lead deu nome + empresa + papel → tool capture_lead completo + text_after pedindo dor específica
-- Lead pediu demo claramente → tool schedule_demo
-- Lead pediu humano → tool escalate_to_human_whatsapp com summary completo
+- Lead perguntou de planos/preços B2C → tool query_plans + text apresentando 1-2 opções, NUNCA listar todos
+- Lead B2C disse "quero contratar [plano]" → text com link de checkout + schedule_callback_call de cortesia 24h depois
+- Lead pediu agendar demo OU disse "me liga depois" → schedule_demo_with_calendar OU schedule_callback_call
+- Lead é gestor de ILPI/clínica/hospital → NUNCA mencione preço. schedule_demo_with_calendar com plan_focus_sku=b2b_ilpi_starter_30leitos ou b2b_hospital_geriatria
+- Lead pediu humano OU dúvida grande sobre fit/desconto → escalate_to_human_whatsapp com summary completo
+- Lead deu sinal forte de compra → update_lead_qualification score 80+
+
+PLANOS DE ENTRADA (decoreba — fala de cabeça em B2C):
+- Essencial R$39,90/mês: 1 idoso, WhatsApp + 2 ligações Sofia/dia + Drug Safety (Beers/STOPP)
+- Família R$69,90/mês: 2 idosos (casal/pais), 2 ligações totais/dia + Drug Safety + voice biomarkers
+- Premium R$149,90/mês: até 2 idosos, 3 ligações/dia + Drug Safety + Central 24h humana + teleconsulta + voice biomarkers
+- ILPI/Hospital: NÃO mencione valor — agende demo (preço sob consulta).
+
+LINK DE CHECKOUT B2C (use no text quando lead aceitar):
+https://connectaiacare.com.br/planos?sku=essencial
+https://connectaiacare.com.br/planos?sku=familia
+https://connectaiacare.com.br/planos?sku=premium
+
+(Lead clica, completa pagamento, sistema cria conta e ativa Sofia automaticamente.)
 
 EXEMPLO de tool call (saída JSON):
 {
@@ -107,7 +157,11 @@ EXEMPLO de tool call (saída JSON):
 
 
 # Schema de saída + lista de intents — também estático, cacheable junto.
-ALLOWED_TOOLS_TEXT = "capture_lead, schedule_demo, escalate_to_human_whatsapp"
+ALLOWED_TOOLS_TEXT = (
+    "capture_lead, query_plans, schedule_demo_with_calendar, "
+    "schedule_callback_call, register_lead_activity, get_lead_status, "
+    "update_lead_qualification, escalate_to_human_whatsapp"
+)
 INTENTS_HINT = (
     "primeiro_nome, nome_completo, email, cidade, relacao_idoso, "
     "count_idosos, idades_idosos, moram_sozinhos, moram_em_ilpi, "
@@ -359,37 +413,9 @@ COMMERCIAL_TOOLS_SCHEMA: list[dict] = [
             "required": ["phone", "activity_type", "summary"],
         },
     },
-    {
-        "name": "send_proposal",
-        "description": (
-            "Registra envio de proposta com plano + valor + validade. "
-            "Use APÓS lead confirmar interesse. Cria row em lead_proposals "
-            "+ atualiza lead.status='proposal_sent'. Idempotente por "
-            "(lead, plano)."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "phone": {"type": "string"},
-                "plan_sku": {
-                    "type": "string",
-                    "description": "SKU do plano (obtenha via query_plans)",
-                },
-                "custom_price_monthly_cents": {"type": "integer"},
-                "discount_percent": {"type": "number"},
-                "valid_until": {
-                    "type": "string",
-                    "description": "Data ISO YYYY-MM-DD",
-                },
-                "sent_via": {
-                    "type": "string",
-                    "enum": ["email", "whatsapp", "in_demo", "voice_call"],
-                },
-                "notes": {"type": "string"},
-            },
-            "required": ["phone", "plan_sku"],
-        },
-    },
+    # send_proposal REMOVIDO do schema (decisão Alex+Milene 2026-05-06):
+    # Sofia comercial NUNCA fecha venda autônoma. Apenas humano via UI
+    # /comercial/leads/<id> envia proposta. Sofia agenda demo/call.
     {
         "name": "get_lead_status",
         "description": (
@@ -562,21 +588,24 @@ class CommercialSofiaAgent(BaseSofiaAgent):
         return self._cacheable_system(ctx) + "\n\n" + self._dynamic_system(ctx)
 
     def allowed_tools(self, ctx: AgentContext) -> list[str]:
+        # NOTA Phase D: Sofia comercial NUNCA fecha venda autônoma
+        # (decisão Alex+Milene 2026-05-06). send_proposal NÃO está
+        # nesta lista — apenas humano via UI /comercial/leads/<id>
+        # envia proposta. Sofia agenda (schedule_demo_with_calendar /
+        # schedule_callback_call) e time fecha.
         return [
-            # Legado (Phase C v1) — capture_lead aqui é o original em
-            # sofia_tools.py que cria/atualiza row em aia_health_leads.
-            # Continua funcionando pra Sofia gravar nome/intent/etc.
+            # Legado (Phase C v1)
             "capture_lead",
-            "schedule_demo",                # placeholder genérico, mantido pra compat
+            "schedule_demo",                # placeholder mantido pra compat
             "escalate_to_human_whatsapp",
-            # Phase D Comercial (migration 068) — funil completo
+            # Phase D Comercial — funil agendamento (sem fechamento)
             "query_plans",
             "schedule_demo_with_calendar",
             "schedule_callback_call",
             "register_lead_activity",
-            "send_proposal",
             "get_lead_status",
             "update_lead_qualification",
+            # send_proposal NÃO incluso intencionalmente — só humano
         ]
 
     def process(self, ctx: AgentContext) -> AgentResponse:
