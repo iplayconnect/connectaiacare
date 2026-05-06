@@ -1445,6 +1445,27 @@ def validate(
     issues.extend(check_hepatic_adjustment(principle, patient))
     issues.extend(check_vital_constraints(principle, therapeutic_class, patient))
 
+    # Beers avoid check é dose-INDEPENDENT (só depende de principle +
+    # idade + flag em dose_limits). Mas no fluxo original ele estava
+    # INLINE após o cálculo de max_dose (linha ~1488), o que fazia o
+    # path de dose unparseable nunca chegar nele. Roda aqui pra
+    # garantir que Beers dispara mesmo sem dose.
+    if limit and limit.get("beers_avoid") and (age is None or age >= 60):
+        issues.append(DoseIssue(
+            severity="warning_strong",
+            code="beers_avoid",
+            message=(
+                f"⚠️ {principle.title()} consta nos Critérios de Beers como "
+                f"medicamento a evitar em idosos. Motivo: "
+                f"{limit.get('beers_rationale') or 'risco aumentado em geriatria'}."
+            ),
+            detail={
+                "principle_active": principle,
+                "rationale": limit.get("beers_rationale"),
+                "source": limit.get("source"),
+            },
+        ))
+
     # Se dose foi unparseable, retorna agora com TODOS os issues coletados
     # (incluindo Beers/STOPP/interactions rodados acima). Pula apenas
     # cálculo de ratio max_daily_dose que requer daily.value.
@@ -1484,23 +1505,9 @@ def validate(
         unit=limit["max_daily_dose_unit"],
     )
 
-    # Beers avoid: alerta SEMPRE em paciente ≥ 60 anos, independente da dose.
-    beers_avoid = bool(limit.get("beers_avoid"))
-    if beers_avoid and (age is None or age >= 60):
-        issues.append(DoseIssue(
-            severity="warning_strong",
-            code="beers_avoid",
-            message=(
-                f"⚠️ {principle.title()} consta nos Critérios de Beers como "
-                f"medicamento a evitar em idosos. Motivo: "
-                f"{limit.get('beers_rationale') or 'risco aumentado em geriatria'}."
-            ),
-            detail={
-                "principle_active": principle,
-                "rationale": limit.get("beers_rationale"),
-                "source": limit.get("source"),
-            },
-        ))
+    # Beers avoid: já chamado acima (antes do return de dose unparseable),
+    # então NÃO repete aqui pra evitar duplicate issue. Mantido o comentário
+    # pra preservar contexto histórico.
 
     # Cálculo de ratio só se unidades comparáveis
     ratio = None
