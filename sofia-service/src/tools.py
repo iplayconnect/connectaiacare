@@ -384,6 +384,91 @@ def _tool_get_my_subscription(*, persona_ctx: dict, **_: Any) -> dict:
     return {"ok": True, "subscription": row}
 
 
+def _tool_safety_review_prescriptions(
+    *,
+    persona_ctx: dict,
+    prescriptions: list | None = None,
+    patient_id: str | None = None,
+    **_: Any,
+) -> dict:
+    """[Phase C v2.x — unificação canal]
+
+    Tool CANÔNICA pra avaliar 1+ prescrições contra knowledge graph
+    farmacológico. Delega via HTTP /api/internal/drug-safety/review
+    pro mesmo wrapper DrugSafetyService que CareSofiaAgent (WhatsApp)
+    e voice-call-service usam. UMA fonte de verdade pros 3 canais.
+
+    Substitui (deprecando) check_medication_safety/query_drug_rules/
+    check_drug_interaction. Aceita dose='não informado' — pipeline
+    ainda dispara Beers/STOPP/interactions corretamente (fix
+    dose-independent #128).
+    """
+    if not prescriptions or not isinstance(prescriptions, list):
+        return {"ok": False, "error": "prescriptions_required_list"}
+
+    pid = patient_id or persona_ctx.get("patient_id")
+    tenant_id = persona_ctx.get("tenant_id") or "connectaiacare_demo"
+    api_base = os.getenv("BACKEND_API_URL", "http://api:5055")
+
+    payload = {
+        "prescriptions": prescriptions,
+        "patient_id": pid,
+        "tenant_id": tenant_id,
+        "trace_id": persona_ctx.get("trace_id") or persona_ctx.get("session_id"),
+    }
+    headers = {"Content-Type": "application/json"}
+    internal_key = os.getenv("SOFIA_INTERNAL_KEY", "")
+    if internal_key:
+        headers["X-Internal-Key"] = internal_key
+
+    try:
+        r = requests.post(
+            f"{api_base}/api/internal/drug-safety/review",
+            json=payload, headers=headers, timeout=12,
+        )
+    except Exception as exc:
+        logger.exception("safety_review_prescriptions_http_failed")
+        return {
+            "ok": False, "error": f"backend_unreachable:{exc}",
+            "_message_for_sofia": (
+                "Tive uma demora técnica na consulta farmacológica. "
+                "Vou pedir o time clínico revisar manualmente."
+            ),
+        }
+    if r.status_code != 200:
+        return {
+            "ok": False, "error": "drug_safety_http_error",
+            "status": r.status_code, "body": r.text[:500],
+            "_message_for_sofia": (
+                "Sistema farmacológico indisponível. Não confirme "
+                "posologia — peça revisão clínica."
+            ),
+        }
+
+    body = r.json() or {}
+    review = body.get("review") or {}
+    max_sev = review.get("max_severity") or "info"
+    requires_review = bool(review.get("requires_human_review"))
+
+    if requires_review or max_sev in ("block", "warning_strong"):
+        msg = (
+            "ATENÇÃO: sistema farmacológico identificou ponto importante. "
+            "NÃO confirme posologia. Avise que vai pedir o time clínico revisar."
+        )
+    elif max_sev == "warning":
+        msg = "Sistema identificou ponto de atenção — mencione com cuidado e sugira validar com clínica."
+    else:
+        msg = "Sistema farmacológico não identificou problema crítico. Pode prosseguir com cuidado normal."
+
+    return {
+        "ok": True,
+        "review": review,
+        "max_severity": max_sev,
+        "requires_human_review": requires_review,
+        "_message_for_sofia": msg,
+    }
+
+
 def _tool_check_medication_safety(
     *,
     persona_ctx: dict,
@@ -395,7 +480,9 @@ def _tool_check_medication_safety(
     schedule_type: str | None = None,
     **_: Any,
 ) -> dict:
-    """Roda o motor de cruzamentos da prescrição candidata. Não persiste —
+    """[DEPRECATED — prefira safety_review_prescriptions]
+
+    Roda o motor de cruzamentos da prescrição candidata. Não persiste —
     apenas retorna risco/issues pra que o profissional decida."""
     if not medication_name or not dose:
         return {"ok": False, "error": "medication_name_and_dose_required"}
@@ -1144,8 +1231,53 @@ TOOLS: dict[str, dict[str, Any]] = {
         "handler": _tool_list_beers_avoid_in_condition,
         "allowed_personas": ["medico", "enfermeiro", "admin_tenant", "super_admin"],
     },
+    "safety_review_prescriptions": {
+        "description": (
+            "TOOL CANÔNICA pra avaliar UMA OU MAIS medicações contra o knowledge "
+            "graph farmacológico (Beers 2023, STOPP fall_risk, 93 interações, "
+            "dose limits, ACB, ajustes renal/hepático, cascatas). USE SEMPRE que o "
+            "usuário mencionar med (nome, dose, prescrição nova, intenção de dar). "
+            "NÃO confirme posologia sem rodar essa tool. Se max_severity in "
+            "(block, warning_strong) ou requires_human_review=True, NÃO confirme "
+            "— escale pra equipe clínica. Aceita dose='não informado' — pipeline "
+            "ainda dispara Beers/STOPP/interactions (fix #128)."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "prescriptions": {
+                    "type": "array",
+                    "description": "Lista de prescrições candidatas. Inclua mesmo med já cadastrada se quer revalidar.",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "medication_name": {"type": "string"},
+                            "dose": {
+                                "type": "string",
+                                "description": "Ex: '50mg', '1g'. Se não souber, use 'não informado'.",
+                            },
+                            "times_of_day": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "Horários HH:MM, ex: ['08:00','20:00']",
+                            },
+                            "route": {"type": "string"},
+                        },
+                        "required": ["medication_name", "dose"],
+                    },
+                },
+                "patient_id": {
+                    "type": "string",
+                    "description": "UUID do paciente (vem em CONTEXTO).",
+                },
+            },
+            "required": ["prescriptions"],
+        },
+        "handler": _tool_safety_review_prescriptions,
+        "allowed_personas": ["medico", "enfermeiro", "admin_tenant", "super_admin", "cuidador_pro", "cuidador"],
+    },
     "check_medication_safety": {
-        "description": "Valida uma prescrição candidata contra o motor de cruzamentos clínicos: dose máxima diária, alergias, interações medicamentosas (incluindo separação por horário), contraindicações por condição, ajuste renal/hepático, ACB score, risco de queda, NTI e constraints de sinais vitais. NÃO persiste a prescrição — apenas retorna a análise de risco. Use ANTES de criar/atualizar uma medication_schedule, ou quando o médico pergunta 'é seguro prescrever X mg de Y para o paciente Z?'.",
+        "description": "[DEPRECATED — prefira safety_review_prescriptions] Valida uma prescrição candidata contra o motor de cruzamentos clínicos: dose máxima diária, alergias, interações medicamentosas (incluindo separação por horário), contraindicações por condição, ajuste renal/hepático, ACB score, risco de queda, NTI e constraints de sinais vitais. NÃO persiste a prescrição — apenas retorna a análise de risco. Use ANTES de criar/atualizar uma medication_schedule, ou quando o médico pergunta 'é seguro prescrever X mg de Y para o paciente Z?'.",
         "parameters": {
             "type": "object",
             "properties": {

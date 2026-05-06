@@ -421,69 +421,17 @@ def safety_review_prescriptions(
         )
 
     try:
+        from src.services.drug_safety_context import load_patient_safety_context
         from src.services.drug_safety_service import get_drug_safety_service
+
+        # Patient ctx via helper compartilhado (mesmo usado pelo
+        # endpoint HTTP /api/internal/drug-safety/review chamado pelo
+        # voice-call-service). UMA fonte de verdade pro patient_ctx
+        # cross-canal — qualquer mudança no schema clínico reflete
+        # nos 3 canais (WhatsApp/Voice/VoIP) automaticamente.
+        patient_ctx = load_patient_safety_context(patient_id, tenant_id)
+
         svc = get_drug_safety_service()
-        # Carrega patient context (age, allergies, conditions,
-        # creatinina) — afeta TODOS os 11 checks.
-        patient_ctx: Optional[dict] = None
-        if patient_id:
-            try:
-                row = get_postgres().fetch_one(
-                    """SELECT id::text AS id, full_name, birth_date,
-                              gender, conditions, medications, allergies,
-                              serum_creatinine_mg_dl, weight_kg,
-                              height_cm
-                       FROM aia_health_patients
-                       WHERE id = %s AND tenant_id = %s""",
-                    (patient_id, tenant_id),
-                )
-                if row:
-                    from datetime import date
-                    age = None
-                    if row.get("birth_date"):
-                        today = date.today()
-                        bd = row["birth_date"]
-                        age = today.year - bd.year - (
-                            (today.month, today.day) < (bd.month, bd.day)
-                        )
-                    patient_ctx = {
-                        "id": row["id"],
-                        "age": age,
-                        "gender": row.get("gender"),
-                        "conditions": row.get("conditions") or [],
-                        "current_medications": row.get("medications") or [],
-                        "allergies": row.get("allergies") or [],
-                        "creatinine_mgdl": (
-                            float(row["serum_creatinine_mg_dl"])
-                            if row.get("serum_creatinine_mg_dl") else None
-                        ),
-                        "weight_kg": (
-                            float(row["weight_kg"])
-                            if row.get("weight_kg") else None
-                        ),
-                    }
-            except Exception as exc:
-                logger.warning(
-                    "safety_review_patient_load_failed",
-                    patient_id=patient_id, error=str(exc)[:200],
-                )
-
-        # DEBUG temporário: loga estado do patient_ctx pra entender
-        # por que warning_strong de Beers não dispara em prod
-        # (isolated debug retorna correto, em-agent retorna warning).
-        logger.info(
-            "safety_review_input_state",
-            trace_id=trace_id,
-            patient_id_received=patient_id,
-            patient_ctx_loaded=patient_ctx is not None,
-            patient_ctx_age=(patient_ctx or {}).get("age"),
-            patient_ctx_keys=list((patient_ctx or {}).keys()),
-            prescriptions_in=[
-                {"med": p.get("medication_name"), "dose": p.get("dose")}
-                for p in prescriptions
-            ],
-        )
-
         review = svc.safety_review_prescriptions(
             prescriptions=prescriptions, patient=patient_ctx,
         )
@@ -503,8 +451,6 @@ def safety_review_prescriptions(
                 "principles": [
                     r.get("principle_active") for r in review.get("results", [])
                 ],
-                "patient_ctx_age": (patient_ctx or {}).get("age"),
-                "patient_ctx_loaded": patient_ctx is not None,
             },
         )
         return ToolResult(ok=True, data=review)
