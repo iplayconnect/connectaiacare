@@ -69,8 +69,16 @@ def list_plans():
         target_persona (str)
     """
     qs = request.args
-    where = ["1=1"]
+    # Default: scope='commercial_sales' (planos comerciais que time vende).
+    # Pra ver subscription_b2c também: ?scope=all
+    scope = qs.get("scope", "commercial_sales")
+    where = []
     params: list = []
+    if scope != "all":
+        where.append("scope = %s")
+        params.append(scope)
+    else:
+        where.append("1=1")
 
     if qs.get("active", "true").lower() == "true":
         where.append("active = TRUE")
@@ -112,18 +120,26 @@ def create_plan():
             "status": "error", "reason": "missing_fields", "fields": missing,
         }), 400
 
+    # Endpoint comercial — sempre cria scope='commercial_sales'
+    # (planos B2C subscription são gerenciados via /api/plans público
+    # antigo, não aqui).
     try:
         row = get_postgres().insert_returning(
             """INSERT INTO aia_health_plans (
-                sku, name, target_persona, target_segment,
+                sku, name, scope, target_persona, target_segment,
                 price_monthly_cents, price_setup_cents, currency,
                 billing_period, max_patients, max_caregivers,
                 max_messages_month, max_voice_minutes_month,
                 features, pitch_short, pitch_full, differentials,
-                active, public
+                active, public,
+                price_cents, max_beneficiaries, max_emergency_contacts,
+                trial_days, trial_requires_card, pix_allows_trial,
+                required_verification, display_order
             ) VALUES (
-                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                %s::jsonb, %s, %s, %s::jsonb, %s, %s
+                %s, %s, 'commercial_sales', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                %s::jsonb, %s, %s, %s::jsonb, %s, %s,
+                COALESCE(%s, 0), COALESCE(%s, 0), 0,
+                0, FALSE, FALSE, 'cpf_whatsapp', 999
             )
             RETURNING id::text AS id""",
             (
@@ -140,6 +156,9 @@ def create_plan():
                 body.get("pitch_short"), body.get("pitch_full"),
                 json.dumps(body.get("differentials") or []),
                 body.get("active", True), body.get("public", True),
+                # mirror pra colunas legadas (NOT NULL no schema antigo)
+                body.get("price_monthly_cents"),
+                body.get("max_patients"),
             ),
         )
         return jsonify({

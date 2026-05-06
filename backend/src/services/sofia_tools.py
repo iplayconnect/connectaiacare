@@ -784,7 +784,12 @@ def query_plans(
           count: int
     """
     db = get_postgres()
-    where = ["active = TRUE"]
+    # Catálogo unificado (Caminho B — decisão Alex+Milene 2026-05-06):
+    # Sofia comercial recomenda tanto planos B2C self-service (Sofia Cuida
+    # Essencial R$39,90, Família R$69,90, Premium R$149,90) quanto planos
+    # B2B comerciais (ILPI/Hospital — sem preço, sempre agendar demo).
+    # Filtro: ambos scopes ativos.
+    where = ["active = TRUE", "scope IN ('subscription_b2c', 'commercial_sales')"]
     params: list = []
     if public_only:
         where.append("public = TRUE")
@@ -794,12 +799,14 @@ def query_plans(
 
     try:
         rows = db.fetch_all(
-            f"""SELECT id::text AS id, sku, name, target_persona, target_segment,
+            f"""SELECT id::text AS id, sku, name, scope,
+                       target_persona, target_segment,
                        price_monthly_cents, price_setup_cents, currency,
                        billing_period, max_patients, max_caregivers,
                        max_messages_month, max_voice_minutes_month,
+                       daily_calls_count,
                        features, pitch_short, pitch_full, differentials,
-                       active, public
+                       active, public, requires_demo_to_close
                 FROM aia_health_plans
                 WHERE {' AND '.join(where)}
                 ORDER BY price_monthly_cents NULLS LAST, name""",
