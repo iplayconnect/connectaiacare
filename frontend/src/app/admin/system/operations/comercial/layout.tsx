@@ -2,13 +2,18 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { KanbanSquare, Calendar, Package, Sparkles } from "lucide-react";
+import { KanbanSquare, Calendar, Package, Sparkles, List } from "lucide-react";
 
 const TABS = [
   {
     href: "/admin/system/operations/comercial/funil",
     label: "Funil",
     icon: KanbanSquare,
+  },
+  {
+    href: "/admin/system/operations/comercial/lista",
+    label: "Lista",
+    icon: List,
   },
   {
     href: "/admin/system/operations/comercial/agenda",

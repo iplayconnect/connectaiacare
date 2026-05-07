@@ -204,15 +204,10 @@ const NAV_ITEMS: NavItem[] = [
     roles: ["super_admin"],
     group: "system",
   },
-  {
-    href: "/admin/system/operations/leads",
-    label: "Leads · Lista (legado)",
-    icon: Sparkles,
-    roles: ["super_admin", "admin_tenant"],
-    group: "system",
-  },
-  // ─── Phase D Comercial — único item, abre /comercial/funil
-  // (com tabs Funil / Agenda / Planos no layout interno)
+  // ─── Comercial — hub único com abas internas
+  // Funil (kanban) / Lista (plana com filtros) / Agenda / Planos
+  // A rota legada /admin/system/operations/leads agora redireciona
+  // pra /comercial/lista (Caminho C).
   {
     href: "/admin/system/operations/comercial/funil",
     label: "Comercial",

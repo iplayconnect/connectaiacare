@@ -222,6 +222,73 @@ export interface UpcomingCallback {
   qualification_score: number | null;
 }
 
+// ─── Lista plana (endpoint legado /api/admin/leads) ────────────────
+
+export interface LeadFull {
+  id: string;
+  phone: string;
+  full_name: string | null;
+  email: string | null;
+  organization: string | null;
+  role_self_declared: string | null;
+  intent: string;
+  confidence: number | null;
+  source_channel: string;
+  status: LeadStatus;
+  qualification_score: number | null;
+  demo_link: string | null;
+  demo_scheduled_at: string | null;
+  qualified_at: string | null;
+  converted_at: string | null;
+  converted_to_tenant_id: string | null;
+  lost_reason: string | null;
+  last_contact_at: string | null;
+  created_at: string;
+  updated_at: string;
+  notes_count?: number;
+}
+
+export interface LeadListResponse {
+  status: "ok";
+  count: number;
+  total: number;
+  limit: number;
+  offset: number;
+  leads: LeadFull[];
+}
+
+export interface AuditTimelineEntry {
+  action: string;
+  payload: Record<string, any>;
+  at: string | null;
+}
+
+export interface LeadAuditDetailResponse {
+  status: "ok";
+  lead: LeadFull;
+  timeline: AuditTimelineEntry[];
+}
+
+export interface LeadStatsResponse {
+  status: "ok";
+  days: number;
+  totals: {
+    total: number;
+    qualified: number;
+    demo_scheduled: number;
+    converted: number;
+    lost: number;
+  };
+  by_status: { status: string; n: number }[];
+  by_intent: { intent: string; n: number }[];
+  daily: {
+    day: string;
+    n: number;
+    qualified: number;
+    converted: number;
+  }[];
+}
+
 // ─── API ────────────────────────────────────────────────────────────
 
 export const commercialApi = {
@@ -267,7 +334,7 @@ export const commercialApi = {
   leadTimeline: (leadId: string) =>
     request<LeadTimeline>(`/api/admin/leads/${leadId}/timeline`),
 
-  // ─── Update lead (drag-drop kanban, etc.) ───
+  // ─── Update lead (drag-drop kanban, qualificação, descarte, nota) ───
   updateLead: (
     leadId: string,
     payload: Partial<{
@@ -276,6 +343,7 @@ export const commercialApi = {
       demo_scheduled_at: string;
       demo_link: string;
       lost_reason: string;
+      note: string;
       full_name: string;
       email: string;
       organization: string;
@@ -416,4 +484,37 @@ export const commercialApi = {
     request<{ status: "ok"; count: number; items: UpcomingCallback[] }>(
       `/api/admin/leads/upcoming-callbacks?days=${days}`,
     ),
+
+  // ─── Lista plana (endpoint legado, mantido) ─────────────────────
+  listLeads: (params?: {
+    status?: string; // csv: 'new,qualified,...'
+    intent?: string;
+    days?: number;
+    search?: string;
+    limit?: number;
+    offset?: number;
+  }) => {
+    const qs = new URLSearchParams();
+    if (params?.status) qs.set("status", params.status);
+    if (params?.intent) qs.set("intent", params.intent);
+    qs.set("days", String(params?.days ?? 30));
+    if (params?.search) qs.set("search", params.search);
+    qs.set("limit", String(params?.limit ?? 50));
+    qs.set("offset", String(params?.offset ?? 0));
+    return request<LeadListResponse>(`/api/admin/leads?${qs.toString()}`);
+  },
+
+  leadDetailAudit: (leadId: string) =>
+    request<LeadAuditDetailResponse>(`/api/admin/leads/${leadId}`),
+
+  leadStats: (days = 30) =>
+    request<LeadStatsResponse>(`/api/admin/leads/stats?days=${days}`),
+
+  // Note: append a lead — usa o mesmo PATCH /api/admin/leads/<id>
+  // {note: "..."} já tratado em updateLead via campo `note`.
+  appendLeadNote: (leadId: string, note: string) =>
+    request<{ status: "ok" }>(`/api/admin/leads/${leadId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ note }),
+    }),
 };
