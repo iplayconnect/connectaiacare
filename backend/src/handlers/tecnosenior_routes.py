@@ -109,8 +109,10 @@ def open_carenote():
 def add_addendum():
     """Adiciona addendum a uma CareNote OPEN.
 
-    Body: { care_event_id, content, content_resume, occurred_at?, closes? }
+    Body: { care_event_id, content, content_resume, occurred_at?,
+            closes?, closed_reason? }
     closes=true → manda status=CLOSED no addendum (fecha CareNote pai).
+    closed_reason → texto livre ≤50 chars, só vai com closes=true (V2).
     """
     body = request.get_json(silent=True) or {}
     care_event_id = body.get("care_event_id")
@@ -129,8 +131,217 @@ def add_addendum():
         content_resume=content_resume,
         occurred_at=body.get("occurred_at"),
         closes_note=bool(body.get("closes", False)),
+        closed_reason=body.get("closed_reason"),
     )
     return jsonify(result)
+
+
+# ══════════════════════════════════════════════════════════════════════
+# V2: Upload de mídia (admin endpoints — smoke test do client)
+# ══════════════════════════════════════════════════════════════════════
+
+@bp.post("/api/integrations/tecnosenior/upload-audio-carenote")
+@require_role("super_admin", "admin_tenant")
+def upload_audio_carenote():
+    """Upload de áudio pra CareNote já existente.
+
+    Multipart form-data:
+        care_event_id: UUID
+        audio: arquivo (file)
+        filename?: nome do arquivo (default: audio.ogg)
+        content_type?: MIME (default: audio/ogg)
+    """
+    care_event_id = request.form.get("care_event_id")
+    if not care_event_id:
+        return jsonify({"status": "error", "reason": "care_event_id_required"}), 400
+    if "audio" not in request.files:
+        return jsonify({"status": "error", "reason": "audio_file_required"}), 400
+
+    audio_file = request.files["audio"]
+    audio_bytes = audio_file.read()
+    filename = request.form.get("filename") or audio_file.filename or "audio.ogg"
+    content_type = (
+        request.form.get("content_type")
+        or audio_file.content_type
+        or "audio/ogg"
+    )
+
+    svc = get_tecnosenior_sync()
+    result = svc.upload_audio_for_carenote(
+        care_event_id=care_event_id,
+        audio_bytes=audio_bytes,
+        audio_filename=filename,
+        content_type=content_type,
+    )
+    return jsonify(result)
+
+
+@bp.post("/api/integrations/tecnosenior/upload-audio-addendum")
+@require_role("super_admin", "admin_tenant")
+def upload_audio_addendum():
+    """Upload de áudio pra addendum específico.
+
+    Multipart form-data:
+        care_event_id: UUID
+        addendum_id: int (ID Tecnosenior do addendum)
+        audio: arquivo
+    """
+    care_event_id = request.form.get("care_event_id")
+    addendum_id_raw = request.form.get("addendum_id")
+    if not care_event_id or not addendum_id_raw:
+        return jsonify({
+            "status": "error",
+            "reason": "care_event_id_and_addendum_id_required",
+        }), 400
+    try:
+        addendum_id = int(addendum_id_raw)
+    except (TypeError, ValueError):
+        return jsonify({"status": "error", "reason": "invalid_addendum_id"}), 400
+    if "audio" not in request.files:
+        return jsonify({"status": "error", "reason": "audio_file_required"}), 400
+
+    audio_file = request.files["audio"]
+    audio_bytes = audio_file.read()
+    filename = request.form.get("filename") or audio_file.filename or "audio.ogg"
+    content_type = (
+        request.form.get("content_type")
+        or audio_file.content_type
+        or "audio/ogg"
+    )
+
+    svc = get_tecnosenior_sync()
+    result = svc.upload_audio_for_addendum(
+        care_event_id=care_event_id,
+        addendum_id=addendum_id,
+        audio_bytes=audio_bytes,
+        audio_filename=filename,
+        content_type=content_type,
+    )
+    return jsonify(result)
+
+
+@bp.post("/api/integrations/tecnosenior/upload-photo")
+@require_role("super_admin", "admin_tenant")
+def upload_photo():
+    """Upload de foto pra CareNote (opcionalmente associada a addendum).
+
+    Multipart form-data:
+        care_event_id: UUID
+        image: arquivo
+        addendum_id?: int (associa foto a addendum específico)
+    """
+    care_event_id = request.form.get("care_event_id")
+    if not care_event_id:
+        return jsonify({"status": "error", "reason": "care_event_id_required"}), 400
+    if "image" not in request.files:
+        return jsonify({"status": "error", "reason": "image_file_required"}), 400
+
+    image_file = request.files["image"]
+    image_bytes = image_file.read()
+    filename = request.form.get("filename") or image_file.filename or "photo.jpg"
+    content_type = (
+        request.form.get("content_type")
+        or image_file.content_type
+        or "image/jpeg"
+    )
+
+    addendum_id: int | None = None
+    addendum_id_raw = request.form.get("addendum_id")
+    if addendum_id_raw:
+        try:
+            addendum_id = int(addendum_id_raw)
+        except (TypeError, ValueError):
+            return jsonify({"status": "error", "reason": "invalid_addendum_id"}), 400
+
+    svc = get_tecnosenior_sync()
+    result = svc.upload_photo_for_carenote(
+        care_event_id=care_event_id,
+        image_bytes=image_bytes,
+        image_filename=filename,
+        content_type=content_type,
+        addendum_id=addendum_id,
+    )
+    return jsonify(result)
+
+
+# ══════════════════════════════════════════════════════════════════════
+# V2: Health Measures (TS endpoints em dev — placeholders pra alinhar)
+# ══════════════════════════════════════════════════════════════════════
+
+@bp.get("/api/integrations/tecnosenior/health-measures/<int:patient_int_id>")
+@require_role("super_admin", "admin_tenant", "medico", "enfermeiro")
+def list_health_measures(patient_int_id: int):
+    """GET medidas de saúde de um paciente no TotalCare.
+
+    Query params:
+        type: heart_rate | blood_pressure_systolic | blood_pressure_diastolic
+              | blood_glucose | temperature | weight | oxygen_saturation
+        since: ISO 8601 timestamp
+        until: ISO 8601 timestamp
+        limit: max records (default 100)
+
+    Endpoint Tecnosenior em dev — schema pode ajustar quando estabilizar.
+    """
+    qs = request.args
+    measure_type = qs.get("type") or None
+    since = qs.get("since") or None
+    until = qs.get("until") or None
+    limit_raw = qs.get("limit") or "100"
+    try:
+        limit = int(limit_raw)
+    except (TypeError, ValueError):
+        limit = 100
+
+    svc = get_tecnosenior_sync()
+    measures = svc.client.list_health_measures(
+        patient_id=patient_int_id,
+        measure_type=measure_type,
+        since=since, until=until, limit=limit,
+    )
+    return jsonify({
+        "status": "ok",
+        "patient_id": patient_int_id,
+        "measure_type": measure_type,
+        "count": len(measures),
+        "measures": measures,
+    })
+
+
+@bp.post("/api/integrations/tecnosenior/health-measures/<int:patient_int_id>/bulk")
+@require_role("super_admin", "admin_tenant", "medico", "enfermeiro")
+def post_health_measures_bulk(patient_int_id: int):
+    """POST bulk de medidas de saúde pra um paciente.
+
+    Body: {
+        idempotency_key?: string,
+        measures: [
+            {type, value, unit?, measured_at?, source?, confidence?, raw_text?},
+            ...
+        ]
+    }
+
+    Padrão de uso: cuidador relata várias medidas via WhatsApp,
+    Sofia acumula, recapitula com ele, depois faz bulk send.
+    Sanitização: types inválidos e values não-numéricos são
+    silenciosamente filtrados antes do POST.
+    """
+    body = request.get_json(silent=True) or {}
+    measures = body.get("measures") or []
+    if not isinstance(measures, list) or not measures:
+        return jsonify({
+            "status": "error",
+            "reason": "measures_required_list",
+        }), 400
+
+    svc = get_tecnosenior_sync()
+    result = svc.client.create_health_measures_bulk(
+        patient_id=patient_int_id,
+        measures=measures,
+        idempotency_key=body.get("idempotency_key"),
+    )
+    if result is None:
+        return jsonify({"status": "error", "reason": "bulk_post_failed"}), 502
+    return jsonify({"status": "ok", "result": result})
 
 
 @bp.post("/api/integrations/tecnosenior/test-streaming")

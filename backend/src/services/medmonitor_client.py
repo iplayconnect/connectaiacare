@@ -111,6 +111,74 @@ class MedMonitorClient:
             logger.warning("medmonitor_json_decode_failed", path=path, error=str(exc))
             return None
 
+    def _multipart_request(
+        self,
+        method: str,
+        path: str,
+        files: dict,
+        data: dict | None = None,
+    ) -> dict[str, Any] | None:
+        """Request multipart/form-data com tratamento explícito de 409.
+
+        Retorna:
+            • dict (response JSON) em sucesso (200/201)
+            • {"_status_code": 409, "_already_uploaded": True} se servidor
+              indica que mídia já existe (write-once)
+            • None em qualquer outro erro (logado)
+
+        Por que tratamento especial pra 409: o V2 da Tecnosenior usa
+        "write-once" pra áudio — tentar segundo upload retorna 409. Isso
+        NÃO é erro crítico (provavelmente retry de uma chamada anterior
+        que perdemos a resposta). Caller decide o que fazer.
+        """
+        if not self.enabled:
+            return None
+
+        url = f"{self.base_url}{path}"
+        try:
+            resp = self._client.request(
+                method, url, files=files, data=data or {},
+            )
+        except httpx.RequestError as exc:
+            logger.warning(
+                "medmonitor_multipart_request_error",
+                method=method, path=path, error=str(exc),
+            )
+            return None
+
+        if resp.status_code == 409:
+            logger.info(
+                "medmonitor_media_already_uploaded",
+                path=path, status=409,
+            )
+            return {"_status_code": 409, "_already_uploaded": True}
+
+        if resp.status_code == 403:
+            logger.error("medmonitor_forbidden_multipart", status=403, path=path)
+            return None
+        if resp.status_code == 404:
+            logger.warning("medmonitor_multipart_not_found", path=path)
+            return None
+        if resp.status_code >= 400:
+            try:
+                body = resp.json()
+            except Exception:
+                body = resp.text[:200]
+            logger.warning(
+                "medmonitor_multipart_http_error",
+                method=method, path=path, status=resp.status_code, body=body,
+            )
+            return None
+
+        try:
+            return resp.json()
+        except Exception as exc:
+            logger.warning(
+                "medmonitor_multipart_json_decode_failed",
+                path=path, error=str(exc),
+            )
+            return None
+
     # ---------- patients (assistidos) ----------
     def list_patients(
         self,
@@ -283,11 +351,22 @@ class MedMonitorClient:
         content_resume: str,
         occurred_at: str | None = None,
         status: str = "OPEN",
+        closed_reason: str | None = None,
+        audio_bytes: bytes | None = None,
+        audio_filename: str = "audio.ogg",
     ) -> dict | None:
         """Cria CareNote com status explícito (OPEN ou CLOSED).
 
         Cenário 2 da API Tecnosenior: abre CareNote OPEN pra receber
         addendums depois. Quando passa CLOSED, vira one-off do cenário 1.
+
+        V2:
+            closed_reason: texto livre ≤50 chars. Servidor REJEITA (400)
+                se enviado com status=OPEN. Por isso só anexamos quando
+                status=CLOSED.
+            audio_bytes: se fornecido, usa multipart/form-data e anexa
+                áudio na criação (cenário 6.1 do doc V2). Caso contrário,
+                JSON normal — caller pode fazer upload separado depois.
         """
         if not content or not content.strip():
             logger.warning("care_note_content_empty")
@@ -300,6 +379,39 @@ class MedMonitorClient:
         if status not in ("OPEN", "CLOSED"):
             status = "OPEN"
 
+        # Sanitiza closed_reason: só vai quando CLOSED + truncado a 50 chars
+        closed_reason_clean: str | None = None
+        if status == "CLOSED" and closed_reason:
+            closed_reason_clean = closed_reason.strip()[:50]
+
+        # Branch: multipart com áudio vs JSON normal
+        if audio_bytes:
+            data: dict[str, Any] = {
+                "caretaker": str(caretaker_id),
+                "patient": str(patient_id),
+                "content": content.strip(),
+                "content_resume": resume_clean,
+                "status": status,
+            }
+            if occurred_at:
+                data["occurred_at"] = occurred_at
+            if closed_reason_clean:
+                data["closed_reason"] = closed_reason_clean
+            files = {"audio": (audio_filename, audio_bytes, "audio/ogg")}
+            result = self._multipart_request(
+                "POST", "/care-notes/", files=files, data=data,
+            )
+            if result and result.get("_already_uploaded"):
+                # 409 numa criação não faz sentido — servidor não devia
+                # retornar isso aqui. Loga e retorna None.
+                logger.warning(
+                    "medmonitor_carenote_create_409_unexpected",
+                    caretaker_id=caretaker_id, patient_id=patient_id,
+                )
+                return None
+            return result
+
+        # JSON path (sem áudio)
         body: dict[str, Any] = {
             "caretaker": caretaker_id,
             "patient": patient_id,
@@ -309,6 +421,8 @@ class MedMonitorClient:
         }
         if occurred_at:
             body["occurred_at"] = occurred_at
+        if closed_reason_clean:
+            body["closed_reason"] = closed_reason_clean
         return self._request("POST", "/care-notes/", json_body=body)
 
     def create_care_note_bulk(
@@ -355,12 +469,22 @@ class MedMonitorClient:
         content_resume: str,
         occurred_at: str | None = None,
         status: str | None = None,
+        closed_reason: str | None = None,
+        audio_bytes: bytes | None = None,
+        audio_filename: str = "audio.ogg",
     ) -> dict | None:
         """POST /care-notes/{id}/addendums/ — adiciona addendum a uma
         CareNote OPEN.
 
         status='CLOSED' no addendum dispara fechamento da CareNote pai.
         Sem status: addendum normal (CareNote permanece OPEN).
+
+        V2 (confirmado com Matheus 2026-05-07):
+            closed_reason: se enviado junto com status=CLOSED, o servidor
+                fecha a CareNote pai com essa razão. Só vai ao wire se
+                status=CLOSED.
+            audio_bytes: se fornecido, usa multipart/form-data e anexa
+                áudio na criação do addendum (cenário 6.3 do doc V2).
         """
         if not content or not content.strip():
             return None
@@ -370,6 +494,38 @@ class MedMonitorClient:
         if not resume_clean:
             resume_clean = content.strip()[:MAX_CARE_NOTE_RESUME_LEN - 1] + "…"
 
+        # Sanitiza closed_reason: só vai com status=CLOSED, ≤50 chars
+        closed_reason_clean: str | None = None
+        if status == "CLOSED" and closed_reason:
+            closed_reason_clean = closed_reason.strip()[:50]
+
+        # Branch: multipart com áudio vs JSON
+        if audio_bytes:
+            data: dict[str, Any] = {
+                "content": content.strip(),
+                "content_resume": resume_clean,
+            }
+            if occurred_at:
+                data["occurred_at"] = occurred_at
+            if status == "CLOSED":
+                data["status"] = "CLOSED"
+            if closed_reason_clean:
+                data["closed_reason"] = closed_reason_clean
+            files = {"audio": (audio_filename, audio_bytes, "audio/ogg")}
+            result = self._multipart_request(
+                "POST",
+                f"/care-notes/{care_note_id}/addendums/",
+                files=files, data=data,
+            )
+            if result and result.get("_already_uploaded"):
+                logger.warning(
+                    "medmonitor_addendum_create_409_unexpected",
+                    care_note_id=care_note_id,
+                )
+                return None
+            return result
+
+        # JSON path (sem áudio)
         body: dict[str, Any] = {
             "content": content.strip(),
             "content_resume": resume_clean,
@@ -378,9 +534,261 @@ class MedMonitorClient:
             body["occurred_at"] = occurred_at
         if status == "CLOSED":
             body["status"] = "CLOSED"
+        if closed_reason_clean:
+            body["closed_reason"] = closed_reason_clean
         return self._request(
             "POST", f"/care-notes/{care_note_id}/addendums/", json_body=body,
         )
+
+    # ══════════════════════════════════════════════════════════════════
+    # V2: Upload separado de mídia (cenários 6.2, 6.4 e §7 do doc)
+    # ══════════════════════════════════════════════════════════════════
+
+    def upload_carenote_audio(
+        self,
+        care_note_id: int,
+        audio_bytes: bytes,
+        audio_filename: str = "audio.ogg",
+        content_type: str = "audio/ogg",
+    ) -> dict | None:
+        """POST /care-notes/{id}/audio/ — anexa áudio em CareNote já criada.
+
+        Write-once: 2ª chamada retorna 409 (não é erro crítico, é noop
+        seguro). Returns:
+            • dict da CareNote atualizada com audio_url populado em 200/201
+            • {"_already_uploaded": True, "_status_code": 409} se já tem
+            • None em outros erros
+        """
+        if not audio_bytes:
+            logger.warning("upload_carenote_audio_empty_bytes")
+            return None
+        files = {"audio": (audio_filename, audio_bytes, content_type)}
+        return self._multipart_request(
+            "POST", f"/care-notes/{care_note_id}/audio/", files=files,
+        )
+
+    def upload_addendum_audio(
+        self,
+        care_note_id: int,
+        addendum_id: int,
+        audio_bytes: bytes,
+        audio_filename: str = "audio.ogg",
+        content_type: str = "audio/ogg",
+    ) -> dict | None:
+        """POST /care-notes/{note_id}/addendums/{addendum_id}/audio/
+
+        Servidor valida que addendum_id pertence ao note_id da URL.
+        Write-once por addendum.
+        """
+        if not audio_bytes:
+            logger.warning("upload_addendum_audio_empty_bytes")
+            return None
+        files = {"audio": (audio_filename, audio_bytes, content_type)}
+        return self._multipart_request(
+            "POST",
+            f"/care-notes/{care_note_id}/addendums/{addendum_id}/audio/",
+            files=files,
+        )
+
+    def upload_carenote_photo(
+        self,
+        care_note_id: int,
+        image_bytes: bytes,
+        image_filename: str = "photo.jpg",
+        content_type: str = "image/jpeg",
+        addendum_id: int | None = None,
+    ) -> dict | None:
+        """POST /care-notes/{id}/photos/ — anexa foto à CareNote.
+
+        Sem limite de fotos por nota. Se addendum_id fornecido, foto fica
+        associada a ele (campo `addendum` no body multipart). Servidor
+        valida que addendum pertence à mesma CareNote.
+
+        Diferente do áudio, foto NÃO tem 409 (sem write-once, múltiplas
+        fotos OK).
+        """
+        if not image_bytes:
+            logger.warning("upload_carenote_photo_empty_bytes")
+            return None
+        files = {"image": (image_filename, image_bytes, content_type)}
+        data: dict[str, Any] = {}
+        if addendum_id is not None:
+            data["addendum"] = str(addendum_id)
+        return self._multipart_request(
+            "POST",
+            f"/care-notes/{care_note_id}/photos/",
+            files=files, data=data,
+        )
+
+    # ══════════════════════════════════════════════════════════════════
+    # V2: Health Measures (medidas de saúde — endpoints em dev pelo TS)
+    # ══════════════════════════════════════════════════════════════════
+    #
+    # Unidades padronizadas (alinhadas com Matheus 2026-05-07):
+    #   heart_rate          → bpm
+    #   blood_pressure_*    → mmHg
+    #   blood_glucose       → mg/dL
+    #   temperature         → °C
+    #   weight              → kg
+    #   oxygen_saturation   → %
+    #
+    # Política de fronteira: o AGENTE faz a extração de áudio/foto/texto
+    # natural (NOSSO IP). O TotalCare só recebe dado já estruturado.
+
+    _HEALTH_MEASURE_TYPES = (
+        "heart_rate",
+        "blood_pressure_systolic",
+        "blood_pressure_diastolic",
+        "blood_glucose",
+        "temperature",
+        "weight",
+        "oxygen_saturation",
+    )
+
+    def list_health_measures(
+        self,
+        patient_id: int,
+        measure_type: str | None = None,
+        since: str | None = None,
+        until: str | None = None,
+        limit: int | None = 100,
+    ) -> list[dict]:
+        """GET medidas de saúde de um paciente.
+
+        Endpoint exato a confirmar com Matheus. Por enquanto usamos:
+            GET /patients/{id}/health-measures/?type=&since=&until=&limit=
+            (geral)
+        ou
+            GET /patients/{id}/health-measures/{type}/?since=&until=&limit=
+            (específico — quando measure_type fornecido)
+
+        Args:
+            patient_id: ID TotalCare do paciente
+            measure_type: opcional. Se fornecido, usa endpoint específico.
+                Aceita um dos _HEALTH_MEASURE_TYPES.
+            since/until: ISO 8601 timestamps
+            limit: max de registros pra evitar enxurrada
+
+        Retorna lista (vazia se erro pra graceful degrade).
+        """
+        params: dict[str, Any] = {}
+        if since:
+            params["since"] = since
+        if until:
+            params["until"] = until
+        if limit is not None:
+            params["limit"] = limit
+
+        if measure_type:
+            if measure_type not in self._HEALTH_MEASURE_TYPES:
+                logger.warning(
+                    "health_measure_invalid_type", measure_type=measure_type,
+                )
+                return []
+            path = f"/patients/{patient_id}/health-measures/{measure_type}/"
+        else:
+            path = f"/patients/{patient_id}/health-measures/"
+
+        result = self._request("GET", path, params=params or None)
+        if isinstance(result, dict) and "results" in result:
+            return result["results"]
+        return result if isinstance(result, list) else []
+
+    def create_health_measures_bulk(
+        self,
+        patient_id: int,
+        measures: list[dict],
+        idempotency_key: str | None = None,
+    ) -> dict | None:
+        """POST bulk de medidas de saúde.
+
+        Endpoint exato a confirmar com Matheus. Tendência (alinhamento
+        2026-05-07): UM endpoint que recebe array em vez de 1 endpoint por
+        tipo, pra alinhar com fluxo conversacional (cuidador relata várias
+        medidas, agente confirma com cuidador, faz bulk send).
+
+        Schema do payload:
+            POST /patients/{id}/health-measures/bulk/
+            {
+                "idempotency_key": "uuid",  // opcional — se Tecnosenior expôr
+                "measures": [
+                    {
+                        "type": "heart_rate" | "blood_pressure_systolic" | ...,
+                        "value": 78,
+                        "unit": "bpm",
+                        "measured_at": "2026-05-07T14:30:00Z",
+                        "source": "agent_voice" | "agent_photo" | "agent_typed",
+                        "confidence": 0.95,
+                        "raw_text": "ela tá com 78 batimentos"  // opcional pra audit
+                    },
+                    ...
+                ]
+            }
+
+        Validação local: filtra measures com type/value inválidos antes
+        de mandar. Atomicidade no servidor depende de como Matheus
+        implementar (preferimos all-or-nothing).
+        """
+        if not measures:
+            return None
+
+        # Sanitização local: filtra os com type válido + value numérico
+        sanitized: list[dict] = []
+        for m in measures:
+            if not isinstance(m, dict):
+                continue
+            mtype = m.get("type")
+            if mtype not in self._HEALTH_MEASURE_TYPES:
+                logger.warning(
+                    "health_measure_skipped_invalid_type",
+                    measure_type=mtype,
+                )
+                continue
+            if "value" not in m:
+                continue
+            try:
+                # Aceita int/float/str numérica
+                m_value = float(m["value"])
+            except (TypeError, ValueError):
+                logger.warning(
+                    "health_measure_skipped_invalid_value", measure=m,
+                )
+                continue
+            entry: dict[str, Any] = {
+                "type": mtype,
+                "value": m_value,
+                "unit": m.get("unit") or self._default_unit(mtype),
+            }
+            for k in ("measured_at", "source", "confidence", "raw_text"):
+                if m.get(k) is not None:
+                    entry[k] = m[k]
+            sanitized.append(entry)
+
+        if not sanitized:
+            logger.warning("health_measures_bulk_empty_after_sanitize")
+            return None
+
+        body: dict[str, Any] = {"measures": sanitized}
+        if idempotency_key:
+            body["idempotency_key"] = idempotency_key
+
+        return self._request(
+            "POST",
+            f"/patients/{patient_id}/health-measures/bulk/",
+            json_body=body,
+        )
+
+    @staticmethod
+    def _default_unit(measure_type: str) -> str:
+        return {
+            "heart_rate": "bpm",
+            "blood_pressure_systolic": "mmHg",
+            "blood_pressure_diastolic": "mmHg",
+            "blood_glucose": "mg/dL",
+            "temperature": "°C",
+            "weight": "kg",
+            "oxygen_saturation": "%",
+        }.get(measure_type, "")
 
     def list_care_notes(
         self,

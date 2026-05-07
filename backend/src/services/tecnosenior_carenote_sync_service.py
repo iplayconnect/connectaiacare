@@ -239,6 +239,10 @@ class TecnoseniorCareNoteSyncService:
             "CLOSED" if ev_status in ("resolved", "expired") else "OPEN"
         )
 
+        # closed_reason agora vai como campo nativo (V2 — confirmado com
+        # Matheus 2026-05-07). Antes era embutido em content_resume.
+        closed_reason = ev.get("closed_reason") if target_status == "CLOSED" else None
+
         result = self.client.create_care_note_streaming(
             caretaker_id=caretaker_int,
             patient_id=patient_int,
@@ -246,6 +250,7 @@ class TecnoseniorCareNoteSyncService:
             content_resume=content_resume,
             occurred_at=occurred_iso,
             status=target_status,
+            closed_reason=closed_reason,
         )
 
         if not result or "id" not in result:
@@ -256,23 +261,40 @@ class TecnoseniorCareNoteSyncService:
                 "patient_int": patient_int, "caretaker_int": caretaker_int,
             }
 
-        # Sucesso — grava em sync table
+        # Sucesso — grava em sync table (incluindo closed_reason enviado
+        # pra audit, e audio_url se já veio inline na criação)
         carenote_id = int(result["id"])
+        audio_url_from_response = result.get("audio_url")
         self.db.execute(
             """
             INSERT INTO aia_health_tecnosenior_sync
                 (care_event_id, tecnosenior_carenote_id, tecnosenior_status,
-                 last_synced_at, last_response_payload)
-            VALUES (%s, %s, %s, NOW(), %s)
+                 last_synced_at, last_response_payload,
+                 closed_reason_sent, tecnosenior_audio_url,
+                 tecnosenior_audio_uploaded_at)
+            VALUES (%s, %s, %s, NOW(), %s, %s, %s,
+                    CASE WHEN %s IS NOT NULL THEN NOW() ELSE NULL END)
             ON CONFLICT (care_event_id) DO UPDATE SET
                 tecnosenior_carenote_id = EXCLUDED.tecnosenior_carenote_id,
                 tecnosenior_status = EXCLUDED.tecnosenior_status,
                 last_synced_at = NOW(),
                 sync_error = NULL,
-                last_response_payload = EXCLUDED.last_response_payload
+                last_response_payload = EXCLUDED.last_response_payload,
+                closed_reason_sent = COALESCE(EXCLUDED.closed_reason_sent,
+                    aia_health_tecnosenior_sync.closed_reason_sent),
+                tecnosenior_audio_url = COALESCE(EXCLUDED.tecnosenior_audio_url,
+                    aia_health_tecnosenior_sync.tecnosenior_audio_url),
+                tecnosenior_audio_uploaded_at = COALESCE(
+                    EXCLUDED.tecnosenior_audio_uploaded_at,
+                    aia_health_tecnosenior_sync.tecnosenior_audio_uploaded_at)
             """,
-            (care_event_id, carenote_id, target_status,
-             self.db.json_adapt(result)),
+            (
+                care_event_id, carenote_id, target_status,
+                self.db.json_adapt(result),
+                closed_reason,
+                audio_url_from_response,
+                audio_url_from_response,  # pra trigger condicional do NOW()
+            ),
         )
         logger.info(
             "tecnosenior_sync_ok care_event=%s carenote_id=%s status=%s",
@@ -284,6 +306,7 @@ class TecnoseniorCareNoteSyncService:
             "tecnosenior_status": target_status,
             "patient_int": patient_int,
             "caretaker_int": caretaker_int,
+            "audio_url": audio_url_from_response,
         }
 
     def _mark_error(self, care_event_id: str, reason: str) -> None:
@@ -338,6 +361,7 @@ class TecnoseniorCareNoteSyncService:
         content_resume: str,
         occurred_at: str | None = None,
         closes_note: bool = False,
+        closed_reason: str | None = None,
     ) -> dict[str, Any]:
         """Adiciona um addendum a uma CareNote já criada (cenário 2 —
         streaming).
@@ -345,6 +369,10 @@ class TecnoseniorCareNoteSyncService:
         Usado quando a Sofia recebe novo report dentro de um care_event
         ainda ativo. Se closes_note=True, manda status=CLOSED no addendum
         (fecha a CareNote pai).
+
+        V2 (confirmado com Matheus 2026-05-07): closed_reason pode ir
+        no body do addendum quando closes_note=True. Servidor usa essa
+        razão pra fechar a CareNote pai.
         """
         if not self.enabled:
             return {"status": "error", "reason": "client_disabled"}
@@ -367,12 +395,24 @@ class TecnoseniorCareNoteSyncService:
             }
 
         carenote_id = int(sync["tecnosenior_carenote_id"])
+
+        # Se closes_note e não veio closed_reason explícito, tenta puxar
+        # do care_event (campo nativo)
+        if closes_note and not closed_reason:
+            ev_row = self.db.fetch_one(
+                "SELECT closed_reason FROM aia_health_care_events WHERE id = %s",
+                (care_event_id,),
+            )
+            if ev_row and ev_row.get("closed_reason"):
+                closed_reason = ev_row["closed_reason"]
+
         result = self.client.add_addendum(
             care_note_id=carenote_id,
             content=content,
             content_resume=content_resume,
             occurred_at=occurred_at,
             status="CLOSED" if closes_note else None,
+            closed_reason=closed_reason,
         )
         if not result or "id" not in result:
             return {
@@ -403,13 +443,16 @@ class TecnoseniorCareNoteSyncService:
         except Exception as exc:
             logger.warning("addendum_persist_failed: %s", exc)
 
-        # Se fechou a CareNote, atualiza status local
+        # Se fechou a CareNote, atualiza status local + closed_reason
+        # enviado (audit do que efetivamente foi pra Tecnosenior)
         if closes_note:
             self.db.execute(
-                "UPDATE aia_health_tecnosenior_sync "
-                "SET tecnosenior_status = 'CLOSED', closed_at_remote = NOW() "
-                "WHERE care_event_id = %s",
-                (care_event_id,),
+                """UPDATE aia_health_tecnosenior_sync
+                   SET tecnosenior_status = 'CLOSED',
+                       closed_at_remote = NOW(),
+                       closed_reason_sent = COALESCE(%s, closed_reason_sent)
+                   WHERE care_event_id = %s""",
+                (closed_reason, care_event_id),
             )
 
         return {
@@ -504,7 +547,9 @@ class TecnoseniorCareNoteSyncService:
             """
             SELECT tecnosenior_carenote_id, tecnosenior_status,
                    last_synced_at, last_sync_attempt_at,
-                   sync_error, retry_count
+                   sync_error, retry_count,
+                   tecnosenior_audio_url, tecnosenior_audio_uploaded_at,
+                   closed_reason_sent
             FROM aia_health_tecnosenior_sync WHERE care_event_id = %s
             """,
             (care_event_id,),
@@ -512,10 +557,240 @@ class TecnoseniorCareNoteSyncService:
         if not row:
             return None
         d = dict(row)
-        for k in ("last_synced_at", "last_sync_attempt_at"):
+        for k in ("last_synced_at", "last_sync_attempt_at",
+                  "tecnosenior_audio_uploaded_at"):
             if d.get(k):
                 d[k] = str(d[k])
         return d
+
+    # ══════════════════════════════════════════════════════════════════
+    # V2: Upload de mídia pós-criação
+    # ══════════════════════════════════════════════════════════════════
+
+    def upload_audio_for_carenote(
+        self,
+        care_event_id: str,
+        audio_bytes: bytes,
+        audio_filename: str = "audio.ogg",
+        content_type: str = "audio/ogg",
+    ) -> dict[str, Any]:
+        """Upload de áudio pra CareNote (write-once). Idempotente em
+        duas dimensões:
+            1. Local: se já temos tecnosenior_audio_url no banco, skip.
+            2. Remoto: se servidor retornar 409, marca como já uploaded.
+        """
+        if not self.enabled:
+            return {"status": "error", "reason": "client_disabled"}
+
+        sync = self.db.fetch_one(
+            """SELECT tecnosenior_carenote_id, tecnosenior_audio_url
+               FROM aia_health_tecnosenior_sync WHERE care_event_id = %s""",
+            (care_event_id,),
+        )
+        if not sync or not sync.get("tecnosenior_carenote_id"):
+            return {"status": "error", "reason": "carenote_not_synced_yet"}
+        if sync.get("tecnosenior_audio_url"):
+            return {
+                "status": "already_uploaded",
+                "audio_url": sync["tecnosenior_audio_url"],
+            }
+
+        carenote_id = int(sync["tecnosenior_carenote_id"])
+        result = self.client.upload_carenote_audio(
+            care_note_id=carenote_id,
+            audio_bytes=audio_bytes,
+            audio_filename=audio_filename,
+            content_type=content_type,
+        )
+        if not result:
+            self.db.execute(
+                """UPDATE aia_health_tecnosenior_sync
+                   SET tecnosenior_audio_upload_error = %s
+                   WHERE care_event_id = %s""",
+                ("upload_failed", care_event_id),
+            )
+            return {"status": "error", "reason": "upload_failed"}
+
+        if result.get("_already_uploaded"):
+            # 409 — já tinha. Tenta puxar URL via GET na CareNote pra
+            # cachear localmente (evita retry).
+            self.db.execute(
+                """UPDATE aia_health_tecnosenior_sync
+                   SET tecnosenior_audio_uploaded_at = NOW(),
+                       tecnosenior_audio_upload_error = NULL
+                   WHERE care_event_id = %s""",
+                (care_event_id,),
+            )
+            return {"status": "already_uploaded_remote"}
+
+        audio_url = result.get("audio_url")
+        self.db.execute(
+            """UPDATE aia_health_tecnosenior_sync
+               SET tecnosenior_audio_url = %s,
+                   tecnosenior_audio_uploaded_at = NOW(),
+                   tecnosenior_audio_upload_error = NULL
+               WHERE care_event_id = %s""",
+            (audio_url, care_event_id),
+        )
+        logger.info(
+            "tecnosenior_carenote_audio_uploaded "
+            "care_event=%s carenote_id=%s",
+            care_event_id, carenote_id,
+        )
+        return {"status": "ok", "audio_url": audio_url}
+
+    def upload_audio_for_addendum(
+        self,
+        care_event_id: str,
+        addendum_id: int,
+        audio_bytes: bytes,
+        audio_filename: str = "audio.ogg",
+        content_type: str = "audio/ogg",
+    ) -> dict[str, Any]:
+        """Upload de áudio pra addendum (write-once)."""
+        if not self.enabled:
+            return {"status": "error", "reason": "client_disabled"}
+
+        # Pega carenote_id via addendums table + valida cache
+        addendum_row = self.db.fetch_one(
+            """SELECT tecnosenior_carenote_id, tecnosenior_audio_url
+               FROM aia_health_tecnosenior_addendums
+               WHERE care_event_id = %s AND tecnosenior_addendum_id = %s""",
+            (care_event_id, addendum_id),
+        )
+        if not addendum_row:
+            return {"status": "error", "reason": "addendum_not_found"}
+        if addendum_row.get("tecnosenior_audio_url"):
+            return {
+                "status": "already_uploaded",
+                "audio_url": addendum_row["tecnosenior_audio_url"],
+            }
+
+        carenote_id = int(addendum_row["tecnosenior_carenote_id"])
+        result = self.client.upload_addendum_audio(
+            care_note_id=carenote_id,
+            addendum_id=addendum_id,
+            audio_bytes=audio_bytes,
+            audio_filename=audio_filename,
+            content_type=content_type,
+        )
+        if not result:
+            self.db.execute(
+                """UPDATE aia_health_tecnosenior_addendums
+                   SET tecnosenior_audio_upload_error = %s
+                   WHERE care_event_id = %s AND tecnosenior_addendum_id = %s""",
+                ("upload_failed", care_event_id, addendum_id),
+            )
+            return {"status": "error", "reason": "upload_failed"}
+
+        if result.get("_already_uploaded"):
+            self.db.execute(
+                """UPDATE aia_health_tecnosenior_addendums
+                   SET tecnosenior_audio_uploaded_at = NOW(),
+                       tecnosenior_audio_upload_error = NULL
+                   WHERE care_event_id = %s AND tecnosenior_addendum_id = %s""",
+                (care_event_id, addendum_id),
+            )
+            return {"status": "already_uploaded_remote"}
+
+        audio_url = result.get("audio") or result.get("audio_url")
+        self.db.execute(
+            """UPDATE aia_health_tecnosenior_addendums
+               SET tecnosenior_audio_url = %s,
+                   tecnosenior_audio_uploaded_at = NOW(),
+                   tecnosenior_audio_upload_error = NULL
+               WHERE care_event_id = %s AND tecnosenior_addendum_id = %s""",
+            (audio_url, care_event_id, addendum_id),
+        )
+        return {"status": "ok", "audio_url": audio_url}
+
+    def upload_photo_for_carenote(
+        self,
+        care_event_id: str,
+        image_bytes: bytes,
+        image_filename: str = "photo.jpg",
+        content_type: str = "image/jpeg",
+        addendum_id: int | None = None,
+        local_image_path: str | None = None,
+    ) -> dict[str, Any]:
+        """Upload de foto. Diferente de áudio:
+            • Sem limite (pode mandar várias)
+            • Sem 409 (sem write-once)
+            • addendum_id opcional pra associar a um addendum específico
+              (servidor valida que pertence à CareNote)
+
+        Cada foto enviada vira uma row em aia_health_tecnosenior_photos.
+        """
+        if not self.enabled:
+            return {"status": "error", "reason": "client_disabled"}
+
+        sync = self.db.fetch_one(
+            """SELECT tecnosenior_carenote_id
+               FROM aia_health_tecnosenior_sync WHERE care_event_id = %s""",
+            (care_event_id,),
+        )
+        if not sync or not sync.get("tecnosenior_carenote_id"):
+            return {"status": "error", "reason": "carenote_not_synced_yet"}
+
+        carenote_id = int(sync["tecnosenior_carenote_id"])
+
+        # Validação: se addendum_id informado, confirma que pertence a
+        # essa carenote no nosso banco (defensive — server também valida)
+        if addendum_id is not None:
+            addendum_row = self.db.fetch_one(
+                """SELECT 1 FROM aia_health_tecnosenior_addendums
+                   WHERE care_event_id = %s
+                     AND tecnosenior_addendum_id = %s
+                     AND tecnosenior_carenote_id = %s""",
+                (care_event_id, addendum_id, carenote_id),
+            )
+            if not addendum_row:
+                return {
+                    "status": "error",
+                    "reason": "addendum_not_in_carenote",
+                }
+
+        result = self.client.upload_carenote_photo(
+            care_note_id=carenote_id,
+            image_bytes=image_bytes,
+            image_filename=image_filename,
+            content_type=content_type,
+            addendum_id=addendum_id,
+        )
+        if not result or "id" not in result:
+            return {"status": "error", "reason": "upload_failed"}
+
+        photo_id = int(result["id"])
+        remote_url = result.get("image_url")
+
+        try:
+            self.db.execute(
+                """INSERT INTO aia_health_tecnosenior_photos (
+                    care_event_id, tecnosenior_carenote_id,
+                    tecnosenior_addendum_id, tecnosenior_photo_id,
+                    local_image_path, remote_image_url,
+                    content_type, size_bytes
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (tecnosenior_photo_id) DO NOTHING""",
+                (
+                    care_event_id, carenote_id, addendum_id, photo_id,
+                    local_image_path, remote_url,
+                    content_type, len(image_bytes),
+                ),
+            )
+        except Exception as exc:
+            logger.warning("photo_persist_failed: %s", exc)
+
+        logger.info(
+            "tecnosenior_photo_uploaded "
+            "care_event=%s carenote_id=%s photo_id=%s addendum_id=%s",
+            care_event_id, carenote_id, photo_id, addendum_id,
+        )
+        return {
+            "status": "ok",
+            "tecnosenior_photo_id": photo_id,
+            "remote_image_url": remote_url,
+        }
 
 
 _instance: TecnoseniorCareNoteSyncService | None = None
