@@ -77,13 +77,17 @@ class MedMonitorClient:
         path: str,
         params: dict | None = None,
         json_body: dict | None = None,
+        extra_headers: dict | None = None,
     ) -> Any | None:
         if not self.enabled:
             return None
 
         url = f"{self.base_url}{path}"
         try:
-            resp = self._client.request(method, url, params=params, json=json_body)
+            resp = self._client.request(
+                method, url, params=params, json=json_body,
+                headers=extra_headers,  # httpx merge com headers da session
+            )
         except httpx.RequestError as exc:
             logger.warning("medmonitor_request_error", method=method, path=path, error=str(exc))
             return None
@@ -117,6 +121,7 @@ class MedMonitorClient:
         path: str,
         files: dict,
         data: dict | None = None,
+        extra_headers: dict | None = None,
     ) -> dict[str, Any] | None:
         """Request multipart/form-data com tratamento explícito de 409.
 
@@ -138,6 +143,7 @@ class MedMonitorClient:
         try:
             resp = self._client.request(
                 method, url, files=files, data=data or {},
+                headers=extra_headers,
             )
         except httpx.RequestError as exc:
             logger.warning(
@@ -354,6 +360,7 @@ class MedMonitorClient:
         closed_reason: str | None = None,
         audio_bytes: bytes | None = None,
         audio_filename: str = "audio.ogg",
+        idempotency_key: str | None = None,
     ) -> dict | None:
         """Cria CareNote com status explícito (OPEN ou CLOSED).
 
@@ -367,6 +374,10 @@ class MedMonitorClient:
             audio_bytes: se fornecido, usa multipart/form-data e anexa
                 áudio na criação (cenário 6.1 do doc V2). Caso contrário,
                 JSON normal — caller pode fazer upload separado depois.
+            idempotency_key: opcional. Tecnosenior vai habilitar suporte
+                nativo nos views (Matheus 2026-05-07). Vai como header
+                `Idempotency-Key`; se Tecnosenior aceitar, retry seguro.
+                Servidor ignora silenciosamente quando ainda não suportar.
         """
         if not content or not content.strip():
             logger.warning("care_note_content_empty")
@@ -384,6 +395,12 @@ class MedMonitorClient:
         if status == "CLOSED" and closed_reason:
             closed_reason_clean = closed_reason.strip()[:50]
 
+        # Idempotência (Tecnosenior habilitando próx. semana — 2026-05-07)
+        # vai como header padrão Idempotency-Key
+        extra_headers = (
+            {"Idempotency-Key": idempotency_key} if idempotency_key else None
+        )
+
         # Branch: multipart com áudio vs JSON normal
         if audio_bytes:
             data: dict[str, Any] = {
@@ -400,6 +417,7 @@ class MedMonitorClient:
             files = {"audio": (audio_filename, audio_bytes, "audio/ogg")}
             result = self._multipart_request(
                 "POST", "/care-notes/", files=files, data=data,
+                extra_headers=extra_headers,
             )
             if result and result.get("_already_uploaded"):
                 # 409 numa criação não faz sentido — servidor não devia
@@ -423,7 +441,10 @@ class MedMonitorClient:
             body["occurred_at"] = occurred_at
         if closed_reason_clean:
             body["closed_reason"] = closed_reason_clean
-        return self._request("POST", "/care-notes/", json_body=body)
+        return self._request(
+            "POST", "/care-notes/", json_body=body,
+            extra_headers=extra_headers,
+        )
 
     def create_care_note_bulk(
         self,
@@ -434,6 +455,8 @@ class MedMonitorClient:
         addendums: list[dict],
         occurred_at: str | None = None,
         status: str = "OPEN",
+        closed_reason: str | None = None,
+        idempotency_key: str | None = None,
     ) -> dict | None:
         """Cenário 3/4 da Tecnosenior: cria CareNote + addendums em chamada
         atômica. Cada addendum é {content, content_resume, occurred_at}.
@@ -450,6 +473,11 @@ class MedMonitorClient:
         if status not in ("OPEN", "CLOSED"):
             status = "OPEN"
 
+        # closed_reason só vai com CLOSED, ≤50 chars (V2)
+        closed_reason_clean: str | None = None
+        if status == "CLOSED" and closed_reason:
+            closed_reason_clean = closed_reason.strip()[:50]
+
         body: dict[str, Any] = {
             "caretaker": caretaker_id,
             "patient": patient_id,
@@ -460,7 +488,16 @@ class MedMonitorClient:
         }
         if occurred_at:
             body["occurred_at"] = occurred_at
-        return self._request("POST", "/care-notes/bulk/", json_body=body)
+        if closed_reason_clean:
+            body["closed_reason"] = closed_reason_clean
+
+        extra_headers = (
+            {"Idempotency-Key": idempotency_key} if idempotency_key else None
+        )
+        return self._request(
+            "POST", "/care-notes/bulk/", json_body=body,
+            extra_headers=extra_headers,
+        )
 
     def add_addendum(
         self,
@@ -472,6 +509,7 @@ class MedMonitorClient:
         closed_reason: str | None = None,
         audio_bytes: bytes | None = None,
         audio_filename: str = "audio.ogg",
+        idempotency_key: str | None = None,
     ) -> dict | None:
         """POST /care-notes/{id}/addendums/ — adiciona addendum a uma
         CareNote OPEN.
@@ -499,6 +537,10 @@ class MedMonitorClient:
         if status == "CLOSED" and closed_reason:
             closed_reason_clean = closed_reason.strip()[:50]
 
+        extra_headers = (
+            {"Idempotency-Key": idempotency_key} if idempotency_key else None
+        )
+
         # Branch: multipart com áudio vs JSON
         if audio_bytes:
             data: dict[str, Any] = {
@@ -516,6 +558,7 @@ class MedMonitorClient:
                 "POST",
                 f"/care-notes/{care_note_id}/addendums/",
                 files=files, data=data,
+                extra_headers=extra_headers,
             )
             if result and result.get("_already_uploaded"):
                 logger.warning(
@@ -538,6 +581,7 @@ class MedMonitorClient:
             body["closed_reason"] = closed_reason_clean
         return self._request(
             "POST", f"/care-notes/{care_note_id}/addendums/", json_body=body,
+            extra_headers=extra_headers,
         )
 
     # ══════════════════════════════════════════════════════════════════
@@ -769,13 +813,17 @@ class MedMonitorClient:
             return None
 
         body: dict[str, Any] = {"measures": sanitized}
-        if idempotency_key:
-            body["idempotency_key"] = idempotency_key
+        # idempotency_key vai como header padrão Idempotency-Key
+        # (Tecnosenior habilitando próx. semana — Matheus 2026-05-07)
+        extra_headers = (
+            {"Idempotency-Key": idempotency_key} if idempotency_key else None
+        )
 
         return self._request(
             "POST",
             f"/patients/{patient_id}/health-measures/bulk/",
             json_body=body,
+            extra_headers=extra_headers,
         )
 
     @staticmethod
