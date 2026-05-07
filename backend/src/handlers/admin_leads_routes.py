@@ -190,7 +190,7 @@ def get_lead(lead_id: str):
 
 
 @bp.patch("/api/admin/leads/<lead_id>")
-@require_role("super_admin", "admin_tenant")
+@require_role("super_admin", "admin_tenant", "comercial")
 def update_lead(lead_id: str):
     """Atualiza status/qualification/notes/lost_reason.
 
@@ -199,6 +199,13 @@ def update_lead(lead_id: str):
         qualification_score  → int 0-100
         lost_reason   → str (quando status=lost)
         note          → str (append em notes JSONB)
+        demo_scheduled_at, demo_link, full_name, email, organization,
+        role_self_declared, intent, last_contact_at  → free-form
+
+    Quando o status muda, registra entry em
+    aia_health_lead_activities (timeline da página de detalhe do lead)
+    além do audit log clássico. Falha do log de activity não derruba
+    o update.
     """
     body = request.get_json(silent=True) or {}
     db = get_postgres()
@@ -210,7 +217,10 @@ def update_lead(lead_id: str):
 
     updates: list = []
     params: list = []
-    user_id = (getattr(g, "user", {}) or {}).get("sub")
+    user_ctx = getattr(g, "user", {}) or {}
+    user_id = user_ctx.get("sub")
+
+    status_changed_to: str | None = None
 
     if "status" in body:
         status_new = body["status"]
@@ -220,9 +230,13 @@ def update_lead(lead_id: str):
         params.append(status_new)
         # Marcadores automáticos
         if status_new == "qualified":
-            updates.append("qualified_at = NOW()")
-            updates.append("qualified_by_user_id = %s")
+            updates.append("qualified_at = COALESCE(qualified_at, NOW())")
+            updates.append("qualified_by_user_id = COALESCE(qualified_by_user_id, %s)")
             params.append(user_id)
+        if status_new == "converted":
+            updates.append("converted_at = COALESCE(converted_at, NOW())")
+        if existing.get("status") != status_new:
+            status_changed_to = status_new
 
     if "qualification_score" in body:
         try:
@@ -236,6 +250,14 @@ def update_lead(lead_id: str):
     if "lost_reason" in body:
         updates.append("lost_reason = %s")
         params.append(body["lost_reason"])
+
+    # Campos free-form do funil comercial
+    for k in ("demo_scheduled_at", "demo_link", "full_name", "email",
+              "organization", "role_self_declared", "intent",
+              "last_contact_at"):
+        if k in body:
+            updates.append(f"{k} = %s")
+            params.append(body[k])
 
     if "note" in body and body["note"]:
         updates.append(
@@ -253,6 +275,30 @@ def update_lead(lead_id: str):
         f"UPDATE aia_health_leads SET {', '.join(updates)} WHERE id = %s",
         tuple(params),
     )
+
+    # Activity log (timeline do funil comercial). Independente do
+    # audit_log clássico — esse aqui aparece pro time comercial na UI.
+    if status_changed_to:
+        try:
+            db.execute(
+                """INSERT INTO aia_health_lead_activities
+                   (lead_id, activity_type, actor_type, actor_user_id,
+                    actor_name, summary, importance)
+                   VALUES (%s, 'status_changed', 'human', %s, %s, %s, 'normal')""",
+                (
+                    lead_id,
+                    user_id,
+                    user_ctx.get("name") or user_ctx.get("email") or "humano",
+                    f"status alterado para {status_changed_to}",
+                ),
+            )
+        except Exception:
+            # Não falhar o update por causa do activity log
+            logger.warning(
+                "activity_log_failed_for_status_change",
+                extra={"lead_id": lead_id},
+                exc_info=True,
+            )
 
     write_audit(
         action="lead_admin_updated",

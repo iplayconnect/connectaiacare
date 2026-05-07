@@ -650,85 +650,10 @@ def create_lead_manual():
         logger.exception("create_lead_manual_failed")
         return jsonify({"status": "error", "reason": str(exc)[:200]}), 500
 
-
-# ════════════════════ LEAD UPDATE (drag-drop kanban etc.) ═══════════
-
-_ALLOWED_LEAD_STATUS = {
-    "new", "qualified", "demo_scheduled", "in_demo",
-    "proposal_sent", "converted", "lost",
-}
-
-
-@bp.patch("/api/admin/leads/<lead_id>")
-@require_role("super_admin", "admin_tenant", "comercial")
-def update_lead(lead_id: str):
-    """Atualiza lead. Hoje suporta principalmente status (drag-drop
-    kanban) + qualification_score, demo_scheduled_at, lost_reason,
-    full_name/email/organization/role_self_declared/intent.
-    Marca qualified_at quando vira `qualified`, converted_at quando
-    vira `converted`."""
-    body = request.get_json(silent=True) or {}
-    user_ctx = getattr(g, "user", None) or {}
-
-    allowed = (
-        "status", "qualification_score", "demo_scheduled_at",
-        "demo_link", "lost_reason", "full_name", "email",
-        "organization", "role_self_declared", "intent",
-        "last_contact_at",
-    )
-    updates: list[str] = []
-    params: list = []
-    for k in allowed:
-        if k in body:
-            updates.append(f"{k} = %s")
-            params.append(body[k])
-
-    if "status" in body:
-        new_status = body["status"]
-        if new_status not in _ALLOWED_LEAD_STATUS:
-            return jsonify({
-                "status": "error",
-                "reason": "invalid_status",
-                "allowed": sorted(_ALLOWED_LEAD_STATUS),
-            }), 400
-        if new_status == "qualified":
-            updates.append("qualified_at = COALESCE(qualified_at, NOW())")
-            updates.append("qualified_by_user_id = COALESCE(qualified_by_user_id, %s)")
-            params.append(user_ctx.get("sub"))
-        if new_status == "converted":
-            updates.append("converted_at = COALESCE(converted_at, NOW())")
-
-    if not updates:
-        return jsonify({"status": "error", "reason": "no_fields"}), 400
-
-    updates.append("updated_at = NOW()")
-    params.append(lead_id)
-    try:
-        get_postgres().execute(
-            f"UPDATE aia_health_leads SET {', '.join(updates)} WHERE id = %s",
-            tuple(params),
-        )
-
-        # Log activity (audit trail no kanban)
-        if "status" in body:
-            try:
-                get_postgres().execute(
-                    """INSERT INTO aia_health_lead_activities
-                       (lead_id, activity_type, actor_type, actor_user_id,
-                        actor_name, summary, importance)
-                       VALUES (%s, 'status_changed', 'human', %s, %s, %s, 'normal')""",
-                    (
-                        lead_id,
-                        user_ctx.get("sub"),
-                        user_ctx.get("name") or user_ctx.get("email") or "humano",
-                        f"status alterado para {body['status']}",
-                    ),
-                )
-            except Exception:
-                # Não falhar update por causa de activity log
-                logger.warning("activity_log_failed_for_status_change", exc_info=True)
-
-        return jsonify({"status": "ok"}), 200
-    except Exception as exc:
-        logger.exception("update_lead_failed")
-        return jsonify({"status": "error", "reason": str(exc)[:200]}), 500
+# ════════════════════ NOTA: PATCH /api/admin/leads/<id> ═════════════
+# Esse endpoint vive em src/handlers/admin_leads_routes.py (legado),
+# que já trata status/qualification_score/lost_reason/notes e gera
+# audit no aia_health_audit_log + activity em aia_health_lead_activities
+# quando o status muda (drag-drop kanban). Mantemos um único endpoint
+# pra evitar conflito de blueprints (Flask aceita rotas duplicadas em
+# blueprints diferentes mas usa quem registrou primeiro — frágil).
