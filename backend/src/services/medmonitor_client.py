@@ -743,6 +743,7 @@ class MedMonitorClient:
         patient_id: int,
         measures: list[dict],
         idempotency_key: str | None = None,
+        skip_physiologic_validation: bool = False,
     ) -> dict | None:
         """POST bulk de medidas de saúde.
 
@@ -753,8 +754,8 @@ class MedMonitorClient:
 
         Schema do payload:
             POST /patients/{id}/health-measures/bulk/
+            Headers: Idempotency-Key: <uuid>  (quando habilitado)
             {
-                "idempotency_key": "uuid",  // opcional — se Tecnosenior expôr
                 "measures": [
                     {
                         "type": "heart_rate" | "blood_pressure_systolic" | ...,
@@ -763,20 +764,24 @@ class MedMonitorClient:
                         "measured_at": "2026-05-07T14:30:00Z",
                         "source": "agent_voice" | "agent_photo" | "agent_typed",
                         "confidence": 0.95,
+                        "clinical_status": "routine" | "attention" | "urgent" | "critical",
                         "raw_text": "ela tá com 78 batimentos"  // opcional pra audit
                     },
                     ...
                 ]
             }
 
-        Validação local: filtra measures com type/value inválidos antes
-        de mandar. Atomicidade no servidor depende de como Matheus
-        implementar (preferimos all-or-nothing).
+        Validação fisiológica (decisão 2026-05-07): valores fora da
+        faixa biologicamente possível e valores raros sem confirmação
+        humana são FILTRADOS aqui antes de mandar. A responsabilidade
+        de pedir reconfirmação ao cuidador é da camada acima (Sofia)
+        — esse client só protege o servidor de receber dado claramente
+        bugado. Pra bypass, passar skip_physiologic_validation=True.
         """
         if not measures:
             return None
 
-        # Sanitização local: filtra os com type válido + value numérico
+        # Sanitização básica: filtra os com type válido + value numérico
         sanitized: list[dict] = []
         for m in measures:
             if not isinstance(m, dict):
@@ -803,7 +808,8 @@ class MedMonitorClient:
                 "value": m_value,
                 "unit": m.get("unit") or self._default_unit(mtype),
             }
-            for k in ("measured_at", "source", "confidence", "raw_text"):
+            for k in ("measured_at", "source", "confidence",
+                      "raw_text", "clinical_status"):
                 if m.get(k) is not None:
                     entry[k] = m[k]
             sanitized.append(entry)
@@ -811,6 +817,34 @@ class MedMonitorClient:
         if not sanitized:
             logger.warning("health_measures_bulk_empty_after_sanitize")
             return None
+
+        # Validação fisiológica (camada extra de proteção)
+        if not skip_physiologic_validation:
+            from src.services.vital_signs_validator import (
+                filter_valid_for_persistence,
+            )
+            valid, suspicious = filter_valid_for_persistence(sanitized)
+            if suspicious:
+                logger.warning(
+                    "health_measures_bulk_filtered_suspicious",
+                    suspicious_count=len(suspicious),
+                    valid_count=len(valid),
+                    suspicious_summary=[
+                        {
+                            "type": s.get("type"),
+                            "value": s.get("value"),
+                            "reason": s.get("validation_reason"),
+                        }
+                        for s in suspicious[:10]
+                    ],
+                )
+            if not valid:
+                logger.warning(
+                    "health_measures_bulk_all_filtered_out",
+                    total=len(sanitized),
+                )
+                return None
+            sanitized = valid
 
         body: dict[str, Any] = {"measures": sanitized}
         # idempotency_key vai como header padrão Idempotency-Key
