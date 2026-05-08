@@ -15,6 +15,9 @@ from src.handlers.auth_routes import require_role
 from src.services.tecnosenior_carenote_sync_service import (
     get_tecnosenior_sync,
 )
+from src.services.tecnosenior_vital_signs_sync_service import (
+    get_tecnosenior_vital_signs_sync,
+)
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -310,20 +313,19 @@ def list_health_measures(patient_int_id: int):
 @bp.post("/api/integrations/tecnosenior/health-measures/<int:patient_int_id>/bulk")
 @require_role("super_admin", "admin_tenant", "medico", "enfermeiro")
 def post_health_measures_bulk(patient_int_id: int):
-    """POST bulk de medidas de saúde pra um paciente.
+    """POST bulk RAW (debug) — passa medidas direto pro Tecnosenior sem
+    passar por aia_health_vital_signs local. Útil pra smoke test.
 
     Body: {
         idempotency_key?: string,
         measures: [
-            {type, value, unit?, measured_at?, source?, confidence?, raw_text?},
+            {type, value, unit?, measured_at?, source?, raw_text?},
             ...
         ]
     }
 
-    Padrão de uso: cuidador relata várias medidas via WhatsApp,
-    Sofia acumula, recapitula com ele, depois faz bulk send.
-    Sanitização: types inválidos e values não-numéricos são
-    silenciosamente filtrados antes do POST.
+    Pra fluxo de produção (com persistência local + audit trail),
+    usar /sync-vital-signs abaixo.
     """
     body = request.get_json(silent=True) or {}
     measures = body.get("measures") or []
@@ -342,6 +344,42 @@ def post_health_measures_bulk(patient_int_id: int):
     if result is None:
         return jsonify({"status": "error", "reason": "bulk_post_failed"}), 502
     return jsonify({"status": "ok", "result": result})
+
+
+@bp.post("/api/integrations/tecnosenior/sync-vital-signs")
+@require_role("super_admin", "admin_tenant", "medico", "enfermeiro")
+def sync_vital_signs():
+    """Sincroniza vital signs locais (já persistidos em aia_health_vital_signs)
+    pro TotalCare via bulk POST.
+
+    Body:
+        patient_id: UUID local do paciente
+        vital_signs_ids?: lista de UUIDs específicos. Se omitida, pega
+            TODOS os pendentes (confirmed_by_caregiver_at IS NOT NULL
+            AND tecnosenior_synced_at IS NULL).
+        max_measures?: limite (default 50, só usado quando não passa IDs)
+
+    Retorna estatísticas + idempotency_key pra retry seguro.
+    """
+    body = request.get_json(silent=True) or {}
+    patient_id = body.get("patient_id")
+    if not patient_id:
+        return jsonify({
+            "status": "error", "reason": "patient_id_required",
+        }), 400
+
+    svc = get_tecnosenior_vital_signs_sync()
+    if body.get("vital_signs_ids"):
+        result = svc.sync_specific_measures(
+            patient_uuid=patient_id,
+            vital_signs_ids=body["vital_signs_ids"],
+        )
+    else:
+        result = svc.sync_pending_for_patient(
+            patient_uuid=patient_id,
+            max_measures=int(body.get("max_measures", 50)),
+        )
+    return jsonify(result)
 
 
 @bp.post("/api/integrations/tecnosenior/test-streaming")
