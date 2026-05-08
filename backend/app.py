@@ -24,6 +24,7 @@ from src.handlers.clinical_rules_routes import bp as clinical_rules_bp
 from src.handlers.disease_routes import bp as disease_bp
 from src.handlers.medication_routes import bp as medication_bp
 from src.handlers.onboarding_web_routes import bp as onboarding_web_bp
+from src.handlers.operator_routes import bp as operator_bp
 from src.handlers.patient_portal_routes import bp as patient_portal_bp
 from src.handlers.proactive_caller_routes import bp as proactive_caller_bp
 from src.handlers.profiles_routes import bp as profiles_bp
@@ -104,6 +105,7 @@ def create_app() -> Flask:
     app.register_blueprint(admin_handoff_bp)      # Phase D — handoff queue
     app.register_blueprint(admin_conversations_bp) # Phase D — conversations
     app.register_blueprint(admin_quick_replies_bp) # Phase A — quick replies pra chat handoff
+    app.register_blueprint(operator_bp)            # Phase D — central ATENT 24/7 (migration 071)
 
     # JWT middleware: protege /api/* exceto rotas públicas (auth, webhook,
     # portal do paciente com PIN, onboarding B2C).

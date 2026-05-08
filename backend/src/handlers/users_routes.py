@@ -31,7 +31,8 @@ bp = Blueprint("users", __name__)
 VALID_ROLES = {
     "super_admin", "admin_tenant", "medico", "enfermeiro",
     "cuidador_pro", "familia", "parceiro",
-    "clinical_reviewer",  # Revisor de corpus (Henrique e similares)
+    "clinical_reviewer",   # Revisor de corpus (Henrique e similares)
+    "operador_central",    # ATENT 24/7 — atende fila de handoff
 }
 
 

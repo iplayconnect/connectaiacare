@@ -28,6 +28,7 @@ import {
   KanbanSquare,
   Calendar,
   Package,
+  Headphones,
 } from "lucide-react";
 
 import { useAuth } from "@/context/auth-context";
@@ -225,6 +226,13 @@ const NAV_ITEMS: NavItem[] = [
     label: "Handoff · Atendimento Humano",
     icon: HeartHandshake,
     roles: ["super_admin", "admin_tenant", "medico", "enfermeiro"],
+    group: "system",
+  },
+  {
+    href: "/admin/system/operations/central",
+    label: "Central · ATENT 24/7",
+    icon: Headphones,
+    roles: ["super_admin", "operador_central"],
     group: "system",
   },
   {
