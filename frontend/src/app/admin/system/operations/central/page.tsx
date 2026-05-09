@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/context/auth-context";
 import { hasRole } from "@/lib/permissions";
+import { vitalTypeLabel } from "@/lib/medical-acronyms";
 import {
   operatorApi,
   type QueueItem,
@@ -817,7 +818,7 @@ function ContextSection({
                 className="text-[11px] bg-white/[0.04] border border-white/10 rounded px-2 py-1 flex justify-between"
               >
                 <span className="text-slate-300">
-                  {v.vital_type}: {v.value_numeric}
+                  {vitalTypeLabel(v.vital_type)}: {v.value_numeric}
                   {v.value_secondary != null && `/${v.value_secondary}`} {v.unit}
                 </span>
                 <span className="text-slate-500 font-mono">
