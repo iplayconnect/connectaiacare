@@ -1523,6 +1523,142 @@ def update_lead_qualification(
 
 
 # ──────────────────────────────────────────────────────────────────
+# Operator tools (Phase D — central ATENT 24/7)
+# ──────────────────────────────────────────────────────────────────
+
+
+def escalate_to_central_operator(
+    *,
+    phone: str,
+    reason: str,
+    summary: str,
+    patient_id: Optional[str] = None,
+    caregiver_id: Optional[str] = None,
+    urgency: str = "P3",
+    tenant_id: Optional[str] = None,
+    trace_id: Optional[str] = None,
+    session_id: Optional[str] = None,
+    conversation_log: Optional[list] = None,
+) -> ToolResult:
+    """Variante operacional de escalate_to_human_*: cria handoff com
+    handoff_type='operator'. Usado quando Sofia não tem certeza se o
+    caso é clínico ou comercial — o operador 24/7 triagem e roteia
+    pra fila correta (clinical/commercial) ou resolve direto.
+
+    Caso típico: cuidador relata algo ambíguo ("a Dona Maria tá
+    estranha, não sei o que é") — operador atende, conversa, e
+    decide se escala pro médico ou tranquiliza o cuidador.
+
+    Idempotência: 1 handoff de tipo operator por phone+patient
+    em 30min.
+    """
+    if not phone or not reason or not summary:
+        return ToolResult(ok=False, data={}, error="missing_required_fields")
+
+    from src.services.identity_resolver import normalize_phone_e164_br
+    canonical_phone = normalize_phone_e164_br(phone) or phone
+
+    idem_key = f"{canonical_phone}:{patient_id or 'no_patient'}:operator_handoff"
+    if not is_first_occurrence("escalate_operator", idem_key, ttl_seconds=1800):
+        logger.info(
+            "operator_escalate_idempotent_skip",
+            phone=canonical_phone, patient_id=patient_id, trace_id=trace_id,
+        )
+        return ToolResult(
+            ok=True, data={}, idempotent_skip=True,
+            error="similar_operator_escalate_in_last_30min",
+        )
+
+    valid_urgency = urgency if urgency in ("P1", "P2", "P3") else "P3"
+    sla_seconds = {"P1": 300, "P2": 1800, "P3": 7200}[valid_urgency]
+
+    db = get_postgres()
+    try:
+        phone = canonical_phone
+        row = db.insert_returning(
+            """INSERT INTO aia_health_human_handoff_queue (
+                trace_id, phone, tenant_id, channel, reason,
+                context_summary, conversation_log,
+                triggered_by, priority, status, sla_target_seconds,
+                handoff_type, patient_id, caregiver_id
+            ) VALUES (%s, %s, %s, 'whatsapp', %s, %s, %s::jsonb,
+                      'sofia', %s, 'pending', %s,
+                      'operator', %s, %s)
+            RETURNING id""",
+            (
+                trace_id, phone, tenant_id, reason, summary,
+                json.dumps(conversation_log or []),
+                valid_urgency, sla_seconds,
+                patient_id, caregiver_id,
+            ),
+        )
+        handoff_id = str(row["id"]) if row else "?"
+
+        # Notifica central via outbound stream — operador online verá
+        # no painel; mensagem WhatsApp serve de fallback se ninguém
+        # online no momento.
+        try:
+            central_text = (
+                f"[CENTRAL · {valid_urgency}]\n\n"
+                f"Phone: {phone}\n"
+                f"Motivo: {reason}\n"
+                f"Tenant: {tenant_id or '(sem tenant)'}\n"
+                f"Trace: {trace_id}\n\n"
+                f"Resumo: {summary[:500]}\n\n"
+                f"Atender em /admin/system/operations/central "
+                f"(handoff_id={handoff_id})."
+            )
+            get_event_bus().publish(Streams.OUTBOUND, {
+                "tenant_id": tenant_id,
+                "trace_id": trace_id,
+                "phone": CENTRAL_24H_PHONE,
+                "message_type": "text",
+                "text": central_text,
+                "metadata": {
+                    "reason": "central_operator_handoff_notify",
+                    "handoff_id": handoff_id,
+                    "handoff_type": "operator",
+                },
+            })
+            db.execute(
+                "UPDATE aia_health_human_handoff_queue "
+                "SET notified_central_at = NOW() WHERE id = %s",
+                (handoff_id,),
+            )
+        except Exception as exc:
+            logger.warning(
+                "central_operator_notify_failed",
+                handoff_id=handoff_id, error=str(exc)[:200],
+            )
+
+        write_audit(
+            action="operator_handoff_initiated",
+            actor="sofia",
+            tenant_id=tenant_id,
+            trace_id=trace_id,
+            session_id=session_id,
+            resource_type="handoff",
+            resource_id=handoff_id,
+            payload={
+                "reason": reason,
+                "urgency": valid_urgency,
+                "sla_seconds": sla_seconds,
+                "patient_id": patient_id,
+                "caregiver_id": caregiver_id,
+            },
+        )
+        return ToolResult(ok=True, data={
+            "handoff_id": handoff_id,
+            "handoff_type": "operator",
+            "urgency": valid_urgency,
+            "sla_target_seconds": sla_seconds,
+        })
+    except Exception as exc:
+        logger.exception("operator_escalate_failed", trace_id=trace_id)
+        return ToolResult(ok=False, data={}, error=str(exc)[:200])
+
+
+# ──────────────────────────────────────────────────────────────────
 # Tool registry
 # ──────────────────────────────────────────────────────────────────
 
@@ -1535,6 +1671,8 @@ TOOL_REGISTRY = {
     "safety_review_prescriptions": safety_review_prescriptions,
     "register_caregiver_report": register_caregiver_report,
     "escalate_to_human_clinical": escalate_to_human_clinical,
+    # Operator tools (Phase D — central 24/7)
+    "escalate_to_central_operator": escalate_to_central_operator,
     # Commercial funnel tools (migration 068 — Phase D Comercial)
     "query_plans": query_plans,
     "schedule_demo_with_calendar": schedule_demo_with_calendar,

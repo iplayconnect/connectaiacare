@@ -15,6 +15,13 @@ import {
   Stethoscope,
   HandHeart,
   MessageSquare,
+  ThumbsUp,
+  ThumbsDown,
+  ArrowLeft,
+  AlertCircle,
+  Footprints,
+  TrendingUp,
+  PillBottle,
 } from "lucide-react";
 
 import { useAuth } from "@/context/auth-context";
@@ -23,8 +30,10 @@ import { api } from "@/lib/api";
 
 // ═══════════════════════════════════════════════════════════════
 // /admin/governance/corpus-review — revisão clínica do gold-standard.
-// Um caso por vez, 8 botões, campo de nota opcional. Otimizada
-// pra mobile (alvo: Henrique revisar do celular no café).
+//
+// UX (refeito 2026-05-09): força decisão explícita Concordo/Discordo
+// pra evitar viés de "salvar sem revisar" (estado anterior tinha 100%
+// concordância falsa). Quando Discordar, motivo é OBRIGATÓRIO.
 // ═══════════════════════════════════════════════════════════════
 
 const EVENT_TYPES: {
@@ -36,11 +45,14 @@ const EVENT_TYPES: {
   { code: "relato_geral", label: "Relato geral", hint: "informativo, sem ação clínica", icon: MessageSquare },
   { code: "cuidado_higiene", label: "Higiene/cuidado", hint: "banho, fralda, curativo, troca", icon: Heart },
   { code: "alimentacao_hidratacao", label: "Alimentação/Hidratação", hint: "comeu, bebeu, recusou", icon: Droplet },
-  { code: "medicacao", label: "Medicação", hint: "tomou, não tomou, reagiu", icon: Pill },
+  { code: "medicacao", label: "Medicação", hint: "tomou, não tomou, dose perdida (sem efeito adverso)", icon: Pill },
+  { code: "evento_adverso_medicamentoso", label: "Evento adverso medicamentoso", hint: "reação ao remédio: efeito colateral, alergia, interação", icon: PillBottle },
   { code: "sinal_vital", label: "Sinal vital", hint: "PA, FC, FR, SpO2, glicemia, temp", icon: Activity },
-  { code: "intercorrencia", label: "Intercorrência", hint: "queda, perda de consciência, evento agudo", icon: AlertTriangle },
-  { code: "sintoma_novo", label: "Sintoma novo", hint: "queixa, mal-estar, mudança de comportamento", icon: Stethoscope },
-  { code: "apoio_emocional", label: "Apoio emocional", hint: "tristeza, exaustão, ansiedade", icon: HandHeart },
+  { code: "intercorrencia", label: "Intercorrência", hint: "queda, perda de consciência, evento agudo, anafilaxia", icon: AlertTriangle },
+  { code: "sintoma_novo", label: "Sintoma novo", hint: "queixa nova, mal-estar (sem atribuição a fármaco)", icon: Stethoscope },
+  { code: "avaliacao_funcional", label: "Avaliação funcional", hint: "ABVD/AIVD: mobilidade, autonomia, capacidade", icon: Footprints },
+  { code: "evolucao_clinica", label: "Evolução clínica", hint: "update de quadro JÁ CONHECIDO (melhora/piora)", icon: TrendingUp },
+  { code: "apoio_emocional", label: "Apoio emocional", hint: "cuidador: tristeza, exaustão, ansiedade", icon: HandHeart },
 ];
 
 const CLASSIFICATIONS = [
@@ -49,6 +61,13 @@ const CLASSIFICATIONS = [
   { code: "urgent", label: "Urgente", color: "#fb923c" },
   { code: "critical", label: "Crítico", color: "#ef4444" },
 ];
+
+const TYPE_LABEL_BY_CODE: Record<string, string> = Object.fromEntries(
+  EVENT_TYPES.map((e) => [e.code, e.label]),
+);
+const SEVERITY_LABEL_BY_CODE: Record<string, string> = Object.fromEntries(
+  CLASSIFICATIONS.map((c) => [c.code, c.label]),
+);
 
 interface CorpusCase {
   id: string;
@@ -59,6 +78,7 @@ interface CorpusCase {
   llm_rationale: string | null;
   difficulty: string | null;
   source: string | null;
+  review_track?: string;
 }
 
 interface Stats {
@@ -66,6 +86,8 @@ interface Stats {
   agreement: { reviews_total: number; agreed: number };
   my_remaining: number;
 }
+
+type Mode = "decide" | "disagree";
 
 export default function CorpusReviewPage() {
   const { user } = useAuth();
@@ -84,9 +106,11 @@ export default function CorpusReviewPage() {
   const [error, setError] = useState<string | null>(null);
   const [stats, setStats] = useState<Stats | null>(null);
 
+  // Estado da decisão
+  const [mode, setMode] = useState<Mode>("decide");
   const [chosenEventType, setChosenEventType] = useState<string | null>(null);
   const [chosenClassification, setChosenClassification] = useState<string | null>(null);
-  const [note, setNote] = useState("");
+  const [disagreeReason, setDisagreeReason] = useState("");
   const [skipQueue, setSkipQueue] = useState<string[]>([]);
 
   const loadStats = useCallback(async () => {
@@ -100,12 +124,17 @@ export default function CorpusReviewPage() {
     }
   }, []);
 
+  const resetDecisionState = () => {
+    setMode("decide");
+    setChosenEventType(null);
+    setChosenClassification(null);
+    setDisagreeReason("");
+  };
+
   const loadNext = useCallback(
     async (skipIds: string[] = []) => {
       setError(null);
-      setChosenEventType(null);
-      setChosenClassification(null);
-      setNote("");
+      resetDecisionState();
       setLoading(true);
       try {
         const params = new URLSearchParams();
@@ -121,10 +150,6 @@ export default function CorpusReviewPage() {
         if (res.case) {
           setCurrent(res.case);
           setDone(false);
-          // Preset: começa com a sugestão do LLM. Revisor confirma OU
-          // muda — reduz cliques nos casos óbvios.
-          setChosenEventType(res.case.llm_suggested_event_type);
-          setChosenClassification(res.case.llm_suggested_classification);
         } else {
           setCurrent(null);
           setDone(true);
@@ -144,23 +169,67 @@ export default function CorpusReviewPage() {
     loadStats();
   }, [allowed, loadNext, loadStats]);
 
-  const submit = async () => {
-    if (!current || !chosenEventType) return;
+  // ─── Submit (3 paths) ──────────────────────────────────────────
+
+  // Path A: "Concordo" — aceita sugestão LLM tal como está.
+  const submitAgree = async () => {
+    if (!current) return;
     setSubmitting(true);
     setError(null);
     try {
       await api.request(`/api/admin/corpus-review/${current.id}`, {
         method: "POST",
         body: JSON.stringify({
-          expected_event_type: chosenEventType,
-          expected_classification: chosenClassification,
-          note: note || undefined,
+          expected_event_type: current.llm_suggested_event_type,
+          expected_classification: current.llm_suggested_classification,
+          // Sem note — concordância é registro silencioso
         }),
       });
       await loadStats();
       await loadNext();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Erro salvando");
+      setError(e instanceof Error ? e.message : "Erro salvando concordância");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // Path B: "Discordo" — exige re-classificação + motivo obrigatório.
+  const submitDisagree = async () => {
+    if (!current || !chosenEventType) {
+      setError("Selecione a categoria que você considera correta.");
+      return;
+    }
+    if (!disagreeReason.trim()) {
+      setError("Descreva o motivo da discordância (obrigatório).");
+      return;
+    }
+    // Validação: se mantém a mesma categoria + severidade do LLM, não é discordância real
+    const sameType = chosenEventType === current.llm_suggested_event_type;
+    const sameSev = chosenClassification === current.llm_suggested_classification;
+    if (sameType && sameSev) {
+      setError(
+        "Você marcou exatamente o que o LLM sugeriu. Se concorda, use o botão \"Concordo\".",
+      );
+      return;
+    }
+
+    setSubmitting(true);
+    setError(null);
+    try {
+      const reasonBlock = `[DISCORDÂNCIA]\n${disagreeReason.trim()}`;
+      await api.request(`/api/admin/corpus-review/${current.id}`, {
+        method: "POST",
+        body: JSON.stringify({
+          expected_event_type: chosenEventType,
+          expected_classification: chosenClassification,
+          note: reasonBlock,
+        }),
+      });
+      await loadStats();
+      await loadNext();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Erro salvando discordância");
     } finally {
       setSubmitting(false);
     }
@@ -189,8 +258,11 @@ export default function CorpusReviewPage() {
           Revisão clínica · Corpus
         </h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Você lê o relato, escolhe a categoria que faz sentido clínico,
-          e (opcionalmente) anota sua justificativa.
+          Você lê o relato + sugestão do LLM e decide:{" "}
+          <strong className="text-foreground">concordo</strong> (aceita como
+          gold-standard) ou{" "}
+          <strong className="text-foreground">discordo</strong> (re-classifica
+          com justificativa obrigatória).
         </p>
       </header>
 
@@ -253,155 +325,256 @@ export default function CorpusReviewPage() {
             <blockquote className="text-base sm:text-lg leading-relaxed border-l-2 border-accent-cyan/40 pl-4 py-1">
               {current.transcript}
             </blockquote>
-            {current.llm_rationale && (
-              <details className="text-xs text-muted-foreground">
-                <summary className="cursor-pointer hover:text-foreground">
-                  Sugestão do LLM (clique pra abrir)
-                </summary>
-                <div className="mt-2 pl-3 border-l border-white/10 space-y-1">
-                  <div>
-                    <span className="text-muted-foreground/70">categoria:</span>{" "}
-                    <span className="font-medium">
-                      {current.llm_suggested_event_type}
-                    </span>
-                  </div>
-                  {current.llm_suggested_classification && (
-                    <div>
-                      <span className="text-muted-foreground/70">severidade:</span>{" "}
-                      <span className="font-medium">
-                        {current.llm_suggested_classification}
-                      </span>
-                    </div>
-                  )}
-                  <div className="italic">{current.llm_rationale}</div>
-                </div>
-              </details>
-            )}
           </div>
 
-          {/* Categorias */}
-          <div>
-            <h3 className="text-xs uppercase tracking-wider text-muted-foreground mb-2 px-1">
-              Categoria (8 opções)
-            </h3>
-            <div className="grid grid-cols-2 sm:grid-cols-2 gap-2">
-              {EVENT_TYPES.map((et) => {
-                const Icon = et.icon;
-                const active = chosenEventType === et.code;
-                const llmSuggested = current.llm_suggested_event_type === et.code;
-                return (
-                  <button
-                    key={et.code}
-                    onClick={() => setChosenEventType(et.code)}
-                    className={`text-left p-3 rounded-lg border transition-colors ${
-                      active
-                        ? "bg-accent-cyan/10 border-accent-cyan/40 text-foreground"
-                        : "bg-white/[0.02] border-white/10 hover:border-white/20"
-                    }`}
-                  >
-                    <div className="flex items-start gap-2">
-                      <Icon
-                        className={`h-4 w-4 flex-shrink-0 mt-0.5 ${
-                          active ? "text-accent-cyan" : "text-muted-foreground"
-                        }`}
-                      />
-                      <div className="min-w-0 flex-1">
-                        <div className="text-sm font-medium flex items-center gap-1.5">
-                          {et.label}
-                          {llmSuggested && (
-                            <span
-                              className="text-[9px] px-1 rounded bg-accent-cyan/10 text-accent-cyan"
-                              title="Sugestão do LLM"
-                            >
-                              LLM
-                            </span>
-                          )}
-                        </div>
-                        <div className="text-[10.5px] text-muted-foreground leading-tight mt-0.5">
-                          {et.hint}
-                        </div>
-                      </div>
-                    </div>
-                  </button>
-                );
-              })}
+          {/* SUGESTÃO LLM (sempre visível, em destaque) */}
+          <div className="rounded-xl border border-accent-cyan/30 bg-accent-cyan/[0.04] p-4 sm:p-5">
+            <div className="text-[11px] uppercase tracking-wider text-accent-cyan/80 mb-2 flex items-center gap-1.5">
+              <Sparkles className="h-3 w-3" />
+              Sugestão do LLM
             </div>
-          </div>
-
-          {/* Severidade (opcional) */}
-          <div>
-            <h3 className="text-xs uppercase tracking-wider text-muted-foreground mb-2 px-1">
-              Severidade <span className="normal-case opacity-60">(opcional)</span>
-            </h3>
-            <div className="flex gap-1.5 flex-wrap">
-              {CLASSIFICATIONS.map((cls) => {
-                const active = chosenClassification === cls.code;
-                return (
-                  <button
-                    key={cls.code}
-                    onClick={() =>
-                      setChosenClassification(active ? null : cls.code)
-                    }
-                    className={`px-3 py-1.5 rounded-full border text-xs transition-colors ${
-                      active ? "" : "hover:bg-white/[0.03]"
-                    }`}
+            <div className="space-y-1.5">
+              <div className="flex items-baseline gap-2 flex-wrap">
+                <span className="text-xs text-muted-foreground">categoria:</span>
+                <span className="text-base font-semibold text-foreground">
+                  {TYPE_LABEL_BY_CODE[current.llm_suggested_event_type] ||
+                    current.llm_suggested_event_type}
+                </span>
+              </div>
+              {current.llm_suggested_classification && (
+                <div className="flex items-baseline gap-2 flex-wrap">
+                  <span className="text-xs text-muted-foreground">severidade:</span>
+                  <span
+                    className="text-sm font-semibold"
                     style={{
-                      background: active ? `${cls.color}20` : "transparent",
-                      borderColor: active ? cls.color : "rgba(255,255,255,0.1)",
-                      color: active ? cls.color : "rgba(214,232,246,0.7)",
+                      color:
+                        CLASSIFICATIONS.find(
+                          (c) => c.code === current.llm_suggested_classification,
+                        )?.color || "inherit",
                     }}
                   >
-                    {cls.label}
-                  </button>
-                );
-              })}
+                    {SEVERITY_LABEL_BY_CODE[current.llm_suggested_classification] ||
+                      current.llm_suggested_classification}
+                  </span>
+                </div>
+              )}
+              {current.llm_rationale && (
+                <details className="text-xs text-muted-foreground mt-1">
+                  <summary className="cursor-pointer hover:text-foreground">
+                    Justificativa do LLM
+                  </summary>
+                  <div className="mt-1.5 pl-3 border-l border-accent-cyan/20 italic">
+                    {current.llm_rationale}
+                  </div>
+                </details>
+              )}
             </div>
           </div>
 
-          {/* Nota */}
-          <div>
-            <label className="text-xs uppercase tracking-wider text-muted-foreground mb-2 px-1 block">
-              Justificativa clínica{" "}
-              <span className="normal-case opacity-60">(opcional)</span>
-            </label>
-            <textarea
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-              placeholder="Ex: marquei como sintoma_novo porque recusa repetida pode ser sinal de delirium incipiente."
-              rows={3}
-              className="w-full bg-white/[0.03] border border-white/10 rounded-md px-3 py-2 text-sm focus:outline-none focus:border-accent-cyan/40"
-            />
-          </div>
+          {/* MODO DECIDE: 2 botões enormes ─────────────────── */}
+          {mode === "decide" && (
+            <>
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  onClick={submitAgree}
+                  disabled={submitting}
+                  className="flex flex-col items-center justify-center gap-1.5 py-5 rounded-xl border-2 border-classification-routine/40 bg-classification-routine/10 hover:bg-classification-routine/20 transition disabled:opacity-50"
+                >
+                  {submitting ? (
+                    <Loader2 className="h-6 w-6 animate-spin text-classification-routine" />
+                  ) : (
+                    <ThumbsUp className="h-6 w-6 text-classification-routine" />
+                  )}
+                  <span className="text-base font-semibold text-classification-routine">
+                    Concordo
+                  </span>
+                  <span className="text-[11px] text-muted-foreground">
+                    aceito como gold-standard
+                  </span>
+                </button>
+                <button
+                  onClick={() => {
+                    // Pre-fill com a sugestão pra revisor ajustar a partir dela
+                    setChosenEventType(current.llm_suggested_event_type);
+                    setChosenClassification(current.llm_suggested_classification);
+                    setMode("disagree");
+                  }}
+                  disabled={submitting}
+                  className="flex flex-col items-center justify-center gap-1.5 py-5 rounded-xl border-2 border-classification-urgent/40 bg-classification-urgent/10 hover:bg-classification-urgent/20 transition disabled:opacity-50"
+                >
+                  <ThumbsDown className="h-6 w-6 text-classification-urgent" />
+                  <span className="text-base font-semibold text-classification-urgent">
+                    Discordo
+                  </span>
+                  <span className="text-[11px] text-muted-foreground">
+                    re-classificar com justificativa
+                  </span>
+                </button>
+              </div>
 
-          {error && (
-            <div className="rounded-md border border-classification-urgent/40 bg-classification-urgent/10 p-3 text-sm">
-              {error}
-            </div>
+              {error && (
+                <div className="rounded-md border border-classification-urgent/40 bg-classification-urgent/10 p-3 text-sm flex items-center gap-2">
+                  <AlertCircle className="h-4 w-4 shrink-0" />
+                  {error}
+                </div>
+              )}
+
+              <div className="flex justify-center pt-2">
+                <button
+                  onClick={skip}
+                  disabled={submitting}
+                  className="flex items-center gap-2 px-4 py-2 text-sm rounded-lg border border-white/10 hover:bg-white/5 disabled:opacity-50 text-muted-foreground"
+                >
+                  <SkipForward className="h-4 w-4" />
+                  Não tenho opinião agora — passar pro próximo
+                </button>
+              </div>
+            </>
           )}
 
-          {/* Ações */}
-          <div className="flex justify-between gap-2 sticky bottom-2 bg-[hsl(222,47%,7%)]/90 backdrop-blur p-2 rounded-xl border border-white/10">
-            <button
-              onClick={skip}
-              disabled={submitting}
-              className="flex items-center gap-2 px-3 py-2 text-sm rounded-lg border border-white/10 hover:bg-white/5 disabled:opacity-50"
-            >
-              <SkipForward className="h-4 w-4" />
-              Passar
-            </button>
-            <button
-              onClick={submit}
-              disabled={submitting || !chosenEventType}
-              className="flex items-center gap-2 px-4 py-2 text-sm rounded-md accent-gradient text-slate-900 font-medium disabled:opacity-40 disabled:cursor-not-allowed flex-1 justify-center"
-            >
-              {submitting ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Send className="h-4 w-4" />
+          {/* MODO DISAGREE: re-classificação + motivo OBRIGATÓRIO ─ */}
+          {mode === "disagree" && (
+            <>
+              <div className="rounded-md border border-classification-urgent/30 bg-classification-urgent/[0.04] px-3 py-2 text-xs text-classification-urgent">
+                Você marcou <strong>discordância</strong>. Reclassifique e
+                explique o motivo.
+              </div>
+
+              {/* Categorias */}
+              <div>
+                <h3 className="text-xs uppercase tracking-wider text-muted-foreground mb-2 px-1">
+                  Categoria correta
+                </h3>
+                <div className="grid grid-cols-2 sm:grid-cols-2 gap-2">
+                  {EVENT_TYPES.map((et) => {
+                    const Icon = et.icon;
+                    const active = chosenEventType === et.code;
+                    const llmSuggested = current.llm_suggested_event_type === et.code;
+                    return (
+                      <button
+                        key={et.code}
+                        onClick={() => setChosenEventType(et.code)}
+                        className={`text-left p-3 rounded-lg border transition-colors ${
+                          active
+                            ? "bg-accent-cyan/10 border-accent-cyan/40 text-foreground"
+                            : "bg-white/[0.02] border-white/10 hover:border-white/20"
+                        }`}
+                      >
+                        <div className="flex items-start gap-2">
+                          <Icon
+                            className={`h-4 w-4 flex-shrink-0 mt-0.5 ${
+                              active ? "text-accent-cyan" : "text-muted-foreground"
+                            }`}
+                          />
+                          <div className="min-w-0 flex-1">
+                            <div className="text-sm font-medium flex items-center gap-1.5">
+                              {et.label}
+                              {llmSuggested && (
+                                <span
+                                  className="text-[9px] px-1 rounded bg-accent-cyan/10 text-accent-cyan"
+                                  title="O LLM sugeriu esta opção"
+                                >
+                                  LLM
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-[10.5px] text-muted-foreground leading-tight mt-0.5">
+                              {et.hint}
+                            </div>
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Severidade */}
+              <div>
+                <h3 className="text-xs uppercase tracking-wider text-muted-foreground mb-2 px-1">
+                  Severidade <span className="normal-case opacity-60">(opcional)</span>
+                </h3>
+                <div className="flex gap-1.5 flex-wrap">
+                  {CLASSIFICATIONS.map((cls) => {
+                    const active = chosenClassification === cls.code;
+                    return (
+                      <button
+                        key={cls.code}
+                        onClick={() =>
+                          setChosenClassification(active ? null : cls.code)
+                        }
+                        className={`px-3 py-1.5 rounded-full border text-xs transition-colors ${
+                          active ? "" : "hover:bg-white/[0.03]"
+                        }`}
+                        style={{
+                          background: active ? `${cls.color}20` : "transparent",
+                          borderColor: active ? cls.color : "rgba(255,255,255,0.1)",
+                          color: active ? cls.color : "rgba(214,232,246,0.7)",
+                        }}
+                      >
+                        {cls.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Motivo OBRIGATÓRIO */}
+              <div>
+                <label className="text-xs uppercase tracking-wider text-classification-urgent mb-2 px-1 block">
+                  Motivo da discordância{" "}
+                  <span className="normal-case opacity-80">(obrigatório)</span>
+                </label>
+                <textarea
+                  value={disagreeReason}
+                  onChange={(e) => setDisagreeReason(e.target.value)}
+                  placeholder="Ex: Recusa repetida de água em idoso é sintoma_novo, não relato_geral — pode indicar delirium incipiente."
+                  rows={4}
+                  required
+                  className="w-full bg-white/[0.03] border border-classification-urgent/30 rounded-md px-3 py-2 text-sm focus:outline-none focus:border-classification-urgent/60"
+                />
+                <p className="text-[10.5px] text-muted-foreground mt-1.5 px-1">
+                  Esse texto fica registrado no review pra audit + entra no
+                  treinamento do classificador.
+                </p>
+              </div>
+
+              {error && (
+                <div className="rounded-md border border-classification-urgent/40 bg-classification-urgent/10 p-3 text-sm flex items-center gap-2">
+                  <AlertCircle className="h-4 w-4 shrink-0" />
+                  {error}
+                </div>
               )}
-              Salvar e ir pro próximo
-            </button>
-          </div>
+
+              {/* Ações */}
+              <div className="flex justify-between gap-2 sticky bottom-2 bg-[hsl(222,47%,7%)]/90 backdrop-blur p-2 rounded-xl border border-white/10">
+                <button
+                  onClick={() => {
+                    resetDecisionState();
+                  }}
+                  disabled={submitting}
+                  className="flex items-center gap-2 px-3 py-2 text-sm rounded-lg border border-white/10 hover:bg-white/5 disabled:opacity-50"
+                >
+                  <ArrowLeft className="h-4 w-4" />
+                  Voltar
+                </button>
+                <button
+                  onClick={submitDisagree}
+                  disabled={
+                    submitting || !chosenEventType || !disagreeReason.trim()
+                  }
+                  className="flex items-center gap-2 px-4 py-2 text-sm rounded-md bg-classification-urgent text-slate-900 font-medium disabled:opacity-40 disabled:cursor-not-allowed flex-1 justify-center"
+                >
+                  {submitting ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Send className="h-4 w-4" />
+                  )}
+                  Salvar discordância
+                </button>
+              </div>
+            </>
+          )}
         </>
       )}
     </div>

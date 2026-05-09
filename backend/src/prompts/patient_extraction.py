@@ -22,17 +22,20 @@ Responda APENAS com JSON no seguinte formato:
   "mood": "estável|agitado|apático|confuso|triste|alegre|dolorido|desconhecido",
   "vital_signs": {"bp": "valor ou null", "hr": "valor ou null", "spo2": "valor ou null", "temp": "valor ou null", "glucose": "valor ou null"},
   "urgent_keywords": ["palavras ou frases que sugiram urgência (falta de ar, dor no peito, queda, desmaio, sangramento, etc.)"],
-  "event_type": "relato_geral|cuidado_higiene|alimentacao_hidratacao|medicacao|sinal_vital|intercorrencia|sintoma_novo|apoio_emocional",
+  "event_type": "relato_geral|cuidado_higiene|alimentacao_hidratacao|medicacao|sinal_vital|intercorrencia|sintoma_novo|apoio_emocional|avaliacao_funcional|evolucao_clinica|evento_adverso_medicamentoso",
   "confidence": 0.0-1.0
 }
 
-Regras de event_type — escolha UMA das 8 classes (a que melhor representa o INPUT principal):
+Regras de event_type — escolha UMA das 11 classes (a que melhor representa o INPUT principal):
 - cuidado_higiene: troca de fralda, banho, curativos, mobilização. Foco: cuidado físico de rotina.
 - alimentacao_hidratacao: refeição (comeu/recusou), aceitação de líquidos. Foco: ingesta.
-- medicacao: administração/recusa/efeito de medicamento. Foco: medicação como evento principal.
+- medicacao: administração/recusa de medicamento (sem efeito adverso reportado). Foco: ato de medicar.
+- evento_adverso_medicamentoso: paciente reagiu mal ao remédio — efeito colateral, alergia, interação aparente. Diferente de medicacao genérico — aqui há SINAL CLÍNICO atribuído ao fármaco.
 - sinal_vital: aferição numérica de PA, FC, glicemia, SpO₂, temperatura, peso. Foco: medição.
 - intercorrencia: queda, agitação súbita, episódio agudo. Foco: evento adverso pontual.
 - sintoma_novo: dor, tontura, febre, dispneia, confusão, fraqueza nova. Foco: queixa subjetiva.
+- avaliacao_funcional: ABVD/AIVD, mobilidade, autonomia. Paciente que tava deambulando para de andar; perda/ganho de capacidade pra atividades básicas (comer sozinho, vestir, banhar) ou instrumentais (cozinhar, gerenciar medicação). Foco: capacidade funcional.
+- evolucao_clinica: melhora/piora desde último plantão SEM evento agudo novo. Atualização de status (ex: "ferida fechando bem", "fraqueza piorando ao longo da semana"). Foco: trajetória clínica.
 - apoio_emocional: cuidador desabafa, expressa cansaço, dúvida não-clínica. Foco: o cuidador.
 - relato_geral: relato amplo cobrindo múltiplos tipos sem dominância clara, OU resumo de plantão.
 
@@ -42,25 +45,62 @@ Prioridade quando múltiplos coexistem (HIERARQUIA RÍGIDA):
    - IAM/AVC/SCA suspeito (mesmo se sintoma novo) → intercorrencia (não sintoma_novo)
    - Crise hipertensiva sintomática (mesmo com aferição numérica) → intercorrencia (não sinal_vital)
    - Convulsão, queda com trauma, dispneia severa → intercorrencia
+   - Choque anafilático medicamentoso (mesmo se causa for fármaco) → intercorrencia (não evento_adverso_medicamentoso)
    Regra: se há ameaça imediata à vida ou função, é intercorrencia. Origem (medicação/sintoma/etc) fica nas tags ou no rationale.
 
-2. **sintoma_novo** quando há queixa subjetiva nova SEM evento agudo iminente:
+2. **evento_adverso_medicamentoso** quando há SINAL CLÍNICO atribuído ao fármaco (sem ameaça imediata):
+   - Erupção cutânea após nova prescrição → evento_adverso_medicamentoso
+   - Sonolência excessiva após mudança de dose → evento_adverso_medicamentoso
+   - Náusea pós-administração de antibiótico → evento_adverso_medicamentoso
+   - Hipoglicemia após insulina (sem síncope) → evento_adverso_medicamentoso
+   - SE evento progride pra grave (alergia → anafilaxia) → vira intercorrencia
+
+3. **sintoma_novo** quando há queixa subjetiva nova SEM evento agudo iminente E SEM atribuição a fármaco:
    - Dor articular, tontura leve, dor de cabeça moderada → sintoma_novo
    - Diferencial vs intercorrencia: severity e iminência. Dor torácica irradiada = intercorrencia. Dor articular = sintoma_novo.
+   - Diferencial vs evento_adverso_medicamentoso: causa atribuída a fármaco específico → adverso. Causa desconhecida → sintoma_novo.
 
-3. **medicacao** quando o foco é o medicamento (sem evento agudo):
-   - Recusa de tomar, efeito colateral leve, ajuste sugerido → medicacao
-   - SE houver evento agudo (sangramento, alergia anafilática) → vira intercorrencia
+4. **avaliacao_funcional** quando o foco é mudança em CAPACIDADE (não sintoma específico):
+   - "Paciente não consegue mais subir escadas" → avaliacao_funcional
+   - "Está tomando banho sozinho de novo" → avaliacao_funcional (melhora)
+   - "Já não escova os dentes sem ajuda" → avaliacao_funcional (perda de AIVD)
+   - SE há queda durante perda funcional → vira intercorrencia
 
-4. **sinal_vital** quando o foco é a aferição numérica de rotina:
+5. **evolucao_clinica** quando o foco é STATUS GERAL desde último plantão:
+   - "Ferida do calcanhar continua fechando bem" → evolucao_clinica
+   - "Tosse de ontem melhorou hoje" → evolucao_clinica
+   - "Apatia que começou semana passada se aprofundou" → evolucao_clinica
+   - Diferencial vs sintoma_novo: aqui o sintoma JÁ É CONHECIDO; é update de trajetória. Sintoma novo = aparece pela primeira vez.
+
+6. **medicacao** quando o foco é o ATO de medicar (sem evento agudo, sem efeito adverso):
+   - Recusa de tomar, ajuste de horário, dose esquecida → medicacao
+   - SE houver evento agudo → intercorrencia
+   - SE houver efeito adverso atribuído → evento_adverso_medicamentoso
+
+7. **sinal_vital** quando o foco é a aferição numérica de rotina:
    - Glicemia 280, PA 140/85 → sinal_vital
    - SE há sintomas associados graves → vira intercorrencia ou sintoma_novo
 
-5. **cuidado_higiene** / **alimentacao_hidratacao** → quando focam só no cuidado físico/ingesta de rotina.
+8. **cuidado_higiene** / **alimentacao_hidratacao** → quando focam só no cuidado físico/ingesta de rotina.
 
-6. **apoio_emocional** quando o cuidador é o foco (não o paciente).
+9. **apoio_emocional** quando o cuidador é o foco (não o paciente).
 
-7. Em dúvida real (relato amplo sem dominância) → relato_geral.
+10. Em dúvida real (relato amplo sem dominância) → relato_geral.
+
+CONSIDERAÇÃO DE COMORBIDADE (ajuste de severity):
+Paciente com doença crônica conhecida tem RISCO BASAL ELEVADO. Sintomas que parecem leves
+em paciente saudável podem ser graves em idoso com comorbidade. Ajuste severity pra cima
+quando o relato envolver:
+   - Diabetes + tontura/sudorese/confusão → suspeitar hipoglicemia (severity ≥ urgent)
+   - DPOC + dispneia (mesmo leve) → descompensação possível (severity ≥ attention)
+   - Cardiopatia + edema/dor torácica/dispneia → IC descompensada (severity ≥ urgent)
+   - Anticoagulado + queda/trauma (mesmo sem dor) → risco HSD (severity ≥ urgent)
+   - Imunossuprimido + febrícula/calafrio → infecção grave (severity ≥ urgent)
+   - Demência + agitação/confusão noturna → suspeitar delirium (severity ≥ attention)
+   - Insuficiência renal + alteração de débito urinário → severity ≥ attention
+
+Se o relato não menciona comorbidade mas o histórico do paciente (passado em context) tem,
+APLIQUE O AJUSTE.
 
 Se o relato for confuso ou vazio, retorne os campos como null/vazios e confidence baixa, event_type="relato_geral".
 Não invente. Se não foi dito, é null."""

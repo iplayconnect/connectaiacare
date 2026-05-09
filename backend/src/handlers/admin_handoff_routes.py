@@ -74,6 +74,8 @@ def _tenant_scope() -> tuple[str, list]:
 
     Comportamento:
         - super_admin → "" (acesso global, sem filtro)
+        - operador_central → "" (cross-tenant por design — ATENT 24/7
+          atende handoffs de TODOS os tenants)
         - qualquer outro role → " AND tenant_id = %s" + tenant_id do JWT
 
     Uso:
@@ -83,7 +85,7 @@ def _tenant_scope() -> tuple[str, list]:
     """
     user = getattr(g, "user", {}) or {}
     role = user.get("role") or ""
-    if role == "super_admin":
+    if role in ("super_admin", "operador_central"):
         return "", []
     tenant_id = user.get("tenant_id")
     if not tenant_id:
@@ -115,7 +117,7 @@ def _serialize_handoff(row: dict) -> dict:
 
 
 @bp.get("/api/admin/handoff")
-@require_role("super_admin", "admin_tenant")
+@require_role("super_admin", "admin_tenant", "operador_central")
 def list_handoff():
     qs = request.args
     where = ["1=1"]
@@ -178,7 +180,7 @@ def list_handoff():
 
 
 @bp.get("/api/admin/handoff/<handoff_id>")
-@require_role("super_admin", "admin_tenant")
+@require_role("super_admin", "admin_tenant", "operador_central")
 def get_handoff(handoff_id: str):
     scope_sql, scope_params = _tenant_scope()
     row = get_postgres().fetch_one(
@@ -218,7 +220,7 @@ _INTENT_HIGHLIGHT_CATEGORIES = {
 
 
 @bp.get("/api/admin/handoff/<handoff_id>/context")
-@require_role("super_admin", "admin_tenant", "medico", "enfermeiro")
+@require_role("super_admin", "admin_tenant", "medico", "enfermeiro", "operador_central")
 def handoff_context(handoff_id: str):
     """Agregação rica pra ContextPanel — lead + CSM + capabilities + timing.
 
@@ -375,7 +377,7 @@ def handoff_context(handoff_id: str):
 
 
 @bp.post("/api/admin/handoff/<handoff_id>/claim")
-@require_role("super_admin", "admin_tenant", "medico", "enfermeiro")
+@require_role("super_admin", "admin_tenant", "medico", "enfermeiro", "operador_central")
 def claim_handoff(handoff_id: str):
     user_id = (getattr(g, "user", {}) or {}).get("sub")
     if not user_id:
@@ -418,7 +420,7 @@ def claim_handoff(handoff_id: str):
 
 
 @bp.post("/api/admin/handoff/<handoff_id>/resolve")
-@require_role("super_admin", "admin_tenant", "medico", "enfermeiro")
+@require_role("super_admin", "admin_tenant", "medico", "enfermeiro", "operador_central")
 def resolve_handoff(handoff_id: str):
     """Marca handoff como resolvido + grava desfecho estruturado.
 
@@ -536,7 +538,7 @@ def resolve_handoff(handoff_id: str):
 
 
 @bp.get("/api/admin/handoff/<handoff_id>/messages")
-@require_role("super_admin", "admin_tenant", "medico", "enfermeiro")
+@require_role("super_admin", "admin_tenant", "medico", "enfermeiro", "operador_central")
 def handoff_messages(handoff_id: str):
     """Histórico de mensagens do handoff pro chat do operador.
 
@@ -623,7 +625,7 @@ def handoff_messages(handoff_id: str):
 
 
 @bp.post("/api/admin/handoff/<handoff_id>/send")
-@require_role("super_admin", "admin_tenant", "medico", "enfermeiro")
+@require_role("super_admin", "admin_tenant", "medico", "enfermeiro", "operador_central")
 def handoff_send(handoff_id: str):
     """Operador envia mensagem pro lead via WhatsApp + persiste.
 
@@ -821,7 +823,7 @@ def _load_mutable_message(handoff_id: str, msg_id: str, user_id: str):
 
 
 @bp.patch("/api/admin/handoff/<handoff_id>/messages/<msg_id>")
-@require_role("super_admin", "admin_tenant", "medico", "enfermeiro")
+@require_role("super_admin", "admin_tenant", "medico", "enfermeiro", "operador_central")
 def handoff_message_edit(handoff_id: str, msg_id: str):
     """Edita conteúdo de uma msg do operador.
 
@@ -896,7 +898,7 @@ def handoff_message_edit(handoff_id: str, msg_id: str):
 
 
 @bp.delete("/api/admin/handoff/<handoff_id>/messages/<msg_id>")
-@require_role("super_admin", "admin_tenant", "medico", "enfermeiro")
+@require_role("super_admin", "admin_tenant", "medico", "enfermeiro", "operador_central")
 def handoff_message_delete(handoff_id: str, msg_id: str):
     """Soft delete: marca metadata.deleted=true mas preserva content.
 
@@ -949,7 +951,7 @@ def handoff_message_delete(handoff_id: str, msg_id: str):
 
 
 @bp.get("/api/admin/handoff/stats")
-@require_role("super_admin", "admin_tenant")
+@require_role("super_admin", "admin_tenant", "operador_central")
 def handoff_stats():
     days = int(request.args.get("days") or 7)
     days = max(1, min(days, 90))

@@ -33,9 +33,15 @@ VALID_EVENT_TYPES = {
     "relato_geral", "cuidado_higiene", "alimentacao_hidratacao",
     "medicacao", "sinal_vital", "intercorrencia",
     "sintoma_novo", "apoio_emocional",
+    # Expansão Henrique 2026-05-09:
+    "avaliacao_funcional", "evolucao_clinica",
+    "evento_adverso_medicamentoso",
 }
 
 VALID_CLASSIFICATIONS = {"routine", "attention", "urgent", "critical"}
+
+VALID_REVIEW_TRACKS = {"clinical", "caregiver_wellness"}
+DEFAULT_REVIEW_TRACK = "clinical"
 
 
 def _serialize_case(row: dict) -> dict:
@@ -51,6 +57,7 @@ def _serialize_case(row: dict) -> dict:
         "difficulty": row.get("difficulty"),
         "source": row.get("source"),
         "review_status": row.get("review_status"),
+        "review_track": row.get("review_track") or "clinical",
     }
 
 
@@ -68,10 +75,13 @@ def next_case():
     """
     skip_id = request.args.get("skip_id")
     difficulty = request.args.get("difficulty")
+    track = (request.args.get("track") or DEFAULT_REVIEW_TRACK).strip()
+    if track not in VALID_REVIEW_TRACKS:
+        track = DEFAULT_REVIEW_TRACK
     user_id = (getattr(g, "user", None) or {}).get("sub")
 
-    where = ["c.review_status = 'pending'"]
-    params: list = []
+    where = ["c.review_status = 'pending'", "c.review_track = %s"]
+    params: list = [track]
     if skip_id:
         where.append("c.id <> %s")
         params.append(skip_id)
@@ -279,6 +289,7 @@ def list_cases():
     """
     qs = request.args
     status = qs.get("status")
+    track = qs.get("track")
     limit = max(1, min(int(qs.get("limit") or 50), 200))
     offset = max(0, int(qs.get("offset") or 0))
 
@@ -287,6 +298,9 @@ def list_cases():
     if status in ("pending", "reviewed"):
         where.append("c.review_status = %s")
         params.append(status)
+    if track in VALID_REVIEW_TRACKS:
+        where.append("c.review_track = %s")
+        params.append(track)
     where_clause = ("WHERE " + " AND ".join(where)) if where else ""
 
     rows = get_postgres().fetch_all(

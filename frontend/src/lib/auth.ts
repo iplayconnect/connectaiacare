@@ -34,7 +34,8 @@ export type Role =
   | "parceiro"
   | "paciente_b2c"
   | "clinical_reviewer"
-  | "comercial";
+  | "comercial"
+  | "operador_central";
 
 export type AuthUser = {
   id: string;
