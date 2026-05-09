@@ -33,7 +33,7 @@ export function VitalSignsGrid({ vital_signs, medication_events }: Props) {
 
       <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
         <VitalSparkline
-          label="PA Sistólica"
+          label="Pressão Arterial Sistólica (PAS)"
           unit="mmHg"
           values={systolic}
           target={{ min: 120, max: 140 }}
@@ -44,7 +44,7 @@ export function VitalSignsGrid({ vital_signs, medication_events }: Props) {
           ariaLabel="Pressão arterial sistólica"
         />
         <VitalSparkline
-          label="PA Diastólica"
+          label="Pressão Arterial Diastólica (PAD)"
           unit="mmHg"
           values={diastolic}
           target={{ min: 70, max: 90 }}
@@ -55,17 +55,17 @@ export function VitalSignsGrid({ vital_signs, medication_events }: Props) {
           ariaLabel="Pressão arterial diastólica"
         />
         <VitalSparkline
-          label="Glicemia"
+          label="Glicemia Capilar (HGT)"
           unit="mg/dL"
           values={glucose}
           target={{ min: 90, max: 130 }}
           anomalyThreshold={{ min: 70, max: 180 }}
           delta7d={deltaOf(glucose)}
           direction={directionOf(glucose)}
-          ariaLabel="Glicemia"
+          ariaLabel="Glicemia capilar"
         />
         <VitalSparkline
-          label="Frequência Cardíaca"
+          label="Frequência Cardíaca (FC)"
           unit="bpm"
           values={heartRate}
           target={{ min: 60, max: 100 }}
@@ -75,7 +75,7 @@ export function VitalSignsGrid({ vital_signs, medication_events }: Props) {
           ariaLabel="Frequência cardíaca"
         />
         <VitalSparkline
-          label="Saturação O₂"
+          label="Saturação de Oxigênio (SpO₂)"
           unit="%"
           values={spo2}
           target={{ min: 95, max: 100 }}

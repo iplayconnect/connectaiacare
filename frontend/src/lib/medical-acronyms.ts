@@ -1,13 +1,25 @@
 /**
  * Glossário de acrônimos médicos no client.
  *
- * Decisão Henrique 2026-05-09: sempre escrever termo completo seguido
- * do acrônimo entre parênteses na primeira menção. UI inclusiva pra
- * leigos sem perder rigor técnico.
+ * Decisão Henrique 2026-05-09: backend é fonte de verdade
+ * (`backend/src/data/medical_acronyms.yaml`). Frontend mantém um
+ * fallback hardcoded pra evitar tela vazia se a API falhar OU pra
+ * primeira render antes da API responder.
  *
- * Mantenha sincronizado com backend/src/data/medical_acronyms.yaml.
- * Idealmente exporto via API; por enquanto duplicado pra zero-latência.
+ * Fluxo:
+ *   1. Componente renderiza → usa GLOSSARY hardcoded (síncrono)
+ *   2. Em paralelo, AcronymsBootstrap chama loadGlossaryFromApi()
+ *      no mount do app
+ *   3. API retorna → atualiza _glossary in-memory + reconstrói índice
+ *   4. Próximas renderizações usam dados atualizados
+ *
+ * Como `formatTerm`/`vitalTypeLabel` são síncronos (chamados em render),
+ * não dá pra fazer fetch a cada call. O padrão "load once, mutate
+ * in-memory" funciona desde que o componente que importa NÃO faça
+ * cache do resultado (TS chama a função a cada render — ok).
  */
+
+import { api } from "./api";
 
 export type AcronymCategory =
   | "vital_signs"
@@ -27,7 +39,12 @@ export interface AcronymEntry {
   notes?: string;
 }
 
-const GLOSSARY: AcronymEntry[] = [
+// ─── Fallback hardcoded — sincronizado com YAML em 2026-05-09 ──────
+// Mantém parity com backend/src/data/medical_acronyms.yaml. Se YAML
+// mudar e API estiver up, fetch substitui essa lista. Se API estiver
+// down, pelo menos os acrônimos mais comuns funcionam.
+
+const FALLBACK_GLOSSARY: AcronymEntry[] = [
   // Vital signs
   { acronym: "PA", full_pt: "Pressão Arterial", category: "vital_signs" },
   { acronym: "PAS", full_pt: "Pressão Arterial Sistólica", category: "vital_signs" },
@@ -79,21 +96,67 @@ const GLOSSARY: AcronymEntry[] = [
   { acronym: "UBS", full_pt: "Unidade Básica de Saúde", category: "org" },
 ];
 
-const INDEX: Record<string, AcronymEntry> = Object.fromEntries(
-  GLOSSARY.flatMap((e) => [
-    [e.acronym, e],
-    [e.acronym.toLowerCase(), e],
-    [e.acronym.toUpperCase(), e],
-  ]),
-);
+// ─── State (mutável após API load) ────────────────────────────────
+
+let _glossary: AcronymEntry[] = FALLBACK_GLOSSARY;
+let _index: Record<string, AcronymEntry> = buildIndex(_glossary);
+let _loadPromise: Promise<void> | null = null;
+let _loadedFromApi = false;
+
+function buildIndex(entries: AcronymEntry[]): Record<string, AcronymEntry> {
+  const idx: Record<string, AcronymEntry> = {};
+  for (const e of entries) {
+    idx[e.acronym] = e;
+    idx[e.acronym.toLowerCase()] = e;
+    idx[e.acronym.toUpperCase()] = e;
+  }
+  return idx;
+}
+
+/**
+ * Carrega glossário do backend. Chamar 1x no mount do app.
+ * Idempotente: chamadas concorrentes reusam a mesma promise.
+ * Fail-safe: se API falhar, mantém fallback.
+ */
+export function loadGlossaryFromApi(): Promise<void> {
+  if (_loadedFromApi) return Promise.resolve();
+  if (_loadPromise) return _loadPromise;
+
+  _loadPromise = (async () => {
+    try {
+      const res = await api.request<{
+        status: string;
+        items: AcronymEntry[];
+      }>("/api/glossary");
+      if (res?.items && Array.isArray(res.items) && res.items.length > 0) {
+        _glossary = res.items;
+        _index = buildIndex(_glossary);
+        _loadedFromApi = true;
+      }
+    } catch {
+      // Graceful: mantém fallback. Não é erro bloqueante.
+    } finally {
+      _loadPromise = null;
+    }
+  })();
+  return _loadPromise;
+}
+
+/** Indica se o glossário atual veio da API (vs fallback). */
+export function isGlossaryFromApi(): boolean {
+  return _loadedFromApi;
+}
+
+// ─── Lookup / format helpers ───────────────────────────────────────
 
 /** Lookup case-insensitive. Retorna null se desconhecido. */
 export function lookupAcronym(acronym: string): AcronymEntry | null {
   if (!acronym) return null;
+  const trimmed = acronym.trim();
   return (
-    INDEX[acronym.trim()] ||
-    INDEX[acronym.trim().toLowerCase()] ||
-    INDEX[acronym.trim().toUpperCase()] ||
+    _index[trimmed] ||
+    _index[trimmed.toLowerCase()] ||
+    _index[trimmed.toUpperCase()] ||
     null
   );
 }
@@ -105,7 +168,12 @@ export function formatTerm(acronym: string): string {
   return `${entry.full_pt} (${entry.acronym})`;
 }
 
-/** Mapping vital_type (enum nosso) → label PT-BR formatado. */
+// ─── Domain-specific helpers ───────────────────────────────────────
+
+/**
+ * Mapping vital_type (enum nosso) → label PT-BR formatado.
+ * Sincroniza com backend ALLOWED_EVENT_TYPES + aia_health_vital_signs.vital_type.
+ */
 export function vitalTypeLabel(vitalType: string): string {
   const map: Record<string, string> = {
     blood_pressure_systolic: formatTerm("PAS"),
@@ -137,7 +205,33 @@ export function vitalTypeShort(vitalType: string): string {
   return map[vitalType] || vitalType;
 }
 
+/**
+ * Mapping event_type (enum nosso de classificação) → label PT-BR.
+ * Não é acrônimo, mas centraliza pra paineis usarem labels consistentes.
+ */
+export function eventTypeLabel(eventType: string): string {
+  const map: Record<string, string> = {
+    relato_geral: "Relato geral",
+    cuidado_higiene: "Higiene/cuidado",
+    alimentacao_hidratacao: "Alimentação/Hidratação",
+    medicacao: "Medicação",
+    evento_adverso_medicamentoso: "Evento adverso medicamentoso (EAM)",
+    sinal_vital: "Sinal vital",
+    intercorrencia: "Intercorrência",
+    sintoma_novo: "Sintoma novo",
+    avaliacao_funcional: "Avaliação funcional",
+    evolucao_clinica: "Evolução clínica",
+    apoio_emocional: "Apoio emocional",
+  };
+  return map[eventType] || eventType;
+}
+
 /** Lista todos por categoria — útil pra UI de glossário. */
 export function listByCategory(category: AcronymCategory): AcronymEntry[] {
-  return GLOSSARY.filter((e) => e.category === category);
+  return _glossary.filter((e) => e.category === category);
+}
+
+/** Snapshot de todos os entries (após load se já feito, fallback caso contrário). */
+export function getAllEntries(): AcronymEntry[] {
+  return [..._glossary];
 }

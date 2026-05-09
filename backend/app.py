@@ -22,6 +22,7 @@ from src.handlers.auth_routes import (
 from src.handlers.caregivers_routes import bp as caregivers_bp
 from src.handlers.clinical_rules_routes import bp as clinical_rules_bp
 from src.handlers.disease_routes import bp as disease_bp
+from src.handlers.glossary_routes import bp as glossary_bp
 from src.handlers.medication_routes import bp as medication_bp
 from src.handlers.onboarding_web_routes import bp as onboarding_web_bp
 from src.handlers.operator_routes import bp as operator_bp
@@ -85,6 +86,7 @@ def create_app() -> Flask:
     app.register_blueprint(teleconsulta_bp)
     app.register_blueprint(patient_portal_bp)
     app.register_blueprint(disease_bp)
+    app.register_blueprint(glossary_bp)             # Phase D — glossário acrônimos médicos (Henrique 2026-05-09)
     app.register_blueprint(weekly_report_bp)
     app.register_blueprint(medication_bp)
     app.register_blueprint(onboarding_web_bp, url_prefix="/api")
