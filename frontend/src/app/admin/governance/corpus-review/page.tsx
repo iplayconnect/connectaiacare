@@ -43,14 +43,14 @@ const EVENT_TYPES: {
   icon: React.ComponentType<{ className?: string }>;
 }[] = [
   { code: "relato_geral", label: "Relato geral", hint: "informativo, sem ação clínica", icon: MessageSquare },
-  { code: "cuidado_higiene", label: "Higiene/cuidado", hint: "banho, fralda, curativo, troca", icon: Heart },
-  { code: "alimentacao_hidratacao", label: "Alimentação/Hidratação", hint: "comeu, bebeu, recusou", icon: Droplet },
-  { code: "medicacao", label: "Medicação", hint: "tomou, não tomou, dose perdida (sem efeito adverso)", icon: Pill },
-  { code: "evento_adverso_medicamentoso", label: "Evento adverso medicamentoso", hint: "reação ao remédio: efeito colateral, alergia, interação", icon: PillBottle },
-  { code: "sinal_vital", label: "Sinal vital", hint: "PA, FC, FR, SpO2, glicemia, temp", icon: Activity },
-  { code: "intercorrencia", label: "Intercorrência", hint: "queda, perda de consciência, evento agudo, anafilaxia", icon: AlertTriangle },
+  { code: "cuidado_higiene", label: "Higiene/cuidado", hint: "banho, fralda, curativo, troca de posição (mobilização)", icon: Heart },
+  { code: "alimentacao_hidratacao", label: "Alimentação/Hidratação", hint: "comeu, bebeu, recusou alimentação", icon: Droplet },
+  { code: "medicacao", label: "Medicação", hint: "tomou, não tomou, dose perdida (sem efeito adverso reportado)", icon: Pill },
+  { code: "evento_adverso_medicamentoso", label: "Evento adverso medicamentoso (EAM)", hint: "reação ao remédio: efeito colateral, alergia, interação", icon: PillBottle },
+  { code: "sinal_vital", label: "Sinal vital", hint: "Pressão Arterial (PA), Frequência Cardíaca (FC), Frequência Respiratória (FR), Saturação de Oxigênio (SpO2), Glicemia Capilar (HGT), Temperatura", icon: Activity },
+  { code: "intercorrencia", label: "Intercorrência", hint: "queda, perda de consciência, evento agudo, anafilaxia (alergia grave)", icon: AlertTriangle },
   { code: "sintoma_novo", label: "Sintoma novo", hint: "queixa nova, mal-estar (sem atribuição a fármaco)", icon: Stethoscope },
-  { code: "avaliacao_funcional", label: "Avaliação funcional", hint: "ABVD/AIVD: mobilidade, autonomia, capacidade", icon: Footprints },
+  { code: "avaliacao_funcional", label: "Avaliação funcional", hint: "Atividades Básicas de Vida Diária (ABVD) e Instrumentais (AIVD): mobilidade, autonomia, capacidade", icon: Footprints },
   { code: "evolucao_clinica", label: "Evolução clínica", hint: "update de quadro JÁ CONHECIDO (melhora/piora)", icon: TrendingUp },
   { code: "apoio_emocional", label: "Apoio emocional", hint: "cuidador: tristeza, exaustão, ansiedade", icon: HandHeart },
 ];

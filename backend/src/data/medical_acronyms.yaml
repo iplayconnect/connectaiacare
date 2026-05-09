@@ -1,0 +1,193 @@
+# Glossário central de acrônimos médicos e organizacionais
+#
+# Fonte de verdade pra:
+#   - Prompts da Sofia (instruí-la a escrever "Termo Completo (Acrônimo)")
+#   - Labels do frontend (corpus review, painel central, dashboards)
+#   - Documentação clínica
+#
+# Decisão Henrique 2026-05-09: sempre escrever termo completo seguido do
+# acrônimo entre parênteses na PRIMEIRA menção. Subsequentes podem usar
+# só o acrônimo. Pessoas de fora da saúde que entram em contato com a
+# plataforma (familiares, gestores, operadores) não devem ficar perdidas.
+#
+# Estrutura:
+#   acronym: ABC
+#   full_pt: "Nome Completo em Português"
+#   full_en: "English name (opcional, pra audit/FHIR)"
+#   category: vital_signs | comorbidity | event | functional | regulatory | org
+#   notes: contexto extra opcional
+
+vital_signs:
+  - acronym: PA
+    full_pt: "Pressão Arterial"
+    full_en: "Blood Pressure"
+    notes: "Quando sistólica/diastólica separadas: PAS / PAD"
+  - acronym: PAS
+    full_pt: "Pressão Arterial Sistólica"
+    full_en: "Systolic Blood Pressure"
+  - acronym: PAD
+    full_pt: "Pressão Arterial Diastólica"
+    full_en: "Diastolic Blood Pressure"
+  - acronym: FC
+    full_pt: "Frequência Cardíaca"
+    full_en: "Heart Rate"
+  - acronym: FR
+    full_pt: "Frequência Respiratória"
+    full_en: "Respiratory Rate"
+  - acronym: SpO2
+    full_pt: "Saturação de Oxigênio"
+    full_en: "Oxygen Saturation"
+    notes: "Também chamada de oximetria de pulso"
+  - acronym: T
+    full_pt: "Temperatura"
+    full_en: "Temperature"
+  - acronym: HGT
+    full_pt: "Glicemia Capilar"
+    full_en: "Capillary Blood Glucose"
+    notes: "HGT vem de Hemo-Gluco-Teste"
+
+comorbidities:
+  - acronym: DM
+    full_pt: "Diabetes Mellitus"
+    full_en: "Diabetes Mellitus"
+  - acronym: HAS
+    full_pt: "Hipertensão Arterial Sistêmica"
+    full_en: "Systemic Arterial Hypertension"
+  - acronym: DPOC
+    full_pt: "Doença Pulmonar Obstrutiva Crônica"
+    full_en: "Chronic Obstructive Pulmonary Disease (COPD)"
+  - acronym: IC
+    full_pt: "Insuficiência Cardíaca"
+    full_en: "Heart Failure"
+  - acronym: ICC
+    full_pt: "Insuficiência Cardíaca Congestiva"
+    full_en: "Congestive Heart Failure"
+  - acronym: IRC
+    full_pt: "Insuficiência Renal Crônica"
+    full_en: "Chronic Kidney Disease"
+  - acronym: DRC
+    full_pt: "Doença Renal Crônica"
+    full_en: "Chronic Kidney Disease"
+    notes: "Sinônimo de IRC, terminologia mais nova"
+  - acronym: AVE
+    full_pt: "Acidente Vascular Encefálico"
+    full_en: "Stroke"
+  - acronym: AVC
+    full_pt: "Acidente Vascular Cerebral"
+    full_en: "Stroke"
+    notes: "AVE é termo mais técnico, AVC é mais usado coloquialmente"
+
+events_acute:
+  - acronym: IAM
+    full_pt: "Infarto Agudo do Miocárdio"
+    full_en: "Acute Myocardial Infarction"
+  - acronym: SCA
+    full_pt: "Síndrome Coronariana Aguda"
+    full_en: "Acute Coronary Syndrome"
+  - acronym: TEP
+    full_pt: "Tromboembolismo Pulmonar"
+    full_en: "Pulmonary Embolism"
+  - acronym: TVP
+    full_pt: "Trombose Venosa Profunda"
+    full_en: "Deep Vein Thrombosis"
+  - acronym: HSD
+    full_pt: "Hematoma Subdural"
+    full_en: "Subdural Hematoma"
+  - acronym: HSA
+    full_pt: "Hemorragia Subaracnóidea"
+    full_en: "Subarachnoid Hemorrhage"
+  - acronym: HDA
+    full_pt: "Hemorragia Digestiva Alta"
+    full_en: "Upper Gastrointestinal Bleeding"
+  - acronym: PCR
+    full_pt: "Parada Cardiorrespiratória"
+    full_en: "Cardiopulmonary Arrest"
+    notes: "Em outro contexto: Proteína C Reativa (exame laboratorial)"
+
+functional:
+  - acronym: ABVD
+    full_pt: "Atividades Básicas de Vida Diária"
+    full_en: "Basic Activities of Daily Living"
+    notes: "Banhar, vestir, alimentar, locomover, controle esfincteriano"
+  - acronym: AIVD
+    full_pt: "Atividades Instrumentais de Vida Diária"
+    full_en: "Instrumental Activities of Daily Living"
+    notes: "Cozinhar, limpar, gerenciar medicação, fazer compras, telefone"
+  - acronym: ABVDs
+    full_pt: "Atividades Básicas de Vida Diária"
+    full_en: "Basic Activities of Daily Living"
+    notes: "Plural informal de ABVD"
+  - acronym: AIVDs
+    full_pt: "Atividades Instrumentais de Vida Diária"
+    full_en: "Instrumental Activities of Daily Living"
+
+medications_therapeutics:
+  - acronym: AINE
+    full_pt: "Anti-Inflamatório Não Esteroidal"
+    full_en: "Non-Steroidal Anti-Inflammatory Drug (NSAID)"
+  - acronym: AINH
+    full_pt: "Anti-Inflamatório Não Hormonal"
+    full_en: "Non-Hormonal Anti-Inflammatory"
+    notes: "Sinônimo informal de AINE"
+  - acronym: IECA
+    full_pt: "Inibidor da Enzima Conversora de Angiotensina"
+    full_en: "ACE Inhibitor"
+  - acronym: BRA
+    full_pt: "Bloqueador do Receptor de Angiotensina"
+    full_en: "Angiotensin Receptor Blocker (ARB)"
+  - acronym: BB
+    full_pt: "Betabloqueador"
+    full_en: "Beta Blocker"
+
+regulatory:
+  - acronym: LGPD
+    full_pt: "Lei Geral de Proteção de Dados"
+    full_en: "Brazilian General Data Protection Law"
+  - acronym: CFM
+    full_pt: "Conselho Federal de Medicina"
+    full_en: "Federal Council of Medicine (Brazil)"
+  - acronym: COREN
+    full_pt: "Conselho Regional de Enfermagem"
+    full_en: "Regional Nursing Council"
+  - acronym: CRF
+    full_pt: "Conselho Regional de Farmácia"
+    full_en: "Regional Pharmacy Council"
+  - acronym: ANVISA
+    full_pt: "Agência Nacional de Vigilância Sanitária"
+    full_en: "Brazilian Health Regulatory Agency"
+  - acronym: SUS
+    full_pt: "Sistema Único de Saúde"
+    full_en: "Brazilian Public Health System"
+  - acronym: FHIR
+    full_pt: "Fast Healthcare Interoperability Resources"
+    full_en: "Fast Healthcare Interoperability Resources"
+    notes: "Padrão de interoperabilidade — não traduzir"
+  - acronym: LOINC
+    full_pt: "Logical Observation Identifiers Names and Codes"
+    full_en: "Logical Observation Identifiers Names and Codes"
+    notes: "Sistema de codificação clínica — não traduzir"
+
+org:
+  - acronym: ILPI
+    full_pt: "Instituição de Longa Permanência para Idosos"
+    full_en: "Long-Term Care Facility for Elderly"
+    notes: "Termo coloquial: 'lar de idosos', 'casa de repouso', 'casa geriátrica'"
+  - acronym: UTI
+    full_pt: "Unidade de Terapia Intensiva"
+    full_en: "Intensive Care Unit (ICU)"
+  - acronym: UPA
+    full_pt: "Unidade de Pronto Atendimento"
+    full_en: "Emergency Care Unit"
+  - acronym: UBS
+    full_pt: "Unidade Básica de Saúde"
+    full_en: "Primary Care Health Unit"
+
+care_categories:
+  # Categorias do nosso enum event_type — pra Sofia explicar quando precisar
+  - acronym: AVD
+    full_pt: "Atividade de Vida Diária"
+    full_en: "Activity of Daily Living"
+  - acronym: EAM
+    full_pt: "Evento Adverso Medicamentoso"
+    full_en: "Adverse Drug Event"
+    notes: "Nosso enum: evento_adverso_medicamentoso"

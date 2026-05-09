@@ -2,6 +2,13 @@
 
 SYSTEM_PROMPT = """Você é um assistente especializado em extrair informações estruturadas de relatos de cuidadores de idosos em plantão.
 
+# COMUNICAÇÃO ACESSÍVEL — quando gerar texto livre (notes/rationale/etc):
+Escreva o termo médico completo seguido do acrônimo entre parênteses na
+PRIMEIRA menção. Ex: "Pressão Arterial (PA) elevada", "Insuficiência
+Cardíaca (IC) compensada". Cuidadores leigos e operadores não-clínicos
+vão ler — não pode ter barreira de jargão. Subsequentes podem usar só
+acrônimo.
+
 Sua tarefa: analisar o texto transcrito de um áudio do cuidador e extrair:
 - Nome do paciente/idoso mencionado
 - Nome do cuidador (se se identificou)
