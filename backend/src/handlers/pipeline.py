@@ -571,6 +571,61 @@ class EldercarePipeline:
             elapsed_ms=decision.total_elapsed_ms,
         )
 
+        # ─── DESVIO: apoio_emocional NÃO entra no prontuário ──────────
+        # Decisão arquitetural (Alexandre 2026-05-09): relatos sobre o
+        # CUIDADOR (event_type='apoio_emocional') vão pra tabela paralela
+        # aia_health_caregiver_wellness_events e notificam GESTOR, não
+        # responsável do paciente. NÃO criamos care_event nesse caso —
+        # evitar PHI clínico misturado com gestão de pessoas.
+        if event_type == "apoio_emocional":
+            try:
+                from src.services.caregiver_wellness_service import (
+                    get_caregiver_wellness,
+                )
+                wellness = get_caregiver_wellness().create_event(
+                    tenant_id=tenant,
+                    caregiver_phone=phone,
+                    raw_text=transcription,
+                    severity=decision.final_classification,
+                    summary=(transcription or "")[:200],
+                    caregiver_id=caregiver_id,
+                    source_channel="whatsapp",
+                    source_report_id=str(report_id),
+                )
+                if wellness:
+                    self.db.execute(
+                        """UPDATE aia_health_reports
+                           SET care_event_id = NULL,
+                               metadata = COALESCE(metadata, '{}'::jsonb) ||
+                                          jsonb_build_object(
+                                            'wellness_event_id', %s,
+                                            'routed_as', 'caregiver_wellness'
+                                          )
+                           WHERE id = %s""",
+                        (wellness["id"], report_id),
+                    )
+                logger.info(
+                    "wellness_routed",
+                    report_id=str(report_id),
+                    wellness_event_id=wellness["id"] if wellness else None,
+                    severity=decision.final_classification,
+                )
+            except Exception:
+                logger.exception(
+                    "wellness_route_failed",
+                    extra={"report_id": str(report_id)},
+                )
+
+            # Sofia responde com acolhimento empático — sem cascata clínica
+            ack_text = self._wellness_ack_text(decision.final_classification)
+            self.evo.send_text(phone, ack_text)
+            return {
+                "status": "ok",
+                "routed_as": "caregiver_wellness",
+                "severity": decision.final_classification,
+            }
+
+        # ─── Caminho clínico padrão (event_type ≠ apoio_emocional) ────
         # Notifica responsável quando cascade decide (sempre que T3 é
         # invocado OU quando severity=critical mesmo com agreement T1+T2).
         if decision.notify_responsible and patient and patient_id:
@@ -1240,6 +1295,34 @@ class EldercarePipeline:
     # ==================================================================
     # HELPERS
     # ==================================================================
+    @staticmethod
+    def _wellness_ack_text(severity: str) -> str:
+        """Acolhimento empático pra apoio_emocional. NÃO oferecer
+        consulta médica nem mexer em prescrição — não é evento clínico
+        do paciente. Validação emocional + sinalizar que gestão recebeu.
+
+        Severity guia o tom (não cria escalation clínica).
+        """
+        base = (
+            "Te ouvi. Cuidar de alguém é exigente e o que você sente é "
+            "totalmente válido."
+        )
+        if severity in ("urgent", "critical"):
+            return (
+                f"{base} Sinalizei pra coordenação da unidade pra te dar "
+                f"apoio agora. Você não precisa segurar isso sozinha. "
+                f"Se quiser conversar com alguém em tempo real, posso "
+                f"acionar a central — me avisa."
+            )
+        if severity == "attention":
+            return (
+                f"{base} Vou compartilhar com a coordenação pra te darem "
+                f"suporte. Enquanto isso, se quiser desabafar mais, "
+                f"estou aqui."
+            )
+        # routine — só acolhe, sem escalation
+        return f"{base} Quando quiser conversar, estou disponível."
+
     @staticmethod
     def _derive_tags(transcription: str, entities: dict[str, Any]) -> list[str]:
         text = (transcription or "").lower()

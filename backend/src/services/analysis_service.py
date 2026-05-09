@@ -25,17 +25,20 @@ logger = get_logger(__name__)
 
 ALLOWED_CLASSIFICATIONS = {"routine", "attention", "urgent", "critical"}
 
-# Multiclassificação funcional do INPUT — taxonomia fixa de 8 classes
-# (decidida em panel LLM, taxonomia Grok). Independente de severity acima.
+# Multiclassificação funcional do INPUT — taxonomia 11 classes
+# (8 originais + 3 expansão Henrique 2026-05-09). Independente de severity.
 ALLOWED_EVENT_TYPES = {
     "relato_geral",          # default fallback
     "cuidado_higiene",       # banho, fralda, curativos, mobilização
     "alimentacao_hidratacao",# refeição, recusa alimentar, hidratação
-    "medicacao",             # administração, recusa, efeito, dose
+    "medicacao",             # ato de medicar (sem efeito adverso reportado)
+    "evento_adverso_medicamentoso",  # sinal clínico atribuído a fármaco (sem ameaça aguda)
     "sinal_vital",           # PA/FC/glicemia/SpO2/temp/peso
-    "intercorrencia",        # queda, agitação súbita, episódio agudo
-    "sintoma_novo",          # dor, tontura, dispneia, confusão (queixa)
-    "apoio_emocional",       # desabafo cuidador, dúvida não-clínica
+    "intercorrencia",        # queda, agitação súbita, anafilaxia (ameaça aguda)
+    "sintoma_novo",          # queixa subjetiva nova (sem atribuição a fármaco)
+    "avaliacao_funcional",   # ABVD/AIVD, mobilidade, autonomia
+    "evolucao_clinica",      # status update de quadro já conhecido
+    "apoio_emocional",       # desabafo cuidador, dúvida não-clínica (track wellness)
 }
 
 # Palavras-gatilho de emergência — se aparecerem na transcrição e o LLM classificar
