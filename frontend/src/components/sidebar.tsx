@@ -13,6 +13,7 @@ import {
   UserCog,
   Video,
   ClipboardCheck,
+  BookMarked,
   Users,
   KeyRound,
   Stethoscope,
@@ -145,6 +146,13 @@ const NAV_ITEMS: NavItem[] = [
     label: "Revisão · Corpus",
     icon: HeartHandshake,
     roles: ["super_admin", "admin_tenant", "clinical_reviewer", "medico"],
+    group: "governance",
+  },
+  {
+    href: "/admin/governance/curated-review",
+    label: "Revisão · Bases Curadas",
+    icon: BookMarked,
+    roles: ["super_admin", "admin_tenant", "clinical_reviewer", "medico", "farmaceutico"],
     group: "governance",
   },
   {
