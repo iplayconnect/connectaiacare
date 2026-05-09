@@ -39,7 +39,25 @@ export function hasPermission(user: AuthUser | null, required: string): boolean 
 }
 
 export function hasRole(user: AuthUser | null, ...roles: Role[]): boolean {
-  return !!user && roles.includes(user.role);
+  if (!user) return false;
+  if (roles.includes(user.role)) return true;
+  // Acúmulo de papéis (Henrique 2026-05-09): user pode ter
+  // additionalRoles (ex: gestor + enfermeiro). hasRole retorna true
+  // se MATCH em qualquer um deles.
+  if (user.additionalRoles && user.additionalRoles.length > 0) {
+    return user.additionalRoles.some((r) => roles.includes(r));
+  }
+  return false;
+}
+
+/** Lista todos os papéis efetivos (primário + adicionais) — pra UI de chips. */
+export function allUserRoles(user: AuthUser | null): Role[] {
+  if (!user) return [];
+  const out: Role[] = [user.role];
+  for (const r of user.additionalRoles || []) {
+    if (!out.includes(r)) out.push(r);
+  }
+  return out;
 }
 
 export function isAdmin(user: AuthUser | null): boolean {

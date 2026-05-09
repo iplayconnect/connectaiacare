@@ -24,7 +24,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/context/auth-context";
 import { hasRole } from "@/lib/permissions";
-import { vitalTypeLabel } from "@/lib/medical-acronyms";
+import { eventTypeLabel, vitalTypeLabel } from "@/lib/medical-acronyms";
 import {
   operatorApi,
   type QueueItem,
@@ -856,7 +856,7 @@ function ContextSection({
                     {brDateTime(e.opened_at).slice(0, 16)}
                   </span>
                 </div>
-                <div className="text-slate-300">{e.summary || e.event_type}</div>
+                <div className="text-slate-300">{e.summary || eventTypeLabel(e.event_type)}</div>
               </div>
             ))}
           </div>

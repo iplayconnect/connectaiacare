@@ -45,6 +45,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     setUser(getStoredUser());
     setHydrated(true);
+
+    // Carrega glossário de acrônimos médicos do backend.
+    // Fail-safe — se API falhar, frontend usa fallback hardcoded.
+    // Idempotente, pode ser chamado várias vezes sem problema.
+    import("@/lib/medical-acronyms").then((m) => {
+      m.loadGlossaryFromApi().catch(() => {});
+    });
   }, []);
 
   const login = useCallback<AuthContextValue["login"]>(async (email, password) => {

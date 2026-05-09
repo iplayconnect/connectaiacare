@@ -54,7 +54,7 @@ const VITAL_META: Record<
   }
 > = {
   blood_pressure_composite: {
-    label: "Pressão Arterial",
+    label: "Pressão Arterial (PA)",
     unit: "mmHg",
     color: "rose",
     normalRange: (sys, dia) => {
@@ -67,7 +67,7 @@ const VITAL_META: Record<
     },
   },
   heart_rate: {
-    label: "Frequência Cardíaca",
+    label: "Frequência Cardíaca (FC)",
     unit: "bpm",
     color: "cyan",
     normalRange: (v) => {
@@ -77,7 +77,7 @@ const VITAL_META: Record<
     },
   },
   oxygen_saturation: {
-    label: "Saturação",
+    label: "Saturação de Oxigênio (SpO₂)",
     unit: "%",
     color: "teal",
     normalRange: (v) => {
@@ -98,7 +98,7 @@ const VITAL_META: Record<
     },
   },
   blood_glucose: {
-    label: "Glicemia",
+    label: "Glicemia Capilar (HGT)",
     unit: "mg/dL",
     color: "violet",
     normalRange: (v) => {
