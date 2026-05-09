@@ -27,6 +27,7 @@ from src.handlers.medication_routes import bp as medication_bp
 from src.handlers.onboarding_web_routes import bp as onboarding_web_bp
 from src.handlers.operator_routes import bp as operator_bp
 from src.handlers.patient_portal_routes import bp as patient_portal_bp
+from src.handlers.patient_registration_routes import bp as patient_registration_bp
 from src.handlers.wellness_routes import bp as wellness_bp
 from src.handlers.proactive_caller_routes import bp as proactive_caller_bp
 from src.handlers.profiles_routes import bp as profiles_bp
@@ -87,6 +88,7 @@ def create_app() -> Flask:
     app.register_blueprint(patient_portal_bp)
     app.register_blueprint(disease_bp)
     app.register_blueprint(glossary_bp)             # Phase D — glossário acrônimos médicos (Henrique 2026-05-09)
+    app.register_blueprint(patient_registration_bp) # Phase D — wizard cadastro paciente (migration 074-076)
     app.register_blueprint(weekly_report_bp)
     app.register_blueprint(medication_bp)
     app.register_blueprint(onboarding_web_bp, url_prefix="/api")

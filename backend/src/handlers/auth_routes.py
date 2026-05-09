@@ -96,12 +96,17 @@ def _resolve_user_permissions(user: dict) -> list[str]:
 
 
 def _user_payload(user: dict, tenant_id: str, permissions: list[str]) -> dict:
-    """Payload do JWT (subset do user que cabe no token)."""
+    """Payload do JWT (subset do user que cabe no token).
+
+    additional_roles permite acúmulo de papéis (ex: gestor + enfermeiro).
+    has_role() checa role primário E additional_roles. Decisão Henrique
+    2026-05-09."""
     return {
         "sub": str(user["id"]),
         "tenant_id": tenant_id,
         "email": user["email"],
         "role": user["role"],
+        "additional_roles": list(user.get("additional_roles") or []),
         "name": user.get("full_name"),
         "permissions": permissions,
         "profile_id": str(user["profile_id"]) if user.get("profile_id") else None,
@@ -120,6 +125,7 @@ def _user_response(user: dict, tenant_id: str, permissions: list[str]) -> dict:
         "email": user["email"],
         "fullName": user.get("full_name"),
         "role": user["role"],
+        "additionalRoles": list(user.get("additional_roles") or []),
         "permissions": permissions,
         "profileId": str(user["profile_id"]) if user.get("profile_id") else None,
         "avatarUrl": user.get("avatar_url"),

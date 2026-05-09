@@ -109,5 +109,33 @@ def has_permission(permissions: list[str], required: str) -> bool:
 
 
 def has_role(user_payload: dict, *roles: str) -> bool:
-    """user_payload aqui é o JWT decodificado (ou g.user)."""
-    return (user_payload or {}).get("role") in roles
+    """user_payload aqui é o JWT decodificado (ou g.user).
+
+    Decisão Henrique 2026-05-09: usuário pode ACUMULAR papéis (gestor +
+    enfermeiro / gestor + médico). `role` é o primário; `additional_roles`
+    array tem os demais. has_role retorna True se MATCH em qualquer um.
+    """
+    if not user_payload:
+        return False
+    primary = user_payload.get("role")
+    if primary in roles:
+        return True
+    additional = user_payload.get("additional_roles") or []
+    if isinstance(additional, (list, tuple)):
+        return any(r in roles for r in additional)
+    return False
+
+
+def all_user_roles(user_payload: dict) -> list[str]:
+    """Lista todos os papéis efetivos do user (primário + adicionais).
+    Útil pra UI mostrar chips, audit, e debugging."""
+    if not user_payload:
+        return []
+    out: list[str] = []
+    primary = user_payload.get("role")
+    if primary:
+        out.append(primary)
+    for r in (user_payload.get("additional_roles") or []):
+        if r and r not in out:
+            out.append(r)
+    return out

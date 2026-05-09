@@ -43,6 +43,10 @@ export type AuthUser = {
   email: string;
   fullName: string;
   role: Role;
+  /** Papéis adicionais ao role primário (acúmulo de funções).
+   * Ex: gestor admin_tenant + enfermeiro. hasRole() checa AMBOS.
+   * Henrique 2026-05-09. */
+  additionalRoles?: Role[];
   permissions: string[];
   profileId: string | null;
   avatarUrl: string | null;
