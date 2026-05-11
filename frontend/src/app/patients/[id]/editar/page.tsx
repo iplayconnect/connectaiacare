@@ -7,6 +7,7 @@ import {
   AlertCircle,
   ArrowLeft,
   Building2,
+  ClipboardCheck,
   Heart,
   IdCard,
   Loader2,
@@ -233,22 +234,32 @@ export default function PatientEditPage() {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-5 max-w-3xl">
-      <div className="flex items-center gap-3">
-        <Link
-          href={`/patients/${patientId}`}
-          className="p-1.5 rounded hover:bg-white/[0.04] text-muted-foreground"
-        >
-          <ArrowLeft className="h-4 w-4" />
-        </Link>
-        <div>
-          <h1 className="text-xl font-semibold flex items-center gap-2">
-            <UserCheck className="h-5 w-5 text-accent-cyan" />
-            Editar paciente
-          </h1>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            Atualize cadastro, CPF, condições, alergias e responsável.
-          </p>
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <Link
+            href={`/patients/${patientId}`}
+            className="p-1.5 rounded hover:bg-white/[0.04] text-muted-foreground"
+          >
+            <ArrowLeft className="h-4 w-4" />
+          </Link>
+          <div>
+            <h1 className="text-xl font-semibold flex items-center gap-2">
+              <UserCheck className="h-5 w-5 text-accent-cyan" />
+              Editar paciente
+            </h1>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Atualize cadastro, CPF, condições, alergias e responsável.
+            </p>
+          </div>
         </div>
+        <Link
+          href={`/patients/${patientId}/registration`}
+          className="inline-flex items-center gap-1.5 text-[11px] px-2.5 py-1.5 rounded-lg border border-accent-cyan/40 bg-accent-cyan/5 text-accent-cyan hover:bg-accent-cyan/10"
+          title="Wizard guiado: identificação, condições, medicamentos com cruzamento clínico"
+        >
+          <ClipboardCheck className="h-3.5 w-3.5" />
+          Cadastro completo (wizard)
+        </Link>
       </div>
 
       {/* Identificação */}
