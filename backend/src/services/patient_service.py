@@ -46,6 +46,42 @@ class PatientService:
         return _serialize_row(row)
 
     # ──────────────────────────────────────────────────────────────
+    # Create — paciente novo do zero (não importado)
+    # ──────────────────────────────────────────────────────────────
+    def create(
+        self,
+        *,
+        tenant_id: str,
+        full_name: str,
+        nickname: str | None = None,
+        cpf: str | None = None,
+    ) -> dict | None:
+        """Cria paciente "stub" mínimo. Usado pelo botão "Novo paciente"
+        antes de abrir o wizard de cadastro completo, que vai preencher
+        o resto via /api/patients/<id>/registration/save.
+
+        CPF é normalizado pra dígitos. Conditions/medications/allergies
+        ficam em '[]' e serão preenchidos pelo wizard.
+        """
+        import re as _re
+        cpf_clean = _re.sub(r"\D", "", cpf) if cpf else None
+        if cpf_clean == "":
+            cpf_clean = None
+
+        row = self.db.fetch_one(
+            """INSERT INTO aia_health_patients
+                (tenant_id, full_name, nickname, cpf,
+                 conditions, medications, allergies,
+                 active, created_at, updated_at)
+               VALUES (%s, %s, %s, %s,
+                       '[]'::jsonb, '[]'::jsonb, '[]'::jsonb,
+                       TRUE, NOW(), NOW())
+               RETURNING *""",
+            (tenant_id, full_name.strip(), (nickname or None), cpf_clean),
+        )
+        return _serialize_row(row)
+
+    # ──────────────────────────────────────────────────────────────
     # Update — campos editáveis pelo painel admin
     # ──────────────────────────────────────────────────────────────
     # Whitelist explícita pra evitar update de tenant_id/id/created_at

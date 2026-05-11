@@ -121,9 +121,29 @@ export interface CrossValidationPrompt {
   clinical_rationale: string | null;
 }
 
+export interface CreatedPatient {
+  id: string;
+  full_name: string;
+  nickname: string | null;
+  cpf: string | null;
+  tenant_id: string;
+  created_at: string;
+}
+
 // ─── API ────────────────────────────────────────────────────────────
 
 export const patientRegistrationApi = {
+  // ── Criação de paciente novo (stub mínimo) ──
+  createPatient: (payload: {
+    full_name: string;
+    nickname?: string;
+    cpf?: string;
+  }) =>
+    api.request<{ status: "ok"; patient: CreatedPatient }>(
+      "/api/patients",
+      { method: "POST", body: JSON.stringify(payload) },
+    ),
+
   // ── Lookups ──
   searchCid10: (q: string, limit = 20) =>
     api.request<{ status: "ok"; count: number; items: Cid10SearchResult[] }>(
