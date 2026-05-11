@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import uuid
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, g, jsonify, request
 
 from src.handlers.pipeline import get_pipeline
 from src.services.patient_service import get_patient_service
@@ -536,6 +536,7 @@ def voice_enroll():
 
     from config.settings import settings
     from src.handlers.auth_routes import require_role
+    from src.services.audit_log_writer import write_audit
     from src.services.voice_biometrics_service import get_voice_biometrics
 
     @require_role("super_admin", "admin_tenant", "medico", "enfermeiro")
@@ -560,6 +561,24 @@ def voice_enroll():
             consent_ip=request.remote_addr or "",
             sample_rate=int(body.get("sample_rate", 0)),
         )
+        # Audit central (LGPD trail) — além do voice_consent_log específico
+        user = (getattr(g, "user", None) or {})
+        write_audit(
+            action="voice_enrollment_added" if result.get("success") else "voice_enrollment_failed",
+            actor=user.get("sub"),
+            actor_role=user.get("role"),
+            tenant_id=settings.tenant_id,
+            resource_type="caregiver",
+            resource_id=caregiver_id,
+            payload={
+                "person_type": "caregiver",
+                "sample_label": body.get("sample_label", "enrollment"),
+                "success": bool(result.get("success")),
+                "reason": result.get("reason") or result.get("message"),
+            },
+            ip_address=request.remote_addr,
+            user_agent=request.headers.get("User-Agent"),
+        )
         return jsonify(result), 200 if result.get("success") else 400
 
     return _impl()
@@ -583,6 +602,7 @@ def voice_enrollment_status(caregiver_id: str):
 def voice_delete_enrollment(caregiver_id: str):
     from config.settings import settings
     from src.handlers.auth_routes import require_role
+    from src.services.audit_log_writer import write_audit
     from src.services.voice_biometrics_service import get_voice_biometrics
 
     @require_role("super_admin", "admin_tenant")
@@ -590,6 +610,22 @@ def voice_delete_enrollment(caregiver_id: str):
         svc = get_voice_biometrics()
         result = svc.delete_enrollment(
             caregiver_id, settings.tenant_id, ip=request.remote_addr or "",
+        )
+        user = (getattr(g, "user", None) or {})
+        write_audit(
+            action="voice_enrollment_deleted",
+            actor=user.get("sub"),
+            actor_role=user.get("role"),
+            tenant_id=settings.tenant_id,
+            resource_type="caregiver",
+            resource_id=caregiver_id,
+            payload={
+                "person_type": "caregiver",
+                "deleted_count": result.get("deleted_count", 0),
+                "success": bool(result.get("success")),
+            },
+            ip_address=request.remote_addr,
+            user_agent=request.headers.get("User-Agent"),
         )
         return jsonify(result), 200 if result.get("success") else 400
 
@@ -611,6 +647,7 @@ def voice_enroll_patient():
 
     from config.settings import settings
     from src.handlers.auth_routes import require_role
+    from src.services.audit_log_writer import write_audit
     from src.services.voice_biometrics_service import get_voice_biometrics
 
     @require_role("super_admin", "admin_tenant", "medico", "enfermeiro")
@@ -636,6 +673,23 @@ def voice_enroll_patient():
             consent_ip=request.remote_addr or "",
             sample_rate=int(body.get("sample_rate", 0)),
         )
+        user = (getattr(g, "user", None) or {})
+        write_audit(
+            action="voice_enrollment_added" if result.get("success") else "voice_enrollment_failed",
+            actor=user.get("sub"),
+            actor_role=user.get("role"),
+            tenant_id=settings.tenant_id,
+            resource_type="patient",
+            resource_id=patient_id,
+            payload={
+                "person_type": "patient",
+                "sample_label": body.get("sample_label", "enrollment"),
+                "success": bool(result.get("success")),
+                "reason": result.get("reason") or result.get("message"),
+            },
+            ip_address=request.remote_addr,
+            user_agent=request.headers.get("User-Agent"),
+        )
         return jsonify(result), 200 if result.get("success") else 400
 
     return _impl()
@@ -659,6 +713,7 @@ def voice_patient_enrollment_status(patient_id: str):
 def voice_delete_patient_enrollment(patient_id: str):
     from config.settings import settings
     from src.handlers.auth_routes import require_role
+    from src.services.audit_log_writer import write_audit
     from src.services.voice_biometrics_service import get_voice_biometrics
 
     @require_role("super_admin", "admin_tenant")
@@ -666,6 +721,22 @@ def voice_delete_patient_enrollment(patient_id: str):
         svc = get_voice_biometrics()
         result = svc.delete_patient_enrollment(
             patient_id, settings.tenant_id, ip=request.remote_addr or "",
+        )
+        user = (getattr(g, "user", None) or {})
+        write_audit(
+            action="voice_enrollment_deleted",
+            actor=user.get("sub"),
+            actor_role=user.get("role"),
+            tenant_id=settings.tenant_id,
+            resource_type="patient",
+            resource_id=patient_id,
+            payload={
+                "person_type": "patient",
+                "deleted_count": result.get("deleted_count", 0),
+                "success": bool(result.get("success")),
+            },
+            ip_address=request.remote_addr,
+            user_agent=request.headers.get("User-Agent"),
         )
         return jsonify(result), 200 if result.get("success") else 400
 
