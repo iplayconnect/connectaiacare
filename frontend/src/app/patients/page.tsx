@@ -1,5 +1,6 @@
 import { HeartPulse } from "lucide-react";
 
+import { NewPatientButton } from "@/components/patients/new-patient-button";
 import { PatientsList } from "@/components/patients/patients-list";
 import { api } from "@/lib/api";
 
@@ -16,23 +17,26 @@ export default async function PatientsPage() {
 
   return (
     <div className="space-y-6 max-w-[1400px] animate-fade-up">
-      <header>
-        <div className="flex items-center gap-2 mb-2">
-          <HeartPulse className="h-4 w-4 text-accent-teal" />
-          <span className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
-            Monitorados
-          </span>
+      <header className="flex items-start justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2 mb-2">
+            <HeartPulse className="h-4 w-4 text-accent-teal" />
+            <span className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+              Monitorados
+            </span>
+          </div>
+          <h1 className="text-3xl font-bold tracking-tight">
+            <span className="accent-gradient-text">Pacientes</span>
+          </h1>
+          <p className="text-muted-foreground mt-1">
+            <span className="tabular font-medium text-foreground">{patients.length}</span>{" "}
+            {patients.length === 1
+              ? "idoso em acompanhamento ativo"
+              : "idosos em acompanhamento ativo"}
+            .
+          </p>
         </div>
-        <h1 className="text-3xl font-bold tracking-tight">
-          <span className="accent-gradient-text">Pacientes</span>
-        </h1>
-        <p className="text-muted-foreground mt-1">
-          <span className="tabular font-medium text-foreground">{patients.length}</span>{" "}
-          {patients.length === 1
-            ? "idoso em acompanhamento ativo"
-            : "idosos em acompanhamento ativo"}
-          .
-        </p>
+        <NewPatientButton />
       </header>
 
       <PatientsList patients={patients} />
