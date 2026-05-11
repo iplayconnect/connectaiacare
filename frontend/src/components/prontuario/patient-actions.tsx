@@ -1,5 +1,11 @@
 import Link from "next/link";
-import { FileText, MessageSquare, Pencil, Video } from "lucide-react";
+import {
+  ClipboardCheck,
+  FileText,
+  MessageSquare,
+  Pencil,
+  Video,
+} from "lucide-react";
 
 import type { CareEvent, Patient } from "@/mocks/patients";
 import { SofiaCallButton } from "./sofia-call-button";
@@ -63,6 +69,11 @@ export function PatientActions({ patient, care_events }: Props) {
 
       {/* Ações secundárias */}
       <div className="grid grid-cols-2 gap-2">
+        <SecondaryAction
+          href={`/patients/${patient.id}/registration`}
+          icon={<ClipboardCheck className="h-3.5 w-3.5" />}
+          label="Cadastro"
+        />
         <SecondaryAction
           href={`/patients/${patient.id}/editar`}
           icon={<Pencil className="h-3.5 w-3.5" />}
