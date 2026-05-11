@@ -1,174 +1,222 @@
-# Proposta de Parceria — Coordenadora PUC (Farmácia / Geriatria)
+# Conselho Científico ConnectaIACare — Proposta de Parceria
 
 **Para:** Reunião 2026-05-11 · 10:30 (Alexandre + Henrique + Coordenadora PUC)
-**Status:** Rascunho de trabalho — números são pontos de partida, ajustar conforme conversa
+**Modelo escolhido:** Conselho Científico (advisory board) — sem remuneração mensal, equity simbólico, foco em prestígio acadêmico + network + co-autoria
 **Confidencialidade:** uso interno até a reunião
 
 ---
 
-## Por que essa parceria importa pra ConnectaIACare
+## A decisão estratégica do Alexandre
 
-A plataforma trabalha com população idosa em duas dimensões clínicas que pouco resolvem isoladas:
+ConnectaIACare está em fase pré-seed/seed. O caixa hoje não comporta remuneração mensal recorrente para múltiplas referências clínicas — e mesmo se comportasse, seria uma aposta financeira. Faz mais sentido **trocar cash por equity + benefícios não-monetários** para profissionais cujo retorno principal vem do impacto científico, network e currículo, não do salário.
 
-1. **Polifarmácia geriátrica** — idoso brasileiro toma em média 5–8 medicações simultâneas. Interações, duplicações, classes proibidas pra idoso (anticolinérgicos, BZDs longos, etc.) — tudo isso vira evento adverso evitável quando não há filtro farmacêutico ativo.
-2. **Cruzamento condição × medicamento** — paciente diz "tenho fibrilação atrial", lista os remédios, **falta anticoagulante**. Esse cruzamento é o coração da nossa base curada de regras.
+Alinhado com isso, vamos formar o **Conselho Científico ConnectaIACare** com 3 referências clínicas trabalhando como time integrado de pesquisa e validação:
 
-Henrique cobre a parte de farmácia clínica geral. **A Coordenadora agrega a especialidade em Geriatria** — população onde decisões de fármaco são especialmente delicadas (clearance renal reduzido, polifarmácia, múltiplas comorbidades). É exatamente o gap que faltava no time.
+```
+                     ┌─────────────────────────┐
+                     │   Conselho Científico   │
+                     │     ConnectaIACare      │
+                     └────────────┬────────────┘
+                                  │
+              ┌───────────────────┼───────────────────┐
+              │                   │                   │
+              ▼                   ▼                   ▼
+   ┌──────────────────┐ ┌──────────────────┐ ┌──────────────────┐
+   │   Henrique B.    │ │  Coordenadora    │ │  Geriatra UFRGS  │
+   │   (Biomédico +   │ │  PUC-RS          │ │  (a convidar —   │
+   │   Farmácia 2026) │ │  Geriatria/Farm  │ │  nome reconhecido)│
+   └──────────────────┘ └──────────────────┘ └──────────────────┘
+            │                   │                   │
+            │                   │                   │
+            └───────────────────┼───────────────────┘
+                                ▼
+                    ┌────────────────────────┐
+                    │  Validação clínica +   │
+                    │  pesquisa científica + │
+                    │  network institucional │
+                    │  (PUC-RS + UFRGS)      │
+                    └────────────────────────┘
+```
 
-Além disso, ela é **referência institucional via PUC** — o que destrava algumas portas que dinheiro não abre (extensão universitária, validação acadêmica, network clínico em Porto Alegre).
+Esse formato dá **coesão acadêmica** (3 instituições brasileiras de referência), **multidisciplinaridade** (biomédico + farmácia clínica + medicina geriátrica) e **diferentes estágios de carreira** (estudante avançado + coordenadora estabelecida + nome consolidado).
 
 ---
 
-## Preocupação da Coordenadora — restrição de tempo
+## Termos uniformes — Conselho Científico
 
-Ela demonstrou interesse mas sinalizou que tem agenda apertada na PUC. **Não podemos propor um modelo que exija dela 20h/semana** — qualquer proposta tem que respeitar essa restrição.
-
-A solução é desenhar o engajamento em camadas: ela **coordena**, alunos da PUC **executam** sob orientação dela. Isso multiplica o impacto sem sobrecarregar a agenda dela.
-
----
-
-## 3 cenários de engajamento — escolher com ela na reunião
-
-Os números abaixo são **pontos de partida** baseados em benchmarks de mercado (healthtech BR pré-seed/seed, consultoria farmacêutica clínica, hora-aula docente PUC). Ajustar conforme negociação.
-
-### 🟢 Cenário A — "Acadêmico" (menor compromisso, maior alavancagem PUC)
+Aplicar os mesmos termos para os 3 membros (sem hierarquia financeira, igualdade de tratamento dentro do conselho):
 
 | Item | Detalhe |
 |---|---|
-| **Vínculo** | Sem contrato CLT. Conselheira Clínica + orientadora de extensão universitária |
-| **Cash da ConnectaIACare** | R$ 0/mês (a PUC já remunera a hora-aula dela quando dedicada a extensão) |
-| **Equity** | 0,15% com vesting de 2 anos, cliff de 6 meses |
-| **Carga horária** | ≈ 4h/mês (1 reunião mensal de 1h30 + revisão batch de regras críticas) |
-| **Estrutura de trabalho** | Projeto de extensão da PUC: 4-6 alunos do curso de Farmácia revisam as bases curadas como horas-aula complementar. Ela orienta. |
-| **Não-cash** | Co-autoria garantida em 1 paper/ano · Crédito como "Conselheira Clínica" no site institucional · Apresentação como case em evento PUC · Licença gratuita da plataforma pro curso |
+| **Vínculo formal** | Advisory Agreement (contrato de conselheiro científico). Sem CLT, sem PJ. |
+| **Cash mensal** | **R$ 0** — modelo aposta no projeto |
+| **Equity** | **0,2% por pessoa** com vesting de 2 anos + cliff de 6 meses |
+| **Carga horária esperada** | ≈ **5h/semana** (20h/mês) — flexível, pode ser concentrada em alguns dias |
+| **Compromisso mínimo** | 12 meses (renovável anualmente) |
+| **Saída antecipada** | Sai sem culpa, perde equity não-vestida; equity vestida fica |
 
-**Pra quem é:** ela quer participar do projeto pelo prestígio acadêmico e pela publicação científica, com mínimo overhead financeiro pro nosso lado. Funciona se ela já tem espaço na grade pra projeto de extensão.
+**Pool total reservado para o Conselho:** 1% (3 × 0,2% = 0,6% alocados + 0,4% de reserva pra 4ª pessoa futura ou bônus por marcos científicos).
 
----
-
-### 🟡 Cenário B — "Consultora regular" (recomendado como ponto inicial)
-
-| Item | Detalhe |
-|---|---|
-| **Vínculo** | PJ (ela emite NF) — mais flexível pra ela e pra nós |
-| **Cash da ConnectaIACare** | **R$ 2.500/mês** (≈ R$ 300/h × 8h/mês) |
-| **Equity** | 0,25% com vesting de 3 anos, cliff de 1 ano |
-| **Carga horária** | ≈ 8h/mês (2 reuniões + revisão de regras críticas + 1 análise mensal de cases acumulados) |
-| **Escopo de entrega** | (1) Aprovação final de regras de cross-validation antes de irem pra produção; (2) Revisão batch de alertas críticos disparados (calibrar falsos positivos); (3) Análise mensal de tendências de polifarmácia nos pacientes ativos |
-| **Não-cash** | Tudo do Cenário A + estágio bolsista IC PIBIC com ela como orientadora (ConnectaIACare paga R$ 700/mês de bolsa pro aluno) |
-
-**Pra quem é:** ela quer participar de forma estruturada, recorrente, com responsabilidade clara. Cash reconhece o tempo dela; equity alinha incentivo de longo prazo. Modelo padrão de "advisor clínico" em healthtech.
+> **Equity em contexto:** Numa empresa pré-seed/seed avaliada em R$ 5-15M, 0,2% representa R$ 10-30k em valor papel hoje. Em cenário de saída bem-sucedida (10×), R$ 100-300k. Em cenário de unicórnio (raro mas existe em healthtech), R$ 1-3M. **Cliff de 6 meses** garante engajamento real antes de qualquer equity ser vestida.
 
 ---
 
-### 🔵 Cenário C — "Parceria estratégica" (se ela puder dedicar mais tempo)
+## O que cada membro entrega
 
-| Item | Detalhe |
-|---|---|
-| **Vínculo** | PJ + cláusula de exclusividade no segmento (não pode consultar concorrente direto) |
-| **Cash da ConnectaIACare** | **R$ 5.500/mês** (≈ R$ 350/h × 16h/mês) |
-| **Equity** | 0,40% com vesting de 4 anos, cliff de 1 ano |
-| **Carga horária** | ≈ 16h/mês (4h/semana) + 1 workshop trimestral presencial |
-| **Escopo de entrega** | Tudo do Cenário B + (4) Co-redação de protocolos clínicos pra populações específicas (Alzheimer, Parkinson, IC); (5) Treinamento da equipe interna 1×/trimestre; (6) Representação institucional em eventos médicos/farmacêuticos |
-| **Não-cash** | Tudo do anterior + título formal de "Diretora Científica Adjunta" + 2 bolsas IC simultâneas + projeto PIBIC institucional |
+### 🔬 Trabalho recorrente (todos)
+- **Revisão das bases curadas** (CIDs, medicamentos, regras de cross-validation) — aprovação final antes de regras irem pra produção
+- **Análise mensal de tendências** detectadas pela plataforma (polifarmácia, alertas críticos disparados, falsos positivos)
+- **1 reunião quinzenal de 1h30** com o time todo (sincronização + decisões críticas)
 
-**Pra quem é:** ela aceita ser face científica do projeto. Mais cash, mais equity, mais responsabilidade pública. Faz sentido se a parceria for ganhar tração rapidamente e ela quiser construir um nome dentro disso.
+### 📝 Trabalho científico (compartilhado)
+- **Co-autoria em papers** sobre o método e os resultados da plataforma
+- **Apresentações em eventos** acadêmicos quando relevante (Salão IC, congressos)
+- **Review de hipóteses clínicas** propostas pelo time de produto
 
----
-
-## Comparativo rápido pra decisão
-
-| | A (Acadêmico) | B (Consultora) ⭐ | C (Estratégica) |
-|---|---|---|---|
-| Cash anual | R$ 0 | R$ 30.000 | R$ 66.000 |
-| Equity | 0,15% | 0,25% | 0,40% |
-| Horas/mês dela | ~4h | ~8h | ~16h |
-| Bolsa IC paga por nós | — | 1× R$ 700/mês = R$ 8.400/ano | 2× R$ 700/mês = R$ 16.800/ano |
-| **Custo total/ano** | R$ 0 + 0,15% | **R$ 38.400 + 0,25%** | R$ 82.800 + 0,40% |
-
-⭐ Recomendado começar com **B** — equilibra reconhecimento financeiro com sustentabilidade pro caixa atual. Migrar pra C se a parceria provar valor em 6 meses.
+### 🎓 Trabalho institucional (cada um na sua casa)
+- **Coordenadora PUC** → projeto de extensão com alunos do curso de Farmácia revisando bases curadas como horas-aula complementar
+- **Geriatra UFRGS** (a convidar) → conexão com programa de residência médica em Geriatria, possível parceria com HCPA
+- **Henrique** → coordenação operacional do trabalho clínico, ponte entre conselho e equipe de produto
 
 ---
 
-## Não-cash que valem ouro (incluir em qualquer cenário)
+## Pacote de retorno não-cash (essencial pra atrair os 3)
 
-A Coordenadora vem do mundo acadêmico — algumas dessas coisas têm peso curricular maior que cash extra:
+Profissionais acadêmicos valorizam **alguns** desses mais que cash. Marcar com Coordenadora amanhã quais ela mais valoriza:
 
-- ☐ **Co-autoria em paper científico** — proposta inicial: "Cross-validation algorítmico em farmácia geriátrica: análise de uma base curada com 80 medicamentos e 8 regras de cruzamento aplicadas a uma coorte de N pacientes." Submeter em 6-9 meses pra revista nacional (ex: Brazilian Journal of Pharmaceutical Sciences) e em 12-18 meses pra revista internacional.
-- ☐ **Apresentação como case em eventos PUC** (Salão de Iniciação Científica, semana acadêmica de farmácia) — gera material curricular pra ela e pros alunos.
-- ☐ **Licença gratuita da plataforma pro curso de Farmácia** — alunos podem usar a UI de revisão das bases curadas como ferramenta didática.
-- ☐ **Dataset anonimizado** — alunos de TCC podem usar pra trabalhos de conclusão (com aprovação CEP-PUC).
-- ☐ **Crédito formal** — "Conselheira Clínica" ou "Diretora Científica Adjunta" no site, em material institucional, em apresentações comerciais.
-- ☐ **Eventos** — fazemos um Workshop ConnectaIACare × PUC anual (com a Coordenadora como host), abre porta pra captar mais professores/alunos.
+### 📚 Produção científica (alto valor curricular)
+- **Co-autoria garantida** em todos os papers que publicamos sobre o método, com ela como co-autora destacada nos relativos a polifarmácia/farmácia geriátrica
+- **Roadmap inicial de 3 papers em 18 meses:**
+  1. *"Cross-validation algorítmico em farmácia geriátrica: análise de uma base curada com 80 medicamentos e 8 regras de cruzamento"* — alvo: Brazilian Journal of Pharmaceutical Sciences (Q3) — 6-9 meses
+  2. *"Prompts não-bloqueantes em assistência farmacêutica ao idoso: estudo de aceitação por equipe clínica"* — alvo: Cadernos de Saúde Pública (Q1) — 12 meses
+  3. *"Coorte de [N] pacientes em ILPI assistidos por IA: incidência de eventos adversos medicamentosos detectados precocemente"* — alvo: Geriatrics & Gerontology International (Q2) ou JAMDA (Q1) — 18 meses
 
----
+### 🏛️ Reconhecimento institucional
+- **Crédito formal** como "Membro do Conselho Científico — ConnectaIACare" no site, materiais comerciais, apresentações
+- **Bio + foto destacada** em página "Conselho Científico" do site institucional
+- **Certificado anual** de participação assinado pela diretoria (vai pra lattes)
 
-## Comparação com mercado (pra você ter contexto na negociação)
+### 🎓 Para a PUC especificamente
+- **Licença gratuita** da plataforma pro curso de Farmácia (UI de revisão das bases serve como ferramenta didática)
+- **Dataset anonimizado** disponibilizado pra TCC/IC dos alunos (com aprovação CEP-PUC)
+- **Workshop ConnectaIACare × PUC anual** com a Coordenadora como host
+- **Crédito da Coordenadora como orientadora** de qualquer aluno que faça TCC/IC usando nossos dados
 
-**Healthtech brasileira pré-seed/seed** — modelos típicos de advisor clínico:
-
-| Faixa | Cash/mês | Equity | Horas/mês |
-|---|---|---|---|
-| Mínimo (advisor passivo) | R$ 0-1.000 | 0,1-0,2% | 2-4h |
-| Médio (advisor regular) | R$ 2.000-4.000 | 0,2-0,4% | 6-12h |
-| Alto (chief medical/scientific advisor) | R$ 4.000-8.000 | 0,4-0,7% | 12-20h |
-
-**Hora-aula docente PUC titular** (referência pra calcular fair pricing): R$ 80-150/h.
-**Consultor sênior em farmacovigilância/farmácia clínica**: R$ 200-400/h.
-
-Os valores propostos acima estão na **faixa média de mercado** — não são nem barganha nem prêmio. Justifica negociar pra cima se ela tiver perfil acadêmico forte (PhD + publicações relevantes) ou pra baixo se ela vir mais por interesse acadêmico (scenario A).
-
----
-
-## Equity — entendendo melhor
-
-0,25% pode parecer pouco em isolado, mas:
-
-- ConnectaIACare hoje está em estágio pré-seed/seed. Avaliação típica: R$ 5-15M.
-- 0,25% sobre R$ 10M = R$ 25.000 (valor papel hoje)
-- Se a empresa crescer 10× em 3-5 anos (cenário base de healthtech bem-sucedida), os 0,25% valem R$ 250.000
-- Se 100× (caso de unicórnio): R$ 2,5M
-
-Vesting protege os dois lados:
-- **Cliff de 1 ano**: se ela sair antes de 12 meses, não leva equity
-- **Linear ao longo de 3-4 anos**: garante engajamento sustentado
-
-**Importante**: equity de advisor é **comum** mas exige formalização (contrato de vesting, mention no cap table). Se for esse o caminho, consultar advogado especialista em startup pra estruturar — modelo Stripe/Y Combinator (SAFE for Advisors) é referência.
+### 🤝 Network e visibilidade
+- Apresentação como case em **eventos acadêmicos** (Salão IC PUC, semana acadêmica de farmácia) — gera material curricular pra ela
+- Convite pra **palestrar em eventos** que organizarmos (lançamento, demo days)
+- Citação em **press releases** e material comercial
 
 ---
 
-## Como propor isso na reunião amanhã
+## Cronograma de governança do Conselho
 
-Sugestão de roteiro (40 min):
+| Cadência | O quê | Duração |
+|---|---|---|
+| **Quinzenal** | Reunião de sincronização (todos + Alexandre) | 1h30 |
+| **Mensal** | Análise de tendências (alertas disparados, falsos positivos, novas regras) | assíncrono ~3h |
+| **Trimestral** | Workshop de validação científica (review do que foi pra prod) | 2h |
+| **Semestral** | Retrospectiva + roadmap de papers + revisão de equity vesting | 2h |
+| **Anual** | Renovação formal do conselho, atualização institucional | 1h + jantar |
 
-| Tempo | Tópico |
-|---|---|
-| 5 min | Demo rápida do que a base curada já faz (mostrar painel `/admin/governance/curated-review`) |
-| 10 min | Henrique apresenta o trabalho que vai fazer (revisão das 3 bases) |
-| 15 min | **Você propõe o cenário B** como ponto de partida, mostra a tabela comparativa, abre pra ela escolher entre A/B/C ou customizar |
-| 5 min | Discussão de não-cash (deixa ela marcar o que valoriza) |
-| 5 min | Próximos passos: minuta de contrato em 5 dias, primeira reunião mensal em 2 semanas |
-
-**Não levar isso impresso pra ela ler na reunião** — usa só você como nota de apoio. Conduzir conversa, não entregar PDF.
+Total esperado por pessoa: ~20h/mês (= 5h/semana).
 
 ---
 
-## Próximos passos pós-reunião (se ela aceitar)
+## Estrutura formal — Advisory Agreement
 
-- [ ] Confirmar cenário escolhido por escrito (e-mail rápido com termos resumidos)
-- [ ] Contratar advogado pra minuta de contrato PJ + acordo de equity (orçamento esperado: R$ 1.500-3.000 one-time)
-- [ ] Criar entrada formal no painel `/admin/system/users` com role `clinical_reviewer` + `farmaceutico` (additional_roles funciona)
-- [ ] Adicionar foto e bio dela no site institucional (em "Time")
-- [ ] Agendar primeira reunião mensal recorrente
-- [ ] Registrar acordo no cap table (mesmo que SAFE/promessa, não esquecer)
-- [ ] Comunicar internamente — Murilo, Henrique, equipe de produto
+Cada membro assina um contrato de conselheiro científico contendo:
+
+1. **Escopo de atuação** (lista de responsabilidades acima)
+2. **Carga horária esperada** (5h/semana, flexível) e mínimo de presença (≥75% das reuniões quinzenais)
+3. **Equity** (0,2% com vesting de 2 anos, cliff de 6 meses) — registrar em cap table
+4. **Confidencialidade e non-compete suave** (não consultar concorrente direto pelo período do contrato)
+5. **Propriedade intelectual** — qualquer descoberta no escopo do trabalho pertence à ConnectaIACare; co-autoria em publicações é direito do conselheiro
+6. **Cláusula de saída** — qualquer parte pode rescindir com 30 dias de aviso; equity vestida fica, equity não-vestida volta pro pool
+7. **Renovação automática anual** salvo aviso em contrário com 60 dias de antecedência
+
+**Custo estimado de redação do contrato:** R$ 1.500-3.000 one-time (advogado especialista em startup). Contrato vira template reusável pros 3 membros.
 
 ---
 
-## Perguntas que você ainda precisa responder pra fechar a proposta
+## Roteiro sugerido pra reunião amanhã 10:30
 
-1. **Caixa atual permite R$ 2.500-5.500/mês recorrente?** Se não, opção A vira a única realista.
-2. **Já tem cap table formalizado?** Se não, equity vira só promessa verbal por enquanto — funciona mas tem que cumprir depois.
-3. **Quer dar exclusividade no segmento (Cenário C)?** Pode limitar futuras parcerias com outras instituições.
-4. **Tem orçamento pra advogado de contrato?** R$ 1.500-3.000 é razoável pra fazer direito.
-5. **Tempo da Coordenadora hoje** — ela já comentou faixa específica? (Isso ajuda a calibrar entre A/B/C.)
+| Tempo | Tópico | Quem fala |
+|---|---|---|
+| 5 min | Boas-vindas + contexto rápido do projeto | Alexandre |
+| 5 min | Demo das bases curadas e do wizard | Alexandre |
+| 10 min | Henrique apresenta o trabalho de revisão clínica (3 bases) | Henrique |
+| 10 min | **Convite formal pro Conselho Científico** — apresenta a estrutura (sem entregar PDF), explica equity simbólico, network, co-autoria | Alexandre |
+| 5 min | Carga horária — confirma se 5h/semana cabe na agenda dela | conversa |
+| 5 min | Não-cash — lista o que está na mesa, deixa ela marcar o que valoriza | conversa |
+| 5 min | Próximos passos: minuta de contrato em 7-10 dias, primeira reunião quinzenal em 2 semanas | Alexandre |
+
+**Tom recomendado:**
+- Não vender — reconhecer que ela é peça-chave, que valorizamos o tempo dela, e que estamos oferecendo participação **real** no projeto (equity), não trabalho voluntário
+- Posicionar como time, não como contratação: "estamos formando um Conselho Científico, e queremos você junto com [Henrique e a Geriatra UFRGS que convidaremos em seguida]"
+- Deixar **ela** falar do que valoriza — co-autoria? extensão? network? — e adaptar a proposta na hora
+
+**Não fazer:**
+- ❌ Entregar este PDF pra ela ler na reunião — material de apoio só pra Alexandre
+- ❌ Falar números de equity de forma seca — contextualizar com cenários (saída 10×, etc.)
+- ❌ Pressionar pra fechar na reunião — "leve uma semana pra pensar, mande dúvidas"
+
+---
+
+## A geriatra UFRGS — abordagem em segunda etapa
+
+Você mencionou querer convidar uma médica geriatra da UFRGS, com nome reconhecido. **Não convidar antes da Coordenadora aceitar** — sequência é importante:
+
+1. Coordenadora aceita (ideal: confirmação por escrito em 1 semana)
+2. Você usa o **fato** de ter a Coordenadora no conselho como argumento forte pra convidar a geriatra ("já temos referência em Farmácia Geriátrica via PUC, queremos completar com Geriatria via UFRGS")
+3. Geriatra aceita ou indica nome alternativo de mesmo calibre
+
+**Por que essa sequência?** Profissionais sêniors evitam ser os primeiros a entrar em conselhos científicos de startup early-stage — quer ver quem mais já topou. Coordenadora quebrando o gelo destrava a geriatra. Não fazer paralelo (risco de uma negar pela ausência da outra).
+
+**Timing realista:** Coordenadora resposta em 1 semana → contato com geriatra em 2-3 semanas → resposta dela em 3-4 semanas. Conselho formalizado em 6-8 semanas.
+
+---
+
+## Henrique — revisão dos termos
+
+Henrique já está no time como referência clínica/farmacológica desde 2026-04. Faz sentido **incorporá-lo formalmente ao Conselho Científico** com os mesmos termos (0,2% equity, advisory agreement). Benefícios:
+
+- **Coesão do time** — sem assimetria de tratamento entre os 3
+- **Retenção pós-formatura** — Henrique se forma em Farmácia ainda em 2026; equity simbólico aumenta chance de ele continuar engajado mesmo após começar a carreira clínica
+- **Crédito justo** — ele construiu boa parte das bases curadas e do trabalho de validação até aqui
+- **Sinaliza pra Coordenadora e Geriatra** que o conselho não é "só estrelinhas", tem operação real (Henrique faz a ponte)
+
+Conversa com Henrique pode acontecer **antes** ou **depois** da reunião com a Coordenadora — sua escolha. Se ele já souber que será membro do conselho, fica mais natural ele participar da reunião sem se sentir "operacional".
+
+---
+
+## Pendências pra você decidir antes da reunião
+
+1. **Cap table está formalizado?** Se sim, equity vai pra contrato direto. Se não, vira promessa formal por escrito + formalização na próxima rodada de captação. Ambos funcionam.
+2. **Pool de 1% reservado pro Conselho está OK?** Ou prefere abrir mais (1,5-2%) pra crescer o conselho depois sem renegociar?
+3. **Henrique vira membro formal do Conselho com mesmos termos?** Recomendado sim. Confirmar com ele antes ou na reunião?
+4. **Primeiro paper já pode ser anunciado na reunião?** Mostra que o conselho não é decorativo, tem entregas concretas. Recomendado mencionar o paper #1 (cross-validation algorítmico) como projeto inicial.
+5. **Orçamento de advogado pra contrato (R$ 1.500-3.000)** está OK? Vale fazer direito.
+
+---
+
+## Checklist pós-reunião (se aceitarem)
+
+- [ ] Confirmar aceite por e-mail (resumo dos termos discutidos)
+- [ ] Contratar advogado pra minuta de Advisory Agreement
+- [ ] Registrar entrada no painel `/admin/system/users` com role `clinical_reviewer` + `farmaceutico` + `additional_roles=["advisor_clinical"]`
+- [ ] Adicionar bio + foto na página "Conselho Científico" do site
+- [ ] Agendar primeira reunião quinzenal recorrente
+- [ ] Comunicar internamente (Murilo, equipe de produto)
+- [ ] Iniciar abordagem da Geriatra UFRGS na semana seguinte
+- [ ] Definir CEP responsável pelo paper #1 (PUC ou UFRGS — depende da composição final)
+
+---
+
+## Mantras pra reunião
+
+> *"Não estamos pedindo que você trabalhe de graça. Estamos te oferecendo um lugar no projeto que você possa olhar daqui a 5 anos e dizer 'eu ajudei a construir isso'."*
+
+> *"Equity de advisor não é loteria. É reconhecimento de que o trabalho intelectual que você traz tem valor que precisa ser registrado — mesmo que monetize só lá na frente."*
+
+> *"O que a gente precisa de você não é tempo. É olhar clínico. 5 horas por semana com seu olhar valem mais que 40h de quem não tem sua expertise."*
