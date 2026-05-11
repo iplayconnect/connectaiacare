@@ -13,6 +13,7 @@ from src.handlers.commercial_funnel_routes import bp as commercial_funnel_bp
 from src.handlers.alerts_routes import bp as alerts_bp
 from src.handlers.communications_routes import bp as communications_bp
 from src.handlers.corpus_review_routes import bp as corpus_review_bp
+from src.handlers.curated_review_routes import bp as curated_review_bp
 from src.handlers.safety_routes import bp as safety_bp
 from src.handlers.auth_routes import (
     authenticate_request,
@@ -104,6 +105,7 @@ def create_app() -> Flask:
     app.register_blueprint(system_tenants_bp)
     app.register_blueprint(tecnosenior_bp)
     app.register_blueprint(corpus_review_bp)
+    app.register_blueprint(curated_review_bp)       # Phase D — revisão das bases curadas (Henrique + Coord. PUC)
     app.register_blueprint(webhook_async_bp)  # Phase B — webhook v2 async
     app.register_blueprint(admin_leads_bp)        # Phase D — leads funnel
     app.register_blueprint(commercial_funnel_bp)  # Phase D — comercial: plans/demos/calls/proposals/timeline (migration 068)
