@@ -177,9 +177,60 @@ Você mencionou querer convidar uma médica geriatra da UFRGS, com nome reconhec
 
 ---
 
-## Henrique — revisão dos termos
+## Henrique — papel diferente (NÃO é Conselho)
 
-Henrique já está no time como referência clínica/farmacológica desde 2026-04. Faz sentido **incorporá-lo formalmente ao Conselho Científico** com os mesmos termos (0,2% equity, advisory agreement). Benefícios:
+**Decisão Alexandre 2026-05-10:** Henrique não entra como Conselheiro. Ele tem papel mais ativo, próximo de **co-fundador / Diretor Científico-Clínico**, com dedicação full-time esperada após formatura em Farmácia (final 2026).
+
+### Termos pra Henrique
+
+| Item | Detalhe |
+|---|---|
+| **Vínculo formal** | Atual: estagiário/colaborador. Após formatura: PJ ou CLT (definir conforme caixa) |
+| **Cash mensal** | **Prolabore/salário** — definir valor inicial em conversa direta com ele (faixa de mercado pra biomédico/farmacêutico júnior em healthtech: R$ 4-8k/mês) |
+| **Equity inicial** | **3,0%** com vesting de 4 anos + cliff de 1 ano |
+| **Equity bônus** | Pode chegar a **5,0%** conforme dedicação (gatilhos: full-time formal, marcos científicos, retenção 2+ anos) |
+| **Carga horária** | Full-time (8h/dia) ou tempo parcial intenso (≥4h/dia) — não 5h/semana como conselheiras |
+| **Posição pública** | "Diretor Científico-Clínico" ou "Co-fundador / Diretor de Produto Clínico" |
+
+### Por que tratamento diferente das conselheiras
+
+| Critério | Conselheiras (Coord PUC + Geriatra UFRGS) | Henrique |
+|---|---|---|
+| **Tempo dedicado** | 5h/semana | Full-time (8h/dia) |
+| **Tipo de trabalho** | Validação + revisão batch + co-autoria | Operação + construção + decisões diárias |
+| **Risco assumido** | Zero (contínuam emprego acadêmico) | Alto (carreira aposta no projeto) |
+| **Equity** | 0,2% cada | 3-5% |
+| **Cash** | R$ 0/mês | Prolabore/salário compatível com mercado |
+| **Vesting** | 2 anos + 6m cliff | 4 anos + 1 ano cliff |
+| **Posição** | Conselho Científico | Co-fundador / Diretoria |
+
+Essa estrutura é **padrão de mercado pra healthtech**. Founders/diretores executivos têm equity de 1-5 dígitos percentuais; advisors têm equity de 0,1-0,5%. Misturar os dois categorias gera ressentimento depois.
+
+### Como apresentar pra Coordenadora amanhã
+
+Quando você apresentar o Conselho Científico pra ela (Coord PUC + Geriatra UFRGS futura), é **importante** ela entender que:
+
+> *"Henrique é parte do nosso time core, dedicação full-time, vai liderar a operação clínica do dia-a-dia. O Conselho — você e a geriatra UFRGS — funciona como camada de validação e direção científica de mais alto nível, sem demanda operacional."*
+
+Isso explica por que o tratamento de equity é diferente sem soar injusto. Ela vai entender — todo mundo do mundo acadêmico sabe distinguir "advisor" de "founding team".
+
+### Conversa específica com Henrique (separada)
+
+Não tratar isso na reunião com a Coordenadora. Marcar conversa específica com ele em até 7 dias pra:
+
+1. Comunicar a oferta de 3% equity inicial + escala até 5%
+2. Discutir prolabore (faixa, periodicidade, expectativa de aumento conforme captação)
+3. Definir título oficial (Diretor Científico-Clínico? Co-fundador? CMO Junior?)
+4. Estabelecer expectativas de full-time pós-formatura
+5. Cláusula de boa fé: se ele sair em < 1 ano (cliff), zero equity; entre 1-4 anos, equity proporcional ao vesting
+
+---
+
+## (Texto antigo do Henrique — não aplicável mais)
+
+~~Henrique já está no time como referência clínica/farmacológica desde 2026-04. Faz sentido incorporá-lo formalmente ao Conselho Científico com os mesmos termos~~ — **substituído pela seção acima**. Mantido aqui só pra registro histórico da decisão.
+
+Benefícios da estrutura nova:
 
 - **Coesão do time** — sem assimetria de tratamento entre os 3
 - **Retenção pós-formatura** — Henrique se forma em Farmácia ainda em 2026; equity simbólico aumenta chance de ele continuar engajado mesmo após começar a carreira clínica
@@ -194,9 +245,25 @@ Conversa com Henrique pode acontecer **antes** ou **depois** da reunião com a C
 
 1. **Cap table está formalizado?** Se sim, equity vai pra contrato direto. Se não, vira promessa formal por escrito + formalização na próxima rodada de captação. Ambos funcionam.
 2. **Pool de 1% reservado pro Conselho está OK?** Ou prefere abrir mais (1,5-2%) pra crescer o conselho depois sem renegociar?
-3. **Henrique vira membro formal do Conselho com mesmos termos?** Recomendado sim. Confirmar com ele antes ou na reunião?
-4. **Primeiro paper já pode ser anunciado na reunião?** Mostra que o conselho não é decorativo, tem entregas concretas. Recomendado mencionar o paper #1 (cross-validation algorítmico) como projeto inicial.
-5. **Orçamento de advogado pra contrato (R$ 1.500-3.000)** está OK? Vale fazer direito.
+3. ~~Henrique vira membro formal do Conselho com mesmos termos?~~ — **Decidido:** NÃO. Henrique entra como Diretor Científico-Clínico (3% inicial → até 5%, com prolabore/salário). Ver seção dedicada acima.
+4. **Conversa com Henrique sobre os termos novos** — antes ou depois da reunião com Coordenadora? Recomendado **antes**, pra ele saber qual é o papel dele (e não se sentir operacional na frente da Coord).
+5. **Primeiro paper já pode ser anunciado na reunião?** Mostra que o conselho não é decorativo, tem entregas concretas. Recomendado mencionar o paper #1 (cross-validation algorítmico) como projeto inicial.
+6. **Orçamento de advogado pra contrato (R$ 1.500-3.000)** está OK? Vale fazer direito.
+
+### Pool de equity recalculado
+
+Considerando a nova distribuição:
+
+| Pessoa | Equity | Vesting | Tipo |
+|---|---|---|---|
+| Henrique | 3-5% | 4 anos + 1 ano cliff | Co-fundador / Diretor |
+| Coordenadora PUC | 0,2% | 2 anos + 6 meses cliff | Conselheiro Científico |
+| Geriatra UFRGS (futura) | 0,2% | 2 anos + 6 meses cliff | Conselheiro Científico |
+| **Pool total alocado** | **3,4-5,4%** | | |
+| Reserva pra Conselho (4ª pessoa futura) | 0,2-0,4% | | |
+| **Total reservado** | **3,6-5,8%** | | |
+
+Esse total tem que caber dentro do que você reservou pra time + conselho no cap table. Se ainda não tem cap table formalizado, fica como **promessa por escrito** que vira papel na próxima rodada de captação.
 
 ---
 
