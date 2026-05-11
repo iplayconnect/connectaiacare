@@ -277,10 +277,15 @@ def system_dashboard():
         """,
     ) or {}
 
-    # Série diária últimos 7 dias por classification
+    # Série diária últimos 7 dias por classification.
+    # Schema tem `initial_classification` (no momento da abertura) e
+    # `current_classification` (estado atual após escalações/correções).
+    # Pra tendência da plataforma usamos current_classification —
+    # reflete onde o evento parou clinicamente. COALESCE com initial
+    # cobre eventos antigos onde current pode estar NULL.
     series = db.fetch_all(
         """SELECT DATE_TRUNC('day', created_at)::date AS day,
-                  classification,
+                  COALESCE(current_classification, initial_classification) AS classification,
                   COUNT(*) AS n
            FROM aia_health_care_events
            WHERE created_at >= NOW() - INTERVAL '7 days'
@@ -309,12 +314,14 @@ def system_dashboard():
         r["open_count"] = int(r.get("open_count") or 0)
 
     # Distribuição de classification global (últimos 30d pra ter
-    # base estável; 24h pode ter pouca amostra)
+    # base estável; 24h pode ter pouca amostra).
+    # Mesma lógica da série: current_classification + fallback.
     classification = db.fetch_all(
-        """SELECT classification, COUNT(*) AS n
+        """SELECT COALESCE(current_classification, initial_classification) AS classification,
+                  COUNT(*) AS n
            FROM aia_health_care_events
            WHERE created_at >= NOW() - INTERVAL '30 days'
-           GROUP BY classification
+           GROUP BY 1
            ORDER BY n DESC""",
     )
     for r in classification:
