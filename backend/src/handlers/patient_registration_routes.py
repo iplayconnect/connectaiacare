@@ -1,6 +1,7 @@
 """Endpoints do wizard de cadastro de paciente + lookup de bases curadas.
 
 Endpoints:
+    POST /api/patients                            — cria paciente novo (stub)
     GET  /api/cid10/search?q=press                — autocomplete CID-10
     GET  /api/medication-class/lookup?name=X      — classifica medicamento
     POST /api/registration/validate               — cross-validation
@@ -59,6 +60,76 @@ CLINICAL_VERIFY_ROLES = ("super_admin", "medico", "enfermeiro")
 
 def _user() -> dict:
     return getattr(g, "user", None) or {}
+
+
+# ════════════════════ CRIAÇÃO DE PACIENTE NOVO ══════════════════════
+
+@bp.post("/api/patients")
+@require_role(*WIZARD_ROLES)
+def create_patient():
+    """Cria um paciente "stub" mínimo (só nome + CPF opcional).
+
+    Usado pelo botão "Novo paciente" — a UI cria o paciente vazio e
+    redireciona pro wizard `/patients/<id>/registration` onde o resto
+    do cadastro é preenchido (demografia completa, condições,
+    medicamentos, alergias, responsável).
+
+    Body: { full_name (obrigatório), nickname?, cpf? }
+    Retorna: { status, patient: { id, full_name, ... } }
+
+    Tenant: pego do JWT (g.user.tenant_id).
+    """
+    body = request.get_json(silent=True) or {}
+    full_name = (body.get("full_name") or "").strip()
+    if not full_name or len(full_name) < 2:
+        return jsonify({
+            "status": "error",
+            "reason": "full_name_obrigatorio",
+            "hint": "Nome com pelo menos 2 caracteres",
+        }), 400
+
+    user = _user()
+    tenant_id = user.get("tenant_id") or user.get("tenantId")
+    if not tenant_id:
+        return jsonify({
+            "status": "error", "reason": "tenant_indefinido",
+        }), 400
+
+    from src.services.patient_service import get_patient_service
+    svc = get_patient_service()
+    try:
+        patient = svc.create(
+            tenant_id=tenant_id,
+            full_name=full_name,
+            nickname=body.get("nickname"),
+            cpf=body.get("cpf"),
+        )
+    except Exception as exc:
+        logger.error("create_patient_failed error=%s", str(exc))
+        return jsonify({
+            "status": "error", "reason": "create_failed",
+            "detail": str(exc),
+        }), 500
+
+    if not patient:
+        return jsonify({"status": "error", "reason": "create_returned_null"}), 500
+
+    write_audit(
+        action="patient_created",
+        actor=user.get("sub") or "system",
+        actor_role=user.get("role"),
+        tenant_id=tenant_id,
+        resource_type="patient",
+        resource_id=patient["id"],
+        payload={
+            "full_name": full_name,
+            "via": "wizard_new_patient_button",
+        },
+        ip_address=request.remote_addr,
+        user_agent=request.headers.get("User-Agent"),
+    )
+
+    return jsonify({"status": "ok", "patient": patient}), 201
 
 
 # ════════════════════ LOOKUP DE BASES CURADAS ═══════════════════════
