@@ -6,24 +6,45 @@
 
 ---
 
-## 📩 Mensagem curta pra enviar (WhatsApp/Slack)
+## 📩 Mensagem curta pra enviar (WhatsApp)
 
-> Opa Matheus, beleza! Faz total sentido sim — isso encaixa exatamente no que a gente precisa pra fechar uma camada do safety guardrail da plataforma. Hoje a gente já trabalha com:
+> Opa Matheus, beleza! Faz total sentido sim. A gente já roda uma engine de cross-validation aqui usando como baseline DBHA 2020 (SBC), SBD pra diabetes, SBGG pra geriatria e Beers Criteria — mas hoje os limites são genéricos de literatura. Ter os limites individualizados de vocês, com supervisão médica ativa, é exatamente o que falta pra parar de usar threshold "tamanho único" e respeitar a clínica de cada paciente.
 >
-> • **Cross-validation de condições × medicamentos** (engine própria baseada em diretrizes nacionais e Beers Criteria pra geriatria) com regras curadas e validadas pela nossa equipe clínica antes de irem pra produção
-> • **Bases curadas** de CID-10 PT-BR, classes terapêuticas (princípio ativo → ATC), e medicamentos potencialmente inapropriados para idosos
-> • **Soft prompts** com severidade calibrada (sugestão → atenção → importante → crítico) — sem bloquear, mas alertar
-> • **Audit log imutável** de cada decisão clínica do sistema (LGPD Art. 11)
+> Toda regra clínica nossa passa pelo nosso time antes de virar alerta ativo (Henrique como ref. farmacêutica, Coordenadora de Farmácia/Geriatria da PUC e em breve uma geriatra da UFRGS) — então o que vocês expuserem fica auditado dos dois lados.
 >
-> O que vocês têm — limite por paciente com supervisão médica ativa — é exatamente o **input contextual** que nossa engine precisa pra deixar de usar threshold genérico de literatura e passar a respeitar a individualização clínica que vocês já fazem.
+> Já rascunhei uma spec do endpoint com payload, fonte da diretriz, fallback e audit trail. Te mando aqui ou prefere chamar uma reunião rápida pra alinhar?
+
+---
+
+### Versão alternativa ainda mais curta (3 frases)
+
+> Faz total sentido, Matheus. A gente já tem engine de cross-validation rodando com baseline SBC/SBD/SBGG/Beers, mas os limites individualizados de vocês é o que falta pra deixar de usar threshold genérico e respeitar a clínica de cada paciente — e toda regra que entra no nosso lado passa pela nossa equipe (Henrique + Coord. PUC Farmácia/Geriatria + Geriatra UFRGS).
 >
-> Sobre SBC: nossas referências hoje são **DBHA 2020 (SBC) pra pressão, SBD pra diabetes, SBGG pra geriatria, e Critérios de Beers AGS 2023 pra polifarmácia**. Se vocês tiverem limites que extrapolem essas referências por decisão médica específica, esses prevalecem (médico tem autonomia).
->
-> Sobre o endpoint, sugiro um GET retornando os limites do paciente + meta de qual diretriz baseia (pra audit). Algo tipo `/patient/<id>/vital-thresholds` com payload contendo `vital_type`, `warning_min/max`, `danger_min/max`, `source` (sbc_dbha_2020 | medical_individualized | etc.) e `last_reviewed_by`.
->
-> Toda decisão que nossa engine tomar baseada nesses limites passa pela revisão da nossa equipe clínica (Henrique + Coordenadora PUC + Geriatra UFRGS — geriatria + farmácia clínica) antes de virar regra ativa. Ou seja: você expõe os limites, a gente consome, mas qualquer alerta novo é validado clinicamente antes de ir pro paciente/familiar.
->
-> Posso te mandar a especificação técnica que rascunhei? Fica como base pra você criticar e ajustar antes de implementar.
+> Posso te mandar uma spec do endpoint que rascunhei (payload, audit, fallback) ou prefere chamar uma reunião rápida pra alinhar?
+
+---
+
+### Mensagem original (longa) — guardada pra referência
+
+<details>
+<summary>Clicar pra expandir</summary>
+
+Opa Matheus, beleza! Faz total sentido sim — isso encaixa exatamente no que a gente precisa pra fechar uma camada do safety guardrail da plataforma. Hoje a gente já trabalha com:
+
+- Cross-validation de condições × medicamentos (engine própria baseada em diretrizes nacionais e Beers Criteria pra geriatria) com regras curadas e validadas pela nossa equipe clínica antes de irem pra produção
+- Bases curadas de CID-10 PT-BR, classes terapêuticas (princípio ativo → ATC), e medicamentos potencialmente inapropriados para idosos
+- Soft prompts com severidade calibrada (sugestão → atenção → importante → crítico) — sem bloquear, mas alertar
+- Audit log imutável de cada decisão clínica do sistema (LGPD Art. 11)
+
+O que vocês têm — limite por paciente com supervisão médica ativa — é exatamente o input contextual que nossa engine precisa pra deixar de usar threshold genérico de literatura e passar a respeitar a individualização clínica que vocês já fazem.
+
+Sobre SBC: nossas referências hoje são DBHA 2020 (SBC) pra pressão, SBD pra diabetes, SBGG pra geriatria, e Critérios de Beers AGS 2023 pra polifarmácia. Se vocês tiverem limites que extrapolem essas referências por decisão médica específica, esses prevalecem (médico tem autonomia).
+
+Toda decisão que nossa engine tomar baseada nesses limites passa pela revisão da nossa equipe clínica (Henrique + Coordenadora PUC + Geriatra UFRGS — geriatria + farmácia clínica) antes de virar regra ativa. Ou seja: você expõe os limites, a gente consome, mas qualquer alerta novo é validado clinicamente antes de ir pro paciente/familiar.
+
+Posso te mandar a especificação técnica que rascunhei? Fica como base pra você criticar e ajustar antes de implementar.
+
+</details>
 
 ---
 
