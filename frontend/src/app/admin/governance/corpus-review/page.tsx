@@ -204,15 +204,14 @@ export default function CorpusReviewPage() {
       setError("Descreva o motivo da discordância (obrigatório).");
       return;
     }
-    // Validação: se mantém a mesma categoria + severidade do LLM, não é discordância real
-    const sameType = chosenEventType === current.llm_suggested_event_type;
-    const sameSev = chosenClassification === current.llm_suggested_classification;
-    if (sameType && sameSev) {
-      setError(
-        "Você marcou exatamente o que o LLM sugeriu. Se concorda, use o botão \"Concordo\".",
-      );
-      return;
-    }
+    // Removido em 2026-05-15 (Henrique reportou): antes bloqueávamos o
+    // submit quando user mantinha mesmas categorias do LLM. Mas há casos
+    // legítimos de "concordo com a classificação, mas discordo por falta
+    // de informação na transcrição" (ex: tosse seca após captopril sem
+    // saber se já fazia uso prévio). O card info ainda aparece na UI
+    // alertando que as categorias batem; backend respeita a discordância
+    // explícita (campo disagrees) independente das categorias serem
+    // iguais.
 
     setSubmitting(true);
     setError(null);
@@ -224,6 +223,7 @@ export default function CorpusReviewPage() {
           expected_event_type: chosenEventType,
           expected_classification: chosenClassification,
           note: reasonBlock,
+          disagrees: true,
         }),
       });
       await loadStats();
