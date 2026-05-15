@@ -131,6 +131,13 @@ def submit_review(case_id: str):
     expected = (body.get("expected_event_type") or "").strip()
     classification = (body.get("expected_classification") or "").strip() or None
     note = (body.get("note") or "").strip() or None
+    # Discordância explícita: clicou "Salvar discordância" mesmo
+    # marcando categoria igual à do LLM (margem de interpretação,
+    # informação faltante na transcrição, etc.). Bug reportado pelo
+    # Henrique 2026-05-15 — sem isso, sistema computava agrees=true
+    # quando categorias batem, ignorando que o revisor sinalizou
+    # discordância via UI.
+    explicit_disagreement = bool(body.get("disagrees")) or bool(note)
 
     if expected not in VALID_EVENT_TYPES:
         return jsonify({
@@ -156,7 +163,13 @@ def submit_review(case_id: str):
     if not user_id:
         return jsonify({"status": "error", "reason": "no_user_context"}), 401
 
-    agrees = expected == case["llm_suggested_event_type"]
+    # Se revisor clicou "discordo" ou deu nota explicativa, é
+    # discordância, mesmo que tenha marcado as mesmas categorias
+    # do LLM (margem interpretativa, info faltante, etc.).
+    agrees = (
+        (not explicit_disagreement)
+        and expected == case["llm_suggested_event_type"]
+    )
 
     try:
         review = db.insert_returning(
@@ -203,23 +216,39 @@ def submit_review(case_id: str):
 def stats():
     """Estatísticas: total de cases, revisados, pendentes, taxa de
     concordância LLM, breakdown por difficulty.
+
+    Query: ?track=clinical (default) | caregiver_wellness
+
+    Bug corrigido 2026-05-15 (Henrique): sem filtro de track, o
+    contador mostrava 24 enquanto a UI só listava 21 cases — porque
+    contava também os 3 cases de apoio_emocional (movidos pra trilha
+    caregiver_wellness no PR de wellness separation). Agora stats
+    respeita a trilha sendo revisada.
     """
     db = get_postgres()
     user_id = (getattr(g, "user", None) or {}).get("sub")
+    track = (request.args.get("track") or DEFAULT_REVIEW_TRACK).strip()
+    if track not in VALID_REVIEW_TRACKS:
+        track = DEFAULT_REVIEW_TRACK
 
     totals = db.fetch_one(
         """SELECT
             COUNT(*) AS total_cases,
             COUNT(*) FILTER (WHERE review_status = 'reviewed') AS reviewed,
             COUNT(*) FILTER (WHERE review_status = 'pending') AS pending
-           FROM aia_health_classification_corpus_cases""",
+           FROM aia_health_classification_corpus_cases
+           WHERE review_track = %s""",
+        (track,),
     ) or {}
 
     agreement = db.fetch_one(
         """SELECT
             COUNT(*) AS reviews_total,
-            COUNT(*) FILTER (WHERE agrees_with_llm) AS agreed
-           FROM aia_health_classification_corpus_reviews""",
+            COUNT(*) FILTER (WHERE r.agrees_with_llm) AS agreed
+           FROM aia_health_classification_corpus_reviews r
+           JOIN aia_health_classification_corpus_cases c ON c.id = r.case_id
+           WHERE c.review_track = %s""",
+        (track,),
     ) or {}
 
     by_difficulty = db.fetch_all(
@@ -227,8 +256,10 @@ def stats():
                   COUNT(*) AS total,
                   COUNT(*) FILTER (WHERE review_status = 'reviewed') AS reviewed
            FROM aia_health_classification_corpus_cases
+           WHERE review_track = %s
            GROUP BY difficulty
            ORDER BY difficulty NULLS LAST""",
+        (track,),
     )
     for r in by_difficulty:
         r["total"] = int(r.get("total") or 0)
@@ -248,17 +279,18 @@ def stats():
         r["reviews"] = int(r.get("reviews") or 0)
         r["agreed"] = int(r.get("agreed") or 0)
 
-    # Pendentes que esse user ainda não revisou
+    # Pendentes que esse user ainda não revisou (na trilha atual)
     my_remaining = 0
     if user_id:
         row = db.fetch_one(
             """SELECT COUNT(*) AS n
                FROM aia_health_classification_corpus_cases c
-               WHERE NOT EXISTS (
-                 SELECT 1 FROM aia_health_classification_corpus_reviews r
-                 WHERE r.case_id = c.id AND r.reviewer_user_id = %s
-               )""",
-            (user_id,),
+               WHERE c.review_track = %s
+                 AND NOT EXISTS (
+                   SELECT 1 FROM aia_health_classification_corpus_reviews r
+                   WHERE r.case_id = c.id AND r.reviewer_user_id = %s
+                 )""",
+            (track, user_id),
         )
         my_remaining = int((row or {}).get("n") or 0)
 
