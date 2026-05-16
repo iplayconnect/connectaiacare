@@ -36,15 +36,89 @@ logger = get_logger(__name__)
 
 CENTRAL_24H_PHONE = "5551997354484"
 
-# Phones de admins que recebem PUSH adicional WhatsApp quando
-# entra P1 clínico na fila — escalation pra garantir que ninguém
-# perde emergência. Lê de env `P1_ESCALATION_PHONES` (CSV).
-# Configurado em 2026-05-16 após Murilo ter "dor no peito" ficar
-# 74h sem atendimento humano apesar do P1.
-def _p1_escalation_phones() -> list[str]:
-    import os
-    raw = os.getenv("P1_ESCALATION_PHONES", "")
-    return [p.strip() for p in raw.split(",") if p.strip()]
+# Contatos de escalação por tenant + prioridade.
+#
+# Fonte primária: tabela aia_health_tenant_escalation_contacts
+# (migration 080) — permite gerenciar por UI, multi-tenant, com audit.
+#
+# Fallback: env var P1_ESCALATION_PHONES (CSV) pra retrocompatibilidade
+# durante transição. Será removido depois que todos os tenants
+# tiverem contatos cadastrados via painel.
+#
+# Schedule check (schedule_weekdays + schedule_start/end): se contato
+# tem schedule definido, só dispara dentro da janela. NULL = 24/7.
+def _escalation_phones_for(
+    tenant_id: str | None,
+    urgency: str,
+) -> list[str]:
+    """Retorna phones a notificar pra esse tenant + urgency.
+
+    Query a tabela aia_health_tenant_escalation_contacts:
+      - active=true
+      - urgency in priorities
+      - schedule cobre NOW() (se definido)
+
+    Se DB vazio E urgency=P1, cai no fallback env var.
+    """
+    if urgency not in ("P1", "P2", "P3"):
+        return []
+
+    phones: list[str] = []
+    if tenant_id:
+        try:
+            from src.services.postgres import get_postgres
+            rows = get_postgres().fetch_all(
+                """
+                SELECT phone
+                  FROM aia_health_tenant_escalation_contacts
+                 WHERE tenant_id = %s
+                   AND active = TRUE
+                   AND %s = ANY(priorities)
+                   AND (
+                     schedule_weekdays IS NULL
+                     OR cardinality(schedule_weekdays) = 0
+                     OR EXTRACT(ISODOW FROM NOW() AT TIME ZONE 'America/Sao_Paulo')::int
+                        = ANY(schedule_weekdays)
+                   )
+                   AND (
+                     (schedule_start IS NULL AND schedule_end IS NULL)
+                     OR (
+                       (NOW() AT TIME ZONE 'America/Sao_Paulo')::time
+                         BETWEEN schedule_start AND schedule_end
+                     )
+                   )
+                """,
+                (tenant_id, urgency),
+            )
+            phones = [r["phone"] for r in (rows or []) if r.get("phone")]
+        except Exception as exc:
+            logger.warning(
+                "escalation_contacts_db_query_failed",
+                tenant_id=tenant_id, urgency=urgency,
+                error=str(exc)[:200],
+            )
+
+    # Fallback env var APENAS pra P1 e SE DB não retornou nada
+    if not phones and urgency == "P1":
+        import os
+        raw = os.getenv("P1_ESCALATION_PHONES", "")
+        fallback = [p.strip() for p in raw.split(",") if p.strip()]
+        if fallback:
+            logger.info(
+                "escalation_using_env_fallback",
+                tenant_id=tenant_id,
+                fallback_count=len(fallback),
+                hint="Configure contatos via /api/admin/tenants/<id>/escalation-contacts",
+            )
+            phones = fallback
+
+    return phones
+
+
+# DEPRECATED: alias mantido temporariamente. Remover em PR de cleanup
+# após confirmar que nenhuma chamada externa usa.
+def _p1_escalation_phones() -> list[str]:  # pragma: no cover
+    return _escalation_phones_for(tenant_id=None, urgency="P1")
 
 
 # Placeholder link ConnectaLive (Phase C decide se porta módulo
@@ -723,8 +797,11 @@ def escalate_to_human_clinical(
             # Garante que admins/plantonistas sejam pingados
             # individualmente em emergência clínica — não basta
             # mandar pra Central 24h se ninguém olha lá.
+            # Consulta tabela de contatos por tenant (migration 080).
             if valid_urgency == "P1":
-                escalation_phones = _p1_escalation_phones()
+                escalation_phones = _escalation_phones_for(
+                    tenant_id=tenant_id, urgency="P1",
+                )
                 if escalation_phones:
                     short_msg = (
                         f"🚨 P1 CLÍNICO\n"
