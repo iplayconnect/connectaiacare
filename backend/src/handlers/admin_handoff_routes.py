@@ -957,12 +957,20 @@ def handoff_stats():
     days = max(1, min(days, 90))
     db = get_postgres()
     scope_sql, scope_params = _tenant_scope()
+    # SLA estourado: cálculo dinâmico (created_at + sla_target < NOW()),
+    # não depende do campo materializado. Ver fix em operator_routes.py
+    # 2026-05-16 — campo `sla_breached_at` só é preenchido por job
+    # assíncrono que pode atrasar/falhar, gerando contadores enganosos.
     totals = db.fetch_one(
         f"""SELECT COUNT(*) AS total,
                   COUNT(*) FILTER (WHERE status = 'pending') AS pending,
                   COUNT(*) FILTER (WHERE status = 'claimed') AS claimed,
                   COUNT(*) FILTER (WHERE status = 'resolved') AS resolved,
-                  COUNT(*) FILTER (WHERE sla_breached_at IS NOT NULL) AS sla_breached,
+                  COUNT(*) FILTER (
+                    WHERE status IN ('pending', 'claimed')
+                      AND sla_target_seconds IS NOT NULL
+                      AND created_at + (sla_target_seconds * INTERVAL '1 second') < NOW()
+                  ) AS sla_breached,
                   AVG(EXTRACT(EPOCH FROM (claimed_at - created_at))) AS avg_claim_seconds
            FROM aia_health_human_handoff_queue
            WHERE created_at >= NOW() - (%s || ' days')::interval{scope_sql}""",
