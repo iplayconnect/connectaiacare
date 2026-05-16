@@ -36,6 +36,17 @@ logger = get_logger(__name__)
 
 CENTRAL_24H_PHONE = "5551997354484"
 
+# Phones de admins que recebem PUSH adicional WhatsApp quando
+# entra P1 clínico na fila — escalation pra garantir que ninguém
+# perde emergência. Lê de env `P1_ESCALATION_PHONES` (CSV).
+# Configurado em 2026-05-16 após Murilo ter "dor no peito" ficar
+# 74h sem atendimento humano apesar do P1.
+def _p1_escalation_phones() -> list[str]:
+    import os
+    raw = os.getenv("P1_ESCALATION_PHONES", "")
+    return [p.strip() for p in raw.split(",") if p.strip()]
+
+
 # Placeholder link ConnectaLive (Phase C decide se porta módulo
 # da ConnectaIA ou usa link genérico)
 CONNECTALIVE_DEMO_LINK_DEFAULT = (
@@ -707,6 +718,42 @@ def escalate_to_human_clinical(
                 "SET notified_central_at = NOW() WHERE id = %s",
                 (handoff_id,),
             )
+
+            # Push EXTRA pra phones de escalation se for P1.
+            # Garante que admins/plantonistas sejam pingados
+            # individualmente em emergência clínica — não basta
+            # mandar pra Central 24h se ninguém olha lá.
+            if valid_urgency == "P1":
+                escalation_phones = _p1_escalation_phones()
+                if escalation_phones:
+                    short_msg = (
+                        f"🚨 P1 CLÍNICO\n"
+                        f"Cuidador {phone}\n"
+                        f"Motivo: {reason}\n"
+                        f"SLA: 5min. Atender em:\n"
+                        f"app.connectaiacare.com.br/admin/system/operations/handoff\n"
+                        f"(handoff_id={handoff_id[:8]}...)"
+                    )
+                    for admin_phone in escalation_phones:
+                        try:
+                            get_event_bus().publish(Streams.OUTBOUND, {
+                                "tenant_id": tenant_id,
+                                "trace_id": trace_id,
+                                "phone": admin_phone,
+                                "message_type": "text",
+                                "text": short_msg,
+                                "metadata": {
+                                    "reason": "p1_admin_escalation_push",
+                                    "handoff_id": handoff_id,
+                                    "urgency": "P1",
+                                },
+                            })
+                        except Exception as exc:
+                            logger.warning(
+                                "p1_escalation_push_failed",
+                                admin_phone_suffix=admin_phone[-4:],
+                                error=str(exc)[:200],
+                            )
         except Exception as exc:
             logger.warning(
                 "clinical_central_notify_failed",

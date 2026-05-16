@@ -338,11 +338,20 @@ def get_queue():
 def queue_stats():
     """Stats agregadas da fila — pra dashboard do operador."""
     db = get_postgres()
+    # SLA estourado: calcula dinamicamente em vez de depender do
+    # campo materializado `sla_breached_at` (que só é preenchido por
+    # job assíncrono que pode atrasar/falhar). Bug Alexandre 2026-05-16:
+    # painel mostrava "SLA estourado: 0" enquanto 4 itens tinham
+    # estourado 100x+ o SLA. Cálculo dinâmico evita inconsistência.
     pending = db.fetch_one(
         """SELECT COUNT(*) FILTER (WHERE status = 'pending') AS pending,
                   COUNT(*) FILTER (WHERE status = 'claimed') AS claimed,
                   COUNT(*) FILTER (WHERE priority = 'P1' AND status IN ('pending', 'claimed')) AS p1_open,
-                  COUNT(*) FILTER (WHERE sla_breached_at IS NOT NULL) AS sla_breached,
+                  COUNT(*) FILTER (
+                    WHERE status IN ('pending', 'claimed')
+                      AND sla_target_seconds IS NOT NULL
+                      AND created_at + (sla_target_seconds * INTERVAL '1 second') < NOW()
+                  ) AS sla_breached,
                   COUNT(*) FILTER (WHERE status = 'resolved' AND resolved_at >= NOW() - INTERVAL '24 hours') AS resolved_24h
            FROM aia_health_human_handoff_queue""",
     ) or {}
