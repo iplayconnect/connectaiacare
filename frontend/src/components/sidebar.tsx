@@ -244,6 +244,13 @@ const NAV_ITEMS: NavItem[] = [
     group: "system",
   },
   {
+    href: "/admin/system/operations/escalation-contacts",
+    label: "Plantão · Contatos P1",
+    icon: UserCog,
+    roles: ["super_admin", "admin_tenant"],
+    group: "system",
+  },
+  {
     href: "/admin/system/conversations",
     label: "Conversas · Replay",
     icon: Phone,
