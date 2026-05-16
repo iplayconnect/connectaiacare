@@ -6,6 +6,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 from config.settings import settings
 from src.handlers.admin_conversations_routes import bp as admin_conversations_bp
 from src.handlers.admin_handoff_routes import bp as admin_handoff_bp
+from src.handlers.tenant_escalation_routes import bp as tenant_escalation_bp
 from src.handlers.admin_health_routes import bp as admin_health_bp
 from src.handlers.admin_leads_routes import bp as admin_leads_bp
 from src.handlers.admin_quick_replies_routes import bp as admin_quick_replies_bp
@@ -110,6 +111,7 @@ def create_app() -> Flask:
     app.register_blueprint(admin_leads_bp)        # Phase D — leads funnel
     app.register_blueprint(commercial_funnel_bp)  # Phase D — comercial: plans/demos/calls/proposals/timeline (migration 068)
     app.register_blueprint(admin_handoff_bp)      # Phase D — handoff queue
+    app.register_blueprint(tenant_escalation_bp)  # 2026-05-16 — contatos escalação por tenant
     app.register_blueprint(admin_conversations_bp) # Phase D — conversations
     app.register_blueprint(admin_quick_replies_bp) # Phase A — quick replies pra chat handoff
     app.register_blueprint(operator_bp)            # Phase D — central ATENT 24/7 (migration 071)
