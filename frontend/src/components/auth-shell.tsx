@@ -26,9 +26,9 @@ const CHROMELESS_PREFIXES = [
   "/cadastro",
   "/pitch",
   "/planos",
-  "/demo",
   "/meu",
   "/consulta",
+  // "/demo" removido 2026-05-16 (rota deprecated, substituída por /sofia)
 ];
 
 function isChromeless(pathname: string): boolean {
