@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { AuthProvider } from "@/context/auth-context";
 import { AuthShell } from "@/components/auth-shell";
+import { TooltipProvider } from "@/components/ui/tooltip";
 
 export const metadata: Metadata = {
   title: "ConnectaIACare — Cuidado Integrado com IA",
@@ -25,7 +26,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         />
 
         <AuthProvider>
-          <AuthShell>{children}</AuthShell>
+          <TooltipProvider>
+            <AuthShell>{children}</AuthShell>
+          </TooltipProvider>
         </AuthProvider>
       </body>
     </html>
