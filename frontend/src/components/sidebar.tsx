@@ -35,6 +35,7 @@ import {
 import { useAuth } from "@/context/auth-context";
 import { hasPermission, hasRole, ROLE_LABEL } from "@/lib/permissions";
 import type { AuthUser } from "@/lib/auth";
+import { Tooltip } from "@/components/ui/tooltip";
 
 // ═══════════════════════════════════════════════════════════════
 // Sidebar com 4 grupos:
@@ -447,38 +448,54 @@ function NavGroup({ items, pathname }: { items: NavItem[]; pathname: string }) {
         );
         const active =
           item.href === "/" ? pathname === "/" : isPrefix && !hasMoreSpecific;
+        const linkEl = (
+          <Link
+            href={item.href}
+            className={`
+              flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-all
+              ${
+                active
+                  ? "bg-accent-cyan/10 text-accent-cyan font-medium border border-accent-cyan/20"
+                  : "text-muted-foreground hover:text-foreground hover:bg-white/[0.03] border border-transparent"
+              }
+            `}
+          >
+            <Icon className="h-4 w-4 flex-shrink-0" />
+            <span className="flex-1">{item.label}</span>
+            {item.badge != null && (
+              <span
+                className={`text-[10px] px-1.5 py-0.5 rounded-md font-medium tabular ${
+                  active
+                    ? "bg-accent-cyan/20 text-accent-cyan"
+                    : "bg-white/[0.06] text-muted-foreground"
+                }`}
+              >
+                {item.badge}
+              </span>
+            )}
+          </Link>
+        );
+
         return (
           <li key={item.href}>
-            <Link
-              href={item.href}
-              // Tooltip nativo do browser via title attr. Mostra a descrição
-              // curta da função se houver; cai pro label se não tiver
-              // description preenchida. Considerar trocar por componente
-              // custom (Radix Tooltip) se quiser estilização dark theme.
-              title={item.description || item.label}
-              className={`
-                flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-all
-                ${
-                  active
-                    ? "bg-accent-cyan/10 text-accent-cyan font-medium border border-accent-cyan/20"
-                    : "text-muted-foreground hover:text-foreground hover:bg-white/[0.03] border border-transparent"
+            {item.description ? (
+              <Tooltip
+                content={
+                  <div className="space-y-0.5">
+                    <div className="font-semibold text-foreground">{item.label}</div>
+                    <div className="text-muted-foreground">{item.description}</div>
+                  </div>
                 }
-              `}
-            >
-              <Icon className="h-4 w-4 flex-shrink-0" />
-              <span className="flex-1">{item.label}</span>
-              {item.badge != null && (
-                <span
-                  className={`text-[10px] px-1.5 py-0.5 rounded-md font-medium tabular ${
-                    active
-                      ? "bg-accent-cyan/20 text-accent-cyan"
-                      : "bg-white/[0.06] text-muted-foreground"
-                  }`}
-                >
-                  {item.badge}
-                </span>
-              )}
-            </Link>
+                side="right"
+                sideOffset={10}
+                delayMs={250}
+                maxWidth="280px"
+              >
+                {linkEl}
+              </Tooltip>
+            ) : (
+              linkEl
+            )}
           </li>
         );
       })}
