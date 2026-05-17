@@ -32,10 +32,10 @@ import {
 
 import { useAuth } from "@/context/auth-context";
 import { hasRole } from "@/lib/permissions";
+import { ScheduleBadge } from "@/components/escalation/schedule-badge";
 import {
   ESCALATION_ROLE_LABEL,
   formatPhoneBR,
-  formatSchedule,
   maskPhoneInput,
   tenantEscalationApi,
   type CreateEscalationContactPayload,
@@ -296,12 +296,18 @@ function ContactRow({
               </span>
             )}
           </div>
-          <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
+          <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground flex-wrap">
             <span className="flex items-center gap-1">
               <Phone className="h-3 w-3" /> {formatPhoneBR(contact.phone)}
             </span>
-            <span className="flex items-center gap-1">
-              <Clock className="h-3 w-3" /> {formatSchedule(contact)}
+            <span className="flex items-center gap-1.5">
+              <Clock className="h-3 w-3" />
+              <ScheduleBadge
+                weekdays={contact.schedule_weekdays}
+                start={contact.schedule_start}
+                end={contact.schedule_end}
+                showLiveStatus={contact.active}
+              />
             </span>
           </div>
           <div className="flex items-center gap-1.5 mt-2">
@@ -376,6 +382,11 @@ function NewContactModal({
   const [role, setRole] = useState<EscalationRole>("plantonista_l1");
   const [priorities, setPriorities] = useState<EscalationPriority[]>(["P1"]);
   const [notes, setNotes] = useState("");
+  // Schedule opcional — default vazio (= 24/7)
+  const [scheduleMode, setScheduleMode] = useState<"24/7" | "custom">("24/7");
+  const [weekdays, setWeekdays] = useState<number[]>([1, 2, 3, 4, 5]); // Seg-Sex default
+  const [startTime, setStartTime] = useState("08:00");
+  const [endTime, setEndTime] = useState("18:00");
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -384,6 +395,12 @@ function NewContactModal({
       prev.includes(p)
         ? (prev.filter((x) => x !== p) as EscalationPriority[])
         : ([...prev, p] as EscalationPriority[]),
+    );
+  }
+
+  function toggleWeekday(d: number) {
+    setWeekdays((prev) =>
+      prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d].sort(),
     );
   }
 
@@ -407,6 +424,10 @@ function NewContactModal({
       setErr("Selecione ao menos uma prioridade.");
       return;
     }
+    if (scheduleMode === "custom" && weekdays.length === 0) {
+      setErr("Schedule custom precisa de pelo menos 1 dia da semana.");
+      return;
+    }
     setSaving(true);
     try {
       const payload: CreateEscalationContactPayload = {
@@ -415,6 +436,13 @@ function NewContactModal({
         role,
         priorities,
         notes: notes.trim() || null,
+        // Schedule: 24/7 manda null pra todos; custom manda os 3.
+        schedule_weekdays:
+          scheduleMode === "custom" ? weekdays : null,
+        schedule_start:
+          scheduleMode === "custom" ? `${startTime}:00` : null,
+        schedule_end:
+          scheduleMode === "custom" ? `${endTime}:00` : null,
       };
       await tenantEscalationApi.create(tenantId, payload);
       await onCreated();
@@ -524,6 +552,115 @@ function NewContactModal({
           <span className="text-[10px] text-muted-foreground/60 block">
             Recomendação inicial: <b>só P1</b> (emergência clínica). P2/P3 vira ruído rápido.
           </span>
+        </div>
+
+        {/* Schedule (opcional, default 24/7) */}
+        <div className="space-y-2">
+          <span className="text-[11px] text-muted-foreground block">
+            Turno de plantão
+          </span>
+          <div className="grid grid-cols-2 gap-2">
+            <label
+              className={[
+                "flex items-center justify-center gap-1.5 p-2 rounded-lg border text-xs cursor-pointer transition",
+                scheduleMode === "24/7"
+                  ? "border-accent-cyan/40 bg-accent-cyan/5 text-accent-cyan"
+                  : "border-white/[0.06] hover:bg-white/[0.04] text-muted-foreground",
+              ].join(" ")}
+            >
+              <input
+                type="radio"
+                name="schedule_mode"
+                className="sr-only"
+                checked={scheduleMode === "24/7"}
+                onChange={() => setScheduleMode("24/7")}
+              />
+              ♾️ Sempre disponível (24/7)
+            </label>
+            <label
+              className={[
+                "flex items-center justify-center gap-1.5 p-2 rounded-lg border text-xs cursor-pointer transition",
+                scheduleMode === "custom"
+                  ? "border-accent-cyan/40 bg-accent-cyan/5 text-accent-cyan"
+                  : "border-white/[0.06] hover:bg-white/[0.04] text-muted-foreground",
+              ].join(" ")}
+            >
+              <input
+                type="radio"
+                name="schedule_mode"
+                className="sr-only"
+                checked={scheduleMode === "custom"}
+                onChange={() => setScheduleMode("custom")}
+              />
+              ⏰ Turno específico
+            </label>
+          </div>
+
+          {scheduleMode === "custom" && (
+            <div className="rounded-lg border border-white/[0.06] bg-white/[0.02] p-3 space-y-3">
+              {/* Dias da semana */}
+              <div>
+                <span className="text-[10px] uppercase tracking-wider text-muted-foreground block mb-1.5">
+                  Dias da semana
+                </span>
+                <div className="flex items-center gap-1">
+                  {[
+                    { d: 1, l: "Seg" },
+                    { d: 2, l: "Ter" },
+                    { d: 3, l: "Qua" },
+                    { d: 4, l: "Qui" },
+                    { d: 5, l: "Sex" },
+                    { d: 6, l: "Sáb" },
+                    { d: 7, l: "Dom" },
+                  ].map(({ d, l }) => (
+                    <button
+                      key={d}
+                      type="button"
+                      onClick={() => toggleWeekday(d)}
+                      className={[
+                        "flex-1 py-1.5 rounded text-[10px] font-semibold transition",
+                        weekdays.includes(d)
+                          ? "bg-accent-cyan/15 border border-accent-cyan/40 text-accent-cyan"
+                          : "bg-white/[0.02] border border-white/[0.06] text-muted-foreground hover:bg-white/[0.04]",
+                      ].join(" ")}
+                    >
+                      {l}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Janela horária */}
+              <div className="grid grid-cols-2 gap-2">
+                <label className="block space-y-1">
+                  <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                    Início
+                  </span>
+                  <input
+                    type="time"
+                    className="input w-full font-mono"
+                    value={startTime}
+                    onChange={(e) => setStartTime(e.target.value)}
+                  />
+                </label>
+                <label className="block space-y-1">
+                  <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                    Fim
+                  </span>
+                  <input
+                    type="time"
+                    className="input w-full font-mono"
+                    value={endTime}
+                    onChange={(e) => setEndTime(e.target.value)}
+                  />
+                </label>
+              </div>
+              <span className="text-[10px] text-muted-foreground/60 block">
+                Turno que cruza meia-noite (ex: 22:00 → 06:00) é aceito —
+                fica ativo durante a noite toda.
+              </span>
+            </div>
+          )}
         </div>
 
         <label className="block space-y-1">
