@@ -85,7 +85,7 @@ export function PatientActions({ patient, care_events }: Props) {
           label="Histórico"
         />
         <SecondaryAction
-          href={`/demo/onboarding`}
+          href={`/sofia?patient=${patient.id}`}
           icon={<MessageSquare className="h-3.5 w-3.5" />}
           label="Sofia"
         />

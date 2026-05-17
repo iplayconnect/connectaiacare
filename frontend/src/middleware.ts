@@ -12,11 +12,14 @@ import { NextResponse, type NextRequest } from "next/server";
  *   /cadastro/*                  — onboarding B2C
  *   /pitch                       — material de marketing
  *   /planos                      — tabela de planos
- *   /demo/onboarding             — Sofia ao vivo (público intencionalmente)
  *   /meu/[id]                    — portal do paciente (PIN-gated, próprio guard)
  *   /consulta/[room]             — sala de teleconsulta (token JWT no link)
  *   /consulta/finalizada         — tela pós-call
  *   _next/* / static / favicon   — assets
+ *
+ * Removido em 2026-05-16:
+ *   /demo/onboarding             — deprecated; substituído por /sofia
+ *                                  (sofia exige auth, comportamento correto)
  */
 
 const PUBLIC_PATHS = new Set([
@@ -29,7 +32,6 @@ const PUBLIC_PATHS = new Set([
 
 const PUBLIC_PREFIXES = [
   "/cadastro",
-  "/demo",
   "/meu",
   "/consulta",
   "/_next",
