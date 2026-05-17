@@ -60,6 +60,12 @@ type NavItem = {
   roles?: AuthUser["role"][];
   badge?: number | string;
   group?: NavGroupId;
+  /**
+   * Tooltip exibido ao passar o mouse sobre o item. Curto (até 110
+   * chars), descreve a FUNÇÃO REAL da página — não apenas duplica o
+   * label. Usado pelo title attr do <Link> (tooltip nativo do browser).
+   */
+  description?: string;
 };
 
 const GROUP_LABELS: Record<NavGroupId, string> = {
@@ -71,23 +77,75 @@ const GROUP_LABELS: Record<NavGroupId, string> = {
 
 const NAV_ITEMS: NavItem[] = [
   // ─── Operação (todos com permission) ───
-  { href: "/", label: "Dashboard", icon: Activity },
-  { href: "/alertas", label: "Alertas", icon: ShieldAlert, permissions: ["alerts:read"] },
-  { href: "/alertas/clinicos", label: "Alertas Clínicos", icon: ShieldAlert, permissions: ["alerts:read"] },
-  { href: "/reports", label: "Relatos", icon: FileText, permissions: ["reports:read"] },
-  { href: "/patients", label: "Pacientes", icon: UsersRound, permissions: ["patients:read"] },
-  { href: "/teleconsulta", label: "Teleconsulta", icon: Video, permissions: ["teleconsulta:read"] },
-  { href: "/sofia", label: "Sofia Chat", icon: Sparkles },
-  { href: "/comunicacao", label: "Comunicação", icon: Phone },
-  { href: "/equipe", label: "Equipe", icon: UserCog, permissions: ["caregivers:read"] },
+  {
+    href: "/",
+    label: "Dashboard",
+    icon: Activity,
+    description: "Visão operacional ao vivo: eventos clínicos ativos, KPIs, feed de relatos recentes.",
+  },
+  {
+    href: "/alertas",
+    label: "Alertas Operacionais",
+    icon: ShieldAlert,
+    permissions: ["alerts:read"],
+    description: "Triagem de care events: relatos, check-ins e eventos clínicos abertos esperando ação.",
+  },
+  {
+    href: "/alertas/clinicos",
+    label: "Alertas Clínicos",
+    icon: ShieldAlert,
+    permissions: ["alerts:read"],
+    description: "Motor de validação farmacológica: doses, interações, contraindicações com reconhecimento/resolução.",
+  },
+  {
+    href: "/reports",
+    label: "Relatos",
+    icon: FileText,
+    permissions: ["reports:read"],
+    description: "Histórico de relatos de cuidadores (áudio + transcrição + classificação Íris).",
+  },
+  {
+    href: "/patients",
+    label: "Pacientes",
+    icon: UsersRound,
+    permissions: ["patients:read"],
+    description: "Lista e cadastro de pacientes monitorados; click abre prontuário 360°.",
+  },
+  {
+    href: "/teleconsulta",
+    label: "Teleconsulta",
+    icon: Video,
+    permissions: ["teleconsulta:read"],
+    description: "Salas Jitsi: agendadas, ativas, pós-consulta com SOAP eletrônico.",
+  },
+  {
+    href: "/sofia",
+    label: "Sofia Chat",
+    icon: Sparkles,
+    description: "Chat persona-aware: tire dúvidas clínicas, peça contexto de paciente, simule conversas.",
+  },
+  {
+    href: "/comunicacao",
+    label: "Chamadas · VoIP",
+    icon: Phone,
+    description: "Hub de ligações: nova chamada, em andamento, histórico com transcrição.",
+  },
+  {
+    href: "/equipe",
+    label: "Equipe Clínica",
+    icon: UserCog,
+    permissions: ["caregivers:read"],
+    description: "Médicos, enfermeiros, cuidadores e técnicos que ATENDEM pacientes (tabs por papel).",
+  },
 
   // ─── Administração do tenant ───
   {
     href: "/admin/usuarios",
-    label: "Usuários",
+    label: "Usuários do CRM",
     icon: Users,
     permissions: ["users:read"],
     group: "tenant",
+    description: "Quem tem CONTA no painel: email, papel, CRM/COREN, ativo/inativo. ≠ Equipe Clínica.",
   },
   {
     href: "/admin/perfis",
@@ -95,6 +153,7 @@ const NAV_ITEMS: NavItem[] = [
     icon: KeyRound,
     permissions: ["profiles:read"],
     group: "tenant",
+    description: "Crie papéis customizados além dos defaults (super_admin, médico, etc.) com checkboxes de permissões.",
   },
   {
     href: "/admin/biometria-voz",
@@ -102,22 +161,31 @@ const NAV_ITEMS: NavItem[] = [
     icon: Volume2,
     roles: ["super_admin", "admin_tenant", "medico", "enfermeiro"],
     group: "tenant",
+    description: "Enrollment de voiceprints (pacientes e cuidadores) + cobertura por unidade.",
   },
   {
     href: "/admin/plantoes",
-    label: "Plantões",
+    label: "Escala de Cuidadores",
     icon: CalendarClock,
     roles: ["super_admin", "admin_tenant", "medico", "enfermeiro"],
     group: "tenant",
+    description: "Turnos dos cuidadores que atendem pacientes (quem está em plantão agora, escala futura).",
   },
   {
     href: "/admin/seguranca/fila-revisao",
-    label: "Fila de Revisão",
+    label: "Fila de Revisão · Safety",
     icon: ShieldAlert,
     roles: ["super_admin", "admin_tenant", "medico", "enfermeiro", "cuidador_pro", "familia"],
     group: "tenant",
+    description: "Safety Guardrail: ações clínicas críticas esperando aprovação humana (countdown auto-exec).",
   },
-  { href: "/configuracoes", label: "Configurações", icon: Settings, group: "tenant" },
+  {
+    href: "/configuracoes",
+    label: "Padrões & Compliance",
+    icon: Settings,
+    group: "tenant",
+    description: "Catálogo READ-ONLY de padrões adotados (FHIR, CID-10, escalas, evidência) — vitrine compliance.",
+  },
 
   // ─── Governança Clínica (cross-tenant, multi-role) ───
   {
@@ -126,20 +194,23 @@ const NAV_ITEMS: NavItem[] = [
     icon: Stethoscope,
     roles: ["super_admin", "admin_tenant"],
     group: "governance",
+    description: "CRUD de doses máximas, aliases de medicamentos, interações. Alimenta o motor de Alertas Clínicos.",
   },
   {
     href: "/admin/governance/cascades",
-    label: "Cascatas",
+    label: "Cascatas Farmacológicas",
     icon: GitFork,
     roles: ["super_admin", "admin_tenant", "medico", "enfermeiro"],
     group: "governance",
+    description: "Read-only: visualização das cascatas de prescrição (A+C, A+B+C) com severidade.",
   },
   {
     href: "/admin/governance/review",
-    label: "Revisão Clínica",
+    label: "Revisão · Clínica",
     icon: ClipboardCheck,
     roles: ["super_admin", "admin_tenant", "medico", "enfermeiro"],
     group: "governance",
+    description: "Revisão clínica geral pelo time interno (sample-based).",
   },
   {
     href: "/admin/governance/corpus-review",
@@ -147,6 +218,7 @@ const NAV_ITEMS: NavItem[] = [
     icon: HeartHandshake,
     roles: ["super_admin", "admin_tenant", "clinical_reviewer", "medico"],
     group: "governance",
+    description: "Revisão case-a-case do corpus de classificação (concordância/discordância com LLM).",
   },
   {
     href: "/admin/governance/curated-review",
@@ -154,6 +226,7 @@ const NAV_ITEMS: NavItem[] = [
     icon: BookMarked,
     roles: ["super_admin", "admin_tenant", "clinical_reviewer", "medico", "farmaceutico"],
     group: "governance",
+    description: "Revisão das bases curadas: CID-10, medicamentos, regras de cross-validation (Henrique + PUC).",
   },
   {
     href: "/admin/governance/synthetic-tests",
@@ -161,13 +234,15 @@ const NAV_ITEMS: NavItem[] = [
     icon: Activity,
     roles: ["super_admin", "admin_tenant"],
     group: "governance",
+    description: "Bateria de cenários sintéticos pra validar regressões antes de subir pra produção.",
   },
   {
     href: "/admin/governance/scenarios",
-    label: "Cenários Sofia",
+    label: "Cenários da Sofia",
     icon: Phone,
     roles: ["super_admin", "admin_tenant"],
     group: "governance",
+    description: "Playbooks VoIP da Sofia: prompts, persona, voz, tools, ações pós-call (com versionamento).",
   },
   {
     href: "/admin/governance/scenarios/versions",
@@ -175,6 +250,7 @@ const NAV_ITEMS: NavItem[] = [
     icon: GitBranch,
     roles: ["super_admin", "admin_tenant"],
     group: "governance",
+    description: "Histórico de versões dos prompts da Sofia (diff, rollback).",
   },
 
   // ─── Sistema · Cross-tenant (SUPER_ADMIN ONLY) ───
@@ -184,6 +260,7 @@ const NAV_ITEMS: NavItem[] = [
     icon: Activity,
     roles: ["super_admin"],
     group: "system",
+    description: "Visão agregada de TODOS os tenants: totais, série 7d, top tenants, distribuição 30d.",
   },
   {
     href: "/admin/system/tenants",
@@ -191,6 +268,7 @@ const NAV_ITEMS: NavItem[] = [
     icon: Building2,
     roles: ["super_admin"],
     group: "system",
+    description: "Provisioning SaaS: criar/editar/suspender tenants (ILPI, clínicas, parceiros como Tecnosenior).",
   },
   {
     href: "/admin/system/health",
@@ -198,20 +276,23 @@ const NAV_ITEMS: NavItem[] = [
     icon: ServerCog,
     roles: ["super_admin"],
     group: "system",
+    description: "Uptime, latência, uso de recursos, status de integrações cross-tenant.",
   },
   {
     href: "/admin/system/health/risk-score",
-    label: "Risk Score",
+    label: "Risk Score Agregado",
     icon: Activity,
     roles: ["super_admin"],
     group: "system",
+    description: "Score consolidado de risco da plataforma (clínico + operacional + integração).",
   },
   {
     href: "/admin/system/operations/proactive-caller",
-    label: "Proactive Caller",
+    label: "Sofia Proativa",
     icon: PhoneOutgoing,
     roles: ["super_admin"],
     group: "system",
+    description: "Sofia outbound: chamadas proativas pra check-in de paciente (vê fila + executa).",
   },
   {
     href: "/admin/system/operations/leads",
@@ -219,22 +300,25 @@ const NAV_ITEMS: NavItem[] = [
     icon: Sparkles,
     roles: ["super_admin", "admin_tenant"],
     group: "system",
+    description: "DEPRECATED: lista antiga de leads comerciais. Substituída por Comercial · Funil.",
   },
   // ─── Phase D Comercial — único item, abre /comercial/funil
   // (com tabs Funil / Agenda / Planos no layout interno)
   {
     href: "/admin/system/operations/comercial/funil",
-    label: "Comercial",
+    label: "Comercial · Funil",
     icon: KanbanSquare,
     roles: ["super_admin", "admin_tenant", "comercial"],
     group: "system",
+    description: "Funil de vendas ConnectaIACare: prospects → demos → propostas → fechamento.",
   },
   {
     href: "/admin/system/operations/handoff",
-    label: "Handoff · Atendimento Humano",
+    label: "Handoff · Fila",
     icon: HeartHandshake,
     roles: ["super_admin", "admin_tenant", "medico", "enfermeiro"],
     group: "system",
+    description: "Fila de pedidos que a Sofia escalou pra humano — reivindique e atenda no chat.",
   },
   {
     href: "/admin/system/operations/central",
@@ -242,13 +326,15 @@ const NAV_ITEMS: NavItem[] = [
     icon: Headphones,
     roles: ["super_admin", "operador_central"],
     group: "system",
+    description: "Operação 24/7: fila cross-tenant priorizada (P1/P2/P3) com SLA e heartbeat de operadores.",
   },
   {
     href: "/admin/system/operations/escalation-contacts",
-    label: "Plantão · Contatos P1",
+    label: "Plantão Técnico · Contatos P1",
     icon: UserCog,
     roles: ["super_admin", "admin_tenant"],
     group: "system",
+    description: "CRUD de quem recebe push WhatsApp em P1 clínico (≠ Escala de Cuidadores).",
   },
   {
     href: "/admin/system/conversations",
@@ -256,6 +342,7 @@ const NAV_ITEMS: NavItem[] = [
     icon: Phone,
     roles: ["super_admin", "admin_tenant"],
     group: "system",
+    description: "Replay de conversas Sofia para auditoria LGPD e análise de qualidade (filtro tenant/paciente/período).",
   },
 ];
 
@@ -364,6 +451,11 @@ function NavGroup({ items, pathname }: { items: NavItem[]; pathname: string }) {
           <li key={item.href}>
             <Link
               href={item.href}
+              // Tooltip nativo do browser via title attr. Mostra a descrição
+              // curta da função se houver; cai pro label se não tiver
+              // description preenchida. Considerar trocar por componente
+              // custom (Radix Tooltip) se quiser estilização dark theme.
+              title={item.description || item.label}
               className={`
                 flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-all
                 ${
