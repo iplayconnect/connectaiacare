@@ -33,6 +33,8 @@ import {
 import { useAuth } from "@/context/auth-context";
 import { hasRole } from "@/lib/permissions";
 import { ScheduleBadge } from "@/components/escalation/schedule-badge";
+import { useConfirm } from "@/components/ui/confirm-dialog";
+import { useToast } from "@/components/ui/toast";
 import {
   ESCALATION_ROLE_LABEL,
   formatPhoneBR,
@@ -63,6 +65,8 @@ const ROLE_OPTIONS: EscalationRole[] = [
 export default function EscalationContactsPage() {
   const { user } = useAuth();
   const allowed = hasRole(user, "super_admin", "admin_tenant");
+  const confirm = useConfirm();
+  const toast = useToast();
 
   // Tenant atual — admin_tenant só vê o próprio. super_admin pode
   // futuramente ter dropdown; por enquanto usa o tenant do JWT.
@@ -121,17 +125,32 @@ export default function EscalationContactsPage() {
 
   async function handleToggleActive(c: EscalationContact) {
     if (c.active) {
-      const ok = confirm(
-        `Desativar ${c.contact_name}? Histórico fica preservado pra audit. Pode reativar criando novo cadastro.`,
-      );
+      const ok = await confirm({
+        title: `Desativar ${c.contact_name}?`,
+        description: (
+          <>
+            Histórico fica preservado pra audit (LGPD).
+            Pode reativar depois criando novo cadastro com o mesmo número.
+          </>
+        ),
+        confirmLabel: "Desativar",
+        variant: "destructive",
+      });
       if (!ok) return;
-      await tenantEscalationApi.deactivate(tenantId, c.id);
+      try {
+        await tenantEscalationApi.deactivate(tenantId, c.id);
+        toast.success(`${c.contact_name} desativado.`);
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "Erro desativando");
+        return;
+      }
     } else {
       try {
         await tenantEscalationApi.update(tenantId, c.id, { active: true });
+        toast.success(`${c.contact_name} reativado.`);
       } catch (e) {
         // Pode falhar se já existe outro active com mesmo phone
-        alert(e instanceof Error ? e.message : "Erro reativando");
+        toast.error(e instanceof Error ? e.message : "Erro reativando");
         return;
       }
     }
