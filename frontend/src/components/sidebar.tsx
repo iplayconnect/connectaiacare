@@ -1,5 +1,6 @@
 "use client";
 
+import { Fragment } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -61,6 +62,16 @@ type NavItem = {
   roles?: AuthUser["role"][];
   badge?: number | string;
   group?: NavGroupId;
+  /**
+   * Sub-agrupamento visual DENTRO do group. Itens consecutivos com
+   * o mesmo subgroup ficam juntos; quando muda, renderiza separador
+   * "─ <label> ─". null/undefined = sem subgroup (separador no topo
+   * com nome genérico se quiser, ou nenhum).
+   *
+   * Ordem dos items no array NAV_ITEMS determina a ordem dos
+   * subgroups na UI. Pra reordenar, mover items no array.
+   */
+  subgroup?: string;
   /**
    * Tooltip exibido ao passar o mouse sobre o item. Curto (até 110
    * chars), descreve a FUNÇÃO REAL da página — não apenas duplica o
@@ -189,12 +200,14 @@ const NAV_ITEMS: NavItem[] = [
   },
 
   // ─── Governança Clínica (cross-tenant, multi-role) ───
+  // Sub-grupos: Regras / Revisão / Sofia
   {
     href: "/admin/governance/clinical-rules",
     label: "Regras Clínicas (master)",
     icon: Stethoscope,
     roles: ["super_admin", "admin_tenant"],
     group: "governance",
+    subgroup: "Regras",
     description: "CRUD de doses máximas, aliases de medicamentos, interações. Alimenta o motor de Alertas Clínicos.",
   },
   {
@@ -203,6 +216,7 @@ const NAV_ITEMS: NavItem[] = [
     icon: GitFork,
     roles: ["super_admin", "admin_tenant", "medico", "enfermeiro"],
     group: "governance",
+    subgroup: "Regras",
     description: "Read-only: visualização das cascatas de prescrição (A+C, A+B+C) com severidade.",
   },
   {
@@ -211,6 +225,7 @@ const NAV_ITEMS: NavItem[] = [
     icon: ClipboardCheck,
     roles: ["super_admin", "admin_tenant", "medico", "enfermeiro"],
     group: "governance",
+    subgroup: "Revisão",
     description: "Revisão clínica geral pelo time interno (sample-based).",
   },
   {
@@ -219,6 +234,7 @@ const NAV_ITEMS: NavItem[] = [
     icon: HeartHandshake,
     roles: ["super_admin", "admin_tenant", "clinical_reviewer", "medico"],
     group: "governance",
+    subgroup: "Revisão",
     description: "Revisão case-a-case do corpus de classificação (concordância/discordância com LLM).",
   },
   {
@@ -227,15 +243,8 @@ const NAV_ITEMS: NavItem[] = [
     icon: BookMarked,
     roles: ["super_admin", "admin_tenant", "clinical_reviewer", "medico", "farmaceutico"],
     group: "governance",
+    subgroup: "Revisão",
     description: "Revisão das bases curadas: CID-10, medicamentos, regras de cross-validation (Henrique + PUC).",
-  },
-  {
-    href: "/admin/governance/synthetic-tests",
-    label: "Testes Sintéticos",
-    icon: Activity,
-    roles: ["super_admin", "admin_tenant"],
-    group: "governance",
-    description: "Bateria de cenários sintéticos pra validar regressões antes de subir pra produção.",
   },
   {
     href: "/admin/governance/scenarios",
@@ -243,6 +252,7 @@ const NAV_ITEMS: NavItem[] = [
     icon: Phone,
     roles: ["super_admin", "admin_tenant"],
     group: "governance",
+    subgroup: "Sofia",
     description: "Playbooks VoIP da Sofia: prompts, persona, voz, tools, ações pós-call (com versionamento).",
   },
   {
@@ -251,16 +261,28 @@ const NAV_ITEMS: NavItem[] = [
     icon: GitBranch,
     roles: ["super_admin", "admin_tenant"],
     group: "governance",
+    subgroup: "Sofia",
     description: "Histórico de versões dos prompts da Sofia (diff, rollback).",
+  },
+  {
+    href: "/admin/governance/synthetic-tests",
+    label: "Testes Sintéticos",
+    icon: Activity,
+    roles: ["super_admin", "admin_tenant"],
+    group: "governance",
+    subgroup: "Sofia",
+    description: "Bateria de cenários sintéticos pra validar regressões antes de subir pra produção.",
   },
 
   // ─── Sistema · Cross-tenant (SUPER_ADMIN ONLY) ───
+  // Sub-grupos: Plataforma / Atendimento Humano / Operações / Análise
   {
     href: "/admin/system",
     label: "Dashboard cross-tenant",
     icon: Activity,
     roles: ["super_admin"],
     group: "system",
+    subgroup: "Plataforma",
     description: "Visão agregada de TODOS os tenants: totais, série 7d, top tenants, distribuição 30d.",
   },
   {
@@ -269,6 +291,7 @@ const NAV_ITEMS: NavItem[] = [
     icon: Building2,
     roles: ["super_admin"],
     group: "system",
+    subgroup: "Plataforma",
     description: "Provisioning SaaS: criar/editar/suspender tenants (ILPI, clínicas, parceiros como Tecnosenior).",
   },
   {
@@ -277,6 +300,7 @@ const NAV_ITEMS: NavItem[] = [
     icon: ServerCog,
     roles: ["super_admin"],
     group: "system",
+    subgroup: "Plataforma",
     description: "Uptime, latência, uso de recursos, status de integrações cross-tenant.",
   },
   {
@@ -285,7 +309,35 @@ const NAV_ITEMS: NavItem[] = [
     icon: Activity,
     roles: ["super_admin"],
     group: "system",
+    subgroup: "Plataforma",
     description: "Score consolidado de risco da plataforma (clínico + operacional + integração).",
+  },
+  {
+    href: "/admin/system/operations/handoff",
+    label: "Handoff · Fila",
+    icon: HeartHandshake,
+    roles: ["super_admin", "admin_tenant", "medico", "enfermeiro"],
+    group: "system",
+    subgroup: "Atendimento Humano",
+    description: "Fila de pedidos que a Sofia escalou pra humano — reivindique e atenda no chat.",
+  },
+  {
+    href: "/admin/system/operations/central",
+    label: "Central · ATENT 24/7",
+    icon: Headphones,
+    roles: ["super_admin", "operador_central"],
+    group: "system",
+    subgroup: "Atendimento Humano",
+    description: "Operação 24/7: fila cross-tenant priorizada (P1/P2/P3) com SLA e heartbeat de operadores.",
+  },
+  {
+    href: "/admin/system/operations/escalation-contacts",
+    label: "Plantão Técnico · Contatos P1",
+    icon: UserCog,
+    roles: ["super_admin", "admin_tenant"],
+    group: "system",
+    subgroup: "Atendimento Humano",
+    description: "CRUD de quem recebe push WhatsApp em P1 clínico (≠ Escala de Cuidadores).",
   },
   {
     href: "/admin/system/operations/proactive-caller",
@@ -293,15 +345,8 @@ const NAV_ITEMS: NavItem[] = [
     icon: PhoneOutgoing,
     roles: ["super_admin"],
     group: "system",
+    subgroup: "Operações",
     description: "Sofia outbound: chamadas proativas pra check-in de paciente (vê fila + executa).",
-  },
-  {
-    href: "/admin/system/operations/leads",
-    label: "Leads · Lista (legado)",
-    icon: Sparkles,
-    roles: ["super_admin", "admin_tenant"],
-    group: "system",
-    description: "DEPRECATED: lista antiga de leads comerciais. Substituída por Comercial · Funil.",
   },
   // ─── Phase D Comercial — único item, abre /comercial/funil
   // (com tabs Funil / Agenda / Planos no layout interno)
@@ -311,31 +356,17 @@ const NAV_ITEMS: NavItem[] = [
     icon: KanbanSquare,
     roles: ["super_admin", "admin_tenant", "comercial"],
     group: "system",
+    subgroup: "Operações",
     description: "Funil de vendas ConnectaIACare: prospects → demos → propostas → fechamento.",
   },
   {
-    href: "/admin/system/operations/handoff",
-    label: "Handoff · Fila",
-    icon: HeartHandshake,
-    roles: ["super_admin", "admin_tenant", "medico", "enfermeiro"],
-    group: "system",
-    description: "Fila de pedidos que a Sofia escalou pra humano — reivindique e atenda no chat.",
-  },
-  {
-    href: "/admin/system/operations/central",
-    label: "Central · ATENT 24/7",
-    icon: Headphones,
-    roles: ["super_admin", "operador_central"],
-    group: "system",
-    description: "Operação 24/7: fila cross-tenant priorizada (P1/P2/P3) com SLA e heartbeat de operadores.",
-  },
-  {
-    href: "/admin/system/operations/escalation-contacts",
-    label: "Plantão Técnico · Contatos P1",
-    icon: UserCog,
+    href: "/admin/system/operations/leads",
+    label: "Leads · Lista (legado)",
+    icon: Sparkles,
     roles: ["super_admin", "admin_tenant"],
     group: "system",
-    description: "CRUD de quem recebe push WhatsApp em P1 clínico (≠ Escala de Cuidadores).",
+    subgroup: "Operações",
+    description: "DEPRECATED: lista antiga de leads comerciais. Substituída por Comercial · Funil.",
   },
   {
     href: "/admin/system/conversations",
@@ -343,6 +374,7 @@ const NAV_ITEMS: NavItem[] = [
     icon: Phone,
     roles: ["super_admin", "admin_tenant"],
     group: "system",
+    subgroup: "Análise",
     description: "Replay de conversas Sofia para auditoria LGPD e análise de qualidade (filtro tenant/paciente/período).",
   },
 ];
@@ -431,12 +463,25 @@ function Group({
   );
 }
 
+/**
+ * NavGroup — renderiza items intercalando separadores quando o
+ * subgroup muda em relação ao item anterior.
+ *
+ * Items sem subgroup (ex: grupo "main") renderizam sem header,
+ * preservando comportamento anterior.
+ *
+ * Longest-prefix-wins pro active state: /alertas não fica ativo
+ * quando o pathname é /alertas/clinicos (cada item compete pelo
+ * match mais específico).
+ */
 function NavGroup({ items, pathname }: { items: NavItem[]; pathname: string }) {
   return (
     <ul className="space-y-0.5">
-      {items.map((item) => {
+      {items.map((item, idx) => {
+        const prevSubgroup = idx > 0 ? items[idx - 1].subgroup : undefined;
+        const showSubHeader =
+          item.subgroup && item.subgroup !== prevSubgroup;
         const Icon = item.icon;
-        // Longest-prefix-wins: /alertas não fica ativo em /alertas/clinicos
         const isPrefix =
           pathname === item.href || pathname.startsWith(item.href + "/");
         const hasMoreSpecific = items.some(
@@ -448,6 +493,7 @@ function NavGroup({ items, pathname }: { items: NavItem[]; pathname: string }) {
         );
         const active =
           item.href === "/" ? pathname === "/" : isPrefix && !hasMoreSpecific;
+
         const linkEl = (
           <Link
             href={item.href}
@@ -476,27 +522,40 @@ function NavGroup({ items, pathname }: { items: NavItem[]; pathname: string }) {
           </Link>
         );
 
+        const itemEl = item.description ? (
+          <Tooltip
+            content={
+              <div className="space-y-0.5">
+                <div className="font-semibold text-foreground">{item.label}</div>
+                <div className="text-muted-foreground">{item.description}</div>
+              </div>
+            }
+            side="right"
+            sideOffset={10}
+            delayMs={250}
+            maxWidth="280px"
+          >
+            {linkEl}
+          </Tooltip>
+        ) : (
+          linkEl
+        );
+
         return (
-          <li key={item.href}>
-            {item.description ? (
-              <Tooltip
-                content={
-                  <div className="space-y-0.5">
-                    <div className="font-semibold text-foreground">{item.label}</div>
-                    <div className="text-muted-foreground">{item.description}</div>
-                  </div>
-                }
-                side="right"
-                sideOffset={10}
-                delayMs={250}
-                maxWidth="280px"
+          <Fragment key={item.href}>
+            {showSubHeader && (
+              <li
+                aria-hidden
+                className="px-3 pt-3 pb-1 text-[9px] uppercase tracking-[0.16em] text-muted-foreground/40 select-none"
               >
-                {linkEl}
-              </Tooltip>
-            ) : (
-              linkEl
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="inline-block h-px w-3 bg-muted-foreground/20" />
+                  {item.subgroup}
+                </span>
+              </li>
             )}
-          </li>
+            <li>{itemEl}</li>
+          </Fragment>
         );
       })}
     </ul>
