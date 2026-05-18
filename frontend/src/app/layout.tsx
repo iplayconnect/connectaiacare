@@ -3,6 +3,8 @@ import "./globals.css";
 import { AuthProvider } from "@/context/auth-context";
 import { AuthShell } from "@/components/auth-shell";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { ConfirmDialogHost } from "@/components/ui/confirm-dialog";
+import { ToastHost } from "@/components/ui/toast";
 
 export const metadata: Metadata = {
   title: "ConnectaIACare — Cuidado Integrado com IA",
@@ -27,7 +29,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 
         <AuthProvider>
           <TooltipProvider>
-            <AuthShell>{children}</AuthShell>
+            <ConfirmDialogHost>
+              <ToastHost>
+                <AuthShell>{children}</AuthShell>
+              </ToastHost>
+            </ConfirmDialogHost>
           </TooltipProvider>
         </AuthProvider>
       </body>

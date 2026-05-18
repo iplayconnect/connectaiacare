@@ -62,7 +62,11 @@ def _serialize_contact(row: dict) -> dict:
     if not row:
         return None
     out = dict(row)
-    for k in ("created_at", "updated_at", "deactivated_at"):
+    # Timestamps (incluindo last_p1_received_at da migration 081)
+    for k in (
+        "created_at", "updated_at", "deactivated_at",
+        "last_p1_received_at",
+    ):
         v = out.get(k)
         if v and hasattr(v, "isoformat"):
             out[k] = v.isoformat()
@@ -72,6 +76,8 @@ def _serialize_contact(row: dict) -> dict:
             out[k] = v.isoformat()
     if out.get("id"):
         out["id"] = str(out["id"])
+    if out.get("last_p1_handoff_id"):
+        out["last_p1_handoff_id"] = str(out["last_p1_handoff_id"])
     return out
 
 

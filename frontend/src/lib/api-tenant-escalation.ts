@@ -46,6 +46,10 @@ export interface EscalationContact {
   updated_by_user_id: string | null;
   deactivated_at: string | null;
   deactivated_by_user_id: string | null;
+  // Migration 081: tracking de "sinal de vida" do contato
+  last_p1_received_at: string | null;
+  last_p1_handoff_id: string | null;
+  total_p1_received: number;
 }
 
 export interface CreateEscalationContactPayload {
@@ -125,6 +129,30 @@ export function maskPhoneInput(raw: string): string {
   if (d.length <= 4) return `${d.slice(0, 2)} (${d.slice(2)}`;
   if (d.length <= 9) return `${d.slice(0, 2)} (${d.slice(2, 4)}) ${d.slice(4)}`;
   return `${d.slice(0, 2)} (${d.slice(2, 4)}) ${d.slice(4, 9)}-${d.slice(9)}`;
+}
+
+/**
+ * "Há 2 min", "Há 3h", "Há 4d", "Há 2 sem". Pra last_p1_received_at.
+ * Retorna null se input null/undefined.
+ */
+export function relativeTimeBR(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  const then = new Date(iso).getTime();
+  const now = Date.now();
+  const seconds = Math.max(0, Math.floor((now - then) / 1000));
+  if (seconds < 60) return "agora";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `há ${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `há ${hours}h`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `há ${days}d`;
+  const weeks = Math.floor(days / 7);
+  if (weeks < 5) return `há ${weeks} sem`;
+  const months = Math.floor(days / 30);
+  if (months < 12) return `há ${months} m`;
+  const years = Math.floor(days / 365);
+  return `há ${years}a`;
 }
 
 const WEEKDAY_SHORT = ["", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"];
