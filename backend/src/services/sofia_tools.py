@@ -825,6 +825,31 @@ def escalate_to_human_clinical(
                                     "urgency": "P1",
                                 },
                             })
+                            # Atualiza last_p1_received_at + total_p1
+                            # do contato pra dashboard de saúde do
+                            # plantão (migration 081). Idempotente:
+                            # se o mesmo handoff dispara 2x, contador
+                            # incrementa 2x mas timestamp é sempre o
+                            # último — comportamento correto.
+                            try:
+                                db.execute(
+                                    """UPDATE aia_health_tenant_escalation_contacts
+                                          SET last_p1_received_at = NOW(),
+                                              last_p1_handoff_id = %s,
+                                              total_p1_received = total_p1_received + 1
+                                        WHERE tenant_id = %s
+                                          AND phone = %s
+                                          AND active = TRUE""",
+                                    (handoff_id, tenant_id, admin_phone),
+                                )
+                            except Exception as inner_exc:
+                                # Best-effort — log mas não bloqueia
+                                # o envio do push (que é mais crítico)
+                                logger.warning(
+                                    "escalation_contact_last_push_update_failed",
+                                    admin_phone_suffix=admin_phone[-4:],
+                                    error=str(inner_exc)[:200],
+                                )
                         except Exception as exc:
                             logger.warning(
                                 "p1_escalation_push_failed",

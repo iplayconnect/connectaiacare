@@ -39,6 +39,7 @@ import {
   ESCALATION_ROLE_LABEL,
   formatPhoneBR,
   maskPhoneInput,
+  relativeTimeBR,
   tenantEscalationApi,
   type CreateEscalationContactPayload,
   type EscalationContact,
@@ -329,7 +330,7 @@ function ContactRow({
               />
             </span>
           </div>
-          <div className="flex items-center gap-1.5 mt-2">
+          <div className="flex items-center gap-1.5 mt-2 flex-wrap">
             {contact.priorities.map((p) => (
               <span
                 key={p}
@@ -338,6 +339,13 @@ function ContactRow({
                 {PRIORITY_LABEL[p].label}
               </span>
             ))}
+            {/* Última atividade — sinal de vida do contato.
+                Verde se recebeu nas últimas 24h, amarelo se 1-7 dias,
+                cinza se >7 dias ou nunca. */}
+            <LastActivityBadge
+              lastReceivedAt={contact.last_p1_received_at}
+              totalReceived={contact.total_p1_received}
+            />
           </div>
           {contact.notes && (
             <div className="mt-2 text-[11px] text-muted-foreground italic">
@@ -359,6 +367,47 @@ function ContactRow({
         </button>
       </div>
     </div>
+  );
+}
+
+function LastActivityBadge({
+  lastReceivedAt,
+  totalReceived,
+}: {
+  lastReceivedAt: string | null;
+  totalReceived: number;
+}) {
+  const rel = relativeTimeBR(lastReceivedAt);
+
+  // Nunca recebeu push P1: badge cinza
+  if (!lastReceivedAt) {
+    return (
+      <span
+        className="text-[10px] px-1.5 py-0.5 rounded border border-white/[0.05] bg-white/[0.02] text-muted-foreground/70"
+        title="Esse contato ainda não recebeu nenhum push P1."
+      >
+        Sem atividade
+      </span>
+    );
+  }
+
+  // Cor baseada em frescor (verde <24h, amarelo 1-7d, cinza >7d)
+  const ageHours =
+    (Date.now() - new Date(lastReceivedAt).getTime()) / 1_000 / 3_600;
+  const color =
+    ageHours < 24
+      ? "border-classification-routine/40 bg-classification-routine/10 text-classification-routine"
+      : ageHours < 168 // 7 dias
+      ? "border-classification-attention/30 bg-classification-attention/10 text-classification-attention"
+      : "border-white/[0.06] bg-white/[0.02] text-muted-foreground";
+
+  return (
+    <span
+      className={`text-[10px] px-1.5 py-0.5 rounded border ${color}`}
+      title={`Último push P1: ${new Date(lastReceivedAt).toLocaleString("pt-BR")}\nTotal de P1s recebidos: ${totalReceived}`}
+    >
+      Último P1: {rel} · {totalReceived}×
+    </span>
   );
 }
 
