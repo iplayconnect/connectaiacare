@@ -67,7 +67,61 @@ export type UpdateEscalationContactPayload = Partial<
   CreateEscalationContactPayload & { active: boolean }
 >;
 
+export interface EscalationHealthSummary {
+  active_contacts: number;
+  p1_subscribers: number;
+  total_p1_pushed: number;
+  contacts_never_received: number;
+  contacts_stale_30d: number;
+}
+
+export interface EscalationHealthByContact {
+  id: string;
+  contact_name: string;
+  role: EscalationRole;
+  phone: string;
+  total_p1_received: number;
+  last_p1_received_at: string | null;
+  active: boolean;
+}
+
+export interface EscalationHealthSLA {
+  total_p1: number;
+  claimed_under_sla: number;
+  /** % de P1s reivindicados em < 5min. null se total_p1 = 0. */
+  sla_pct: number | null;
+  /** Segundos médios entre criação e claim. null se nenhum claim. */
+  avg_claim_seconds: number | null;
+}
+
+export interface EscalationHealthDaily {
+  day: string;
+  n: number;
+}
+
+export interface EscalationStaleContact {
+  id: string;
+  contact_name: string;
+  role: EscalationRole;
+  last_p1_received_at: string | null;
+}
+
+export interface EscalationHealthResponse {
+  status: "ok";
+  tenant_id: string;
+  summary: EscalationHealthSummary;
+  by_contact: EscalationHealthByContact[];
+  sla_7d: EscalationHealthSLA;
+  p1_volume_7d: EscalationHealthDaily[];
+  stale_contacts: EscalationStaleContact[];
+}
+
 export const tenantEscalationApi = {
+  health: (tenantId: string) =>
+    api.request<EscalationHealthResponse>(
+      `/api/admin/tenants/${tenantId}/escalation-contacts/health`,
+    ),
+
   list: (tenantId: string, opts?: { include_inactive?: boolean }) => {
     const qs = opts?.include_inactive ? "?include_inactive=true" : "";
     return api.request<{

@@ -33,6 +33,7 @@ import {
 import { useAuth } from "@/context/auth-context";
 import { hasRole } from "@/lib/permissions";
 import { ScheduleBadge } from "@/components/escalation/schedule-badge";
+import { EscalationHealthDashboard } from "@/components/escalation/health-dashboard";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { useToast } from "@/components/ui/toast";
 import {
@@ -79,6 +80,7 @@ export default function EscalationContactsPage() {
   const [error, setError] = useState<string | null>(null);
   const [includeInactive, setIncludeInactive] = useState(false);
   const [showForm, setShowForm] = useState(false);
+  const [tab, setTab] = useState<"contacts" | "health">("contacts");
 
   const load = useCallback(
     async (silent = false) => {
@@ -197,47 +199,63 @@ export default function EscalationContactsPage() {
         </div>
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-3 gap-3">
-        <Stat label="Contatos ativos" value={activeCount} icon={CheckCircle2} accent="text-accent-cyan" />
-        <Stat label="Recebem P1" value={p1Count} icon={AlertCircle} accent="text-classification-critical" />
-        <Stat label="Total cadastrados" value={contacts.length} icon={User} accent="text-muted-foreground" />
+      {/* Tabs */}
+      <div className="flex items-center gap-1 border-b border-white/[0.06]">
+        <TabButton active={tab === "contacts"} onClick={() => setTab("contacts")}>
+          Contatos
+        </TabButton>
+        <TabButton active={tab === "health"} onClick={() => setTab("health")}>
+          Saúde do Plantão
+        </TabButton>
       </div>
 
-      {/* Filtros */}
-      <div className="flex items-center gap-3 text-xs">
-        <label className="flex items-center gap-1.5 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={includeInactive}
-            onChange={(e) => setIncludeInactive(e.target.checked)}
-            className="accent-accent-cyan"
-          />
-          <span>Mostrar histórico (inativos)</span>
-        </label>
-      </div>
+      {tab === "contacts" ? (
+        <>
+          {/* Stats */}
+          <div className="grid grid-cols-3 gap-3">
+            <Stat label="Contatos ativos" value={activeCount} icon={CheckCircle2} accent="text-accent-cyan" />
+            <Stat label="Recebem P1" value={p1Count} icon={AlertCircle} accent="text-classification-critical" />
+            <Stat label="Total cadastrados" value={contacts.length} icon={User} accent="text-muted-foreground" />
+          </div>
 
-      {/* Lista */}
-      {loading ? (
-        <div className="flex items-center justify-center py-16 text-muted-foreground">
-          <Loader2 className="h-4 w-4 animate-spin mr-2" /> Carregando…
-        </div>
-      ) : error ? (
-        <div className="rounded-lg border border-classification-attention/20 bg-classification-attention/5 p-3 text-xs text-classification-attention">
-          {error}
-        </div>
-      ) : contacts.length === 0 ? (
-        <EmptyState onAdd={() => setShowForm(true)} />
+          {/* Filtros */}
+          <div className="flex items-center gap-3 text-xs">
+            <label className="flex items-center gap-1.5 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={includeInactive}
+                onChange={(e) => setIncludeInactive(e.target.checked)}
+                className="accent-accent-cyan"
+              />
+              <span>Mostrar histórico (inativos)</span>
+            </label>
+          </div>
+
+          {/* Lista */}
+          {loading ? (
+            <div className="flex items-center justify-center py-16 text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin mr-2" /> Carregando…
+            </div>
+          ) : error ? (
+            <div className="rounded-lg border border-classification-attention/20 bg-classification-attention/5 p-3 text-xs text-classification-attention">
+              {error}
+            </div>
+          ) : contacts.length === 0 ? (
+            <EmptyState onAdd={() => setShowForm(true)} />
+          ) : (
+            <div className="space-y-2">
+              {contacts.map((c) => (
+                <ContactRow
+                  key={c.id}
+                  contact={c}
+                  onToggleActive={() => handleToggleActive(c)}
+                />
+              ))}
+            </div>
+          )}
+        </>
       ) : (
-        <div className="space-y-2">
-          {contacts.map((c) => (
-            <ContactRow
-              key={c.id}
-              contact={c}
-              onToggleActive={() => handleToggleActive(c)}
-            />
-          ))}
-        </div>
+        <EscalationHealthDashboard tenantId={tenantId} />
       )}
 
       {/* Aviso compatibilidade */}
@@ -367,6 +385,31 @@ function ContactRow({
         </button>
       </div>
     </div>
+  );
+}
+
+function TabButton({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={[
+        "px-4 py-2 text-sm font-medium transition border-b-2 -mb-px",
+        active
+          ? "text-accent-cyan border-accent-cyan"
+          : "text-muted-foreground border-transparent hover:text-foreground",
+      ].join(" ")}
+    >
+      {children}
+    </button>
   );
 }
 
