@@ -20,6 +20,8 @@ import {
 import { useAuth } from "@/context/auth-context";
 import { hasRole } from "@/lib/permissions";
 import { api, type PatientRiskRow, type PatientBaseline, ApiError } from "@/lib/api";
+import { useConfirm } from "@/components/ui/confirm-dialog";
+import { useToast } from "@/components/ui/toast";
 
 // ═══════════════════════════════════════════════════════════════════
 // /admin/system/health/risk-score — Dashboard de risco por paciente.
@@ -47,6 +49,8 @@ const LEVEL_LABELS: Record<Level, string> = {
 
 export default function RiskScorePage() {
   const { user } = useAuth();
+  const confirm = useConfirm();
+  const toast = useToast();
   const [items, setItems] = useState<PatientRiskRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [recomputing, setRecomputing] = useState(false);
@@ -95,38 +99,43 @@ export default function RiskScorePage() {
   }, [allowed, load]);
 
   async function recomputeAll() {
-    if (!confirm("Recalcular score de TODOS os pacientes ativos? Demora ~30s.")) return;
+    const ok = await confirm({
+      title: "Recalcular score de todos os pacientes?",
+      description: "Vai processar TODOS os pacientes ativos. Demora ~30s.",
+      confirmLabel: "Recalcular",
+    });
+    if (!ok) return;
     setRecomputing(true);
     try {
       const r = await api.riskScoreRecomputeAll();
       setByLevel(r.by_level);
       await load();
+      toast.success("Scores recalculados.");
     } catch (e) {
-      alert(`Falhou: ${e instanceof Error ? e.message : "erro"}`);
+      toast.error(`Falhou: ${e instanceof Error ? e.message : "erro"}`);
     } finally {
       setRecomputing(false);
     }
   }
 
   async function recomputeAllBaselines() {
-    if (
-      !confirm(
-        "Recomputar baseline individual de todos os pacientes? " +
-          "Lê 60d de histórico por paciente. Demora ~1min.",
-      )
-    )
-      return;
+    const ok = await confirm({
+      title: "Recomputar baseline individual de todos os pacientes?",
+      description: "Lê 60d de histórico por paciente. Demora ~1min. Vai recomputar os scores em seguida.",
+      confirmLabel: "Recomputar baselines",
+    });
+    if (!ok) return;
     setRecomputingBaselines(true);
     try {
       const r = await api.riskBaselineRecomputeAll();
-      alert(
+      toast.success(
         `Baselines computados: ${r.processed} pacientes, ${r.with_sufficient_data} com dados suficientes (≥4 semanas).`,
       );
       // Após baseline, recompute scores pra atualizar deviation_score
       await api.riskScoreRecomputeAll();
       await load();
     } catch (e) {
-      alert(`Falhou: ${e instanceof Error ? e.message : "erro"}`);
+      toast.error(`Falhou: ${e instanceof Error ? e.message : "erro"}`);
     } finally {
       setRecomputingBaselines(false);
     }
@@ -363,13 +372,13 @@ export default function RiskScorePage() {
           onRecompute={async () => {
             try {
               const r = await api.riskScoreCompute(activeRow.patient_id);
-              alert(
-                `Recalculado: score ${r.score} (${r.level}). Atualize a lista.`,
+              toast.success(
+                `Recalculado: score ${r.score} (${r.level}).`,
               );
               setActiveRow(null);
               await load();
             } catch (e) {
-              alert(`Falhou: ${e instanceof Error ? e.message : "erro"}`);
+              toast.error(`Falhou: ${e instanceof Error ? e.message : "erro"}`);
             }
           }}
         />
@@ -498,6 +507,7 @@ function BreakdownDrawer({
   const [baseline, setBaseline] = useState<PatientBaseline | null>(null);
   const [baselineLoading, setBaselineLoading] = useState(false);
   const [baselineComputing, setBaselineComputing] = useState(false);
+  const toast = useToast();
 
   useEffect(() => {
     setBaselineLoading(true);
@@ -519,11 +529,11 @@ function BreakdownDrawer({
       if (r.has_baseline && r.baseline) setBaseline(r.baseline);
       // Reroda score pra atualizar deviation
       await api.riskScoreCompute(row.patient_id);
-      alert(
-        "Baseline computado. Feche e abra o drawer pra ver os desvios atualizados.",
+      toast.success(
+        "Baseline computado. Feche e reabra o drawer pra ver desvios atualizados.",
       );
     } catch (e) {
-      alert(`Falhou: ${e instanceof Error ? e.message : "erro"}`);
+      toast.error(`Falhou: ${e instanceof Error ? e.message : "erro"}`);
     } finally {
       setBaselineComputing(false);
     }

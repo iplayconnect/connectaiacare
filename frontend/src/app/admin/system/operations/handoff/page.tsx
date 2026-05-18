@@ -19,6 +19,7 @@ import {
 import { useAuth } from "@/context/auth-context";
 import { hasRole } from "@/lib/permissions";
 import { api } from "@/lib/api";
+import { useToast } from "@/components/ui/toast";
 
 interface Handoff {
   id: string;
@@ -54,6 +55,7 @@ const STATUS_COLORS: Record<string, string> = {
 
 export default function HandoffQueuePage() {
   const { user } = useAuth();
+  const toast = useToast();
   const router = useRouter();
   const allowed = hasRole(user, "super_admin", "admin_tenant", "medico", "enfermeiro");
 
@@ -140,7 +142,7 @@ export default function HandoffQueuePage() {
       // do CRM ConnectaIA.
       router.push(`/admin/system/operations/handoff/${id}/chat`);
     } catch (e) {
-      alert(e instanceof Error ? e.message : "erro");
+      toast.error(e instanceof Error ? e.message : "erro");
       setBusyId(null);
     }
   };
@@ -162,7 +164,7 @@ export default function HandoffQueuePage() {
       setResolveSummary("");
       load();
     } catch (e) {
-      alert(e instanceof Error ? e.message : "erro");
+      toast.error(e instanceof Error ? e.message : "erro");
     } finally {
       setBusyId(null);
     }

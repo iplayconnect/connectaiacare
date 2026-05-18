@@ -21,6 +21,7 @@ import { useAuth } from "@/context/auth-context";
 import { hasRole } from "@/lib/permissions";
 import { api } from "@/lib/api";
 import { formatDateTime } from "@/lib/utils";
+import { useToast } from "@/components/ui/toast";
 
 interface Tenant {
   id: string;
@@ -53,6 +54,7 @@ export default function TenantDetailPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const { user } = useAuth();
+  const toast = useToast();
   const tenantId = params?.id || "";
 
   const [tenant, setTenant] = useState<Tenant | null>(null);
@@ -120,7 +122,7 @@ export default function TenantDetailPage() {
       });
       await load();
     } catch (e) {
-      alert(e instanceof Error ? e.message : "Erro salvando");
+      toast.error(e instanceof Error ? e.message : "Erro salvando");
     } finally {
       setSaving(false);
     }
@@ -139,7 +141,7 @@ export default function TenantDetailPage() {
       });
       await load();
     } catch (e) {
-      alert(e instanceof Error ? e.message : "Erro");
+      toast.error(e instanceof Error ? e.message : "Erro");
     }
   };
 
