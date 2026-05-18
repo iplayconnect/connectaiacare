@@ -293,3 +293,148 @@ def delete_contact(tenant_id: str, contact_id: str):
         resource_id=contact_id,
     )
     return jsonify({"status": "ok"})
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Dashboard de saúde do plantão (Opção H)
+# ═══════════════════════════════════════════════════════════════════
+
+@bp.get("/api/admin/tenants/<tenant_id>/escalation-contacts/health")
+@require_role("super_admin", "admin_tenant")
+def escalation_health(tenant_id: str):
+    """Métricas agregadas pra o painel de saúde do plantão.
+
+    Retorna:
+      - summary: totais agregados
+      - by_contact: ranking de contatos por carga e responsividade
+      - sla_7d: % handoffs P1 reivindicados em < 5min últimos 7d
+      - p1_volume_7d: série diária pra mini-gráfico
+      - stale_contacts: contatos ativos sem P1 há > 30d (alerta)
+
+    Acesso: super_admin (qualquer tenant) ou admin_tenant (próprio).
+    """
+    if not _can_access_tenant(tenant_id):
+        return jsonify({"status": "error", "reason": "forbidden"}), 403
+
+    db = get_postgres()
+
+    # ── Summary agregado ──────────────────────────────────────────
+    summary = db.fetch_one(
+        """SELECT
+            COUNT(*) FILTER (WHERE active = TRUE) AS active_contacts,
+            COUNT(*) FILTER (WHERE active = TRUE AND 'P1' = ANY(priorities)) AS p1_subscribers,
+            SUM(total_p1_received) FILTER (WHERE active = TRUE) AS total_p1_pushed,
+            COUNT(*) FILTER (
+                WHERE active = TRUE
+                  AND last_p1_received_at IS NULL
+            ) AS contacts_never_received,
+            COUNT(*) FILTER (
+                WHERE active = TRUE
+                  AND last_p1_received_at IS NOT NULL
+                  AND last_p1_received_at < NOW() - INTERVAL '30 days'
+            ) AS contacts_stale_30d
+           FROM aia_health_tenant_escalation_contacts
+           WHERE tenant_id = %s""",
+        (tenant_id,),
+    ) or {}
+    # Cast pra int (Postgres pode retornar Decimal em SUM)
+    for k in ("active_contacts", "p1_subscribers", "total_p1_pushed",
+              "contacts_never_received", "contacts_stale_30d"):
+        summary[k] = int(summary.get(k) or 0)
+
+    # ── By contact: ranking de carga ──────────────────────────────
+    by_contact = db.fetch_all(
+        """SELECT id, contact_name, role, phone,
+                  total_p1_received,
+                  last_p1_received_at,
+                  active
+           FROM aia_health_tenant_escalation_contacts
+           WHERE tenant_id = %s
+             AND active = TRUE
+           ORDER BY total_p1_received DESC, last_p1_received_at DESC NULLS LAST
+           LIMIT 20""",
+        (tenant_id,),
+    )
+    for r in by_contact:
+        r["id"] = str(r["id"])
+        r["total_p1_received"] = int(r.get("total_p1_received") or 0)
+        if r.get("last_p1_received_at") and hasattr(r["last_p1_received_at"], "isoformat"):
+            r["last_p1_received_at"] = r["last_p1_received_at"].isoformat()
+
+    # ── SLA 7d: % handoffs P1 reivindicados em < 5min ────────────
+    sla = db.fetch_one(
+        """SELECT
+            COUNT(*) AS total_p1,
+            COUNT(*) FILTER (
+                WHERE claimed_at IS NOT NULL
+                  AND EXTRACT(EPOCH FROM (claimed_at - created_at)) < 300
+            ) AS claimed_under_sla,
+            AVG(EXTRACT(EPOCH FROM (claimed_at - created_at)))
+                FILTER (WHERE claimed_at IS NOT NULL) AS avg_claim_seconds
+           FROM aia_health_human_handoff_queue
+           WHERE tenant_id = %s
+             AND priority = 'P1'
+             AND created_at >= NOW() - INTERVAL '7 days'""",
+        (tenant_id,),
+    ) or {}
+    total_p1 = int(sla.get("total_p1") or 0)
+    claimed_ok = int(sla.get("claimed_under_sla") or 0)
+    sla_pct = (claimed_ok * 100.0 / total_p1) if total_p1 > 0 else None
+    avg_seconds = sla.get("avg_claim_seconds")
+    if avg_seconds is not None:
+        avg_seconds = float(avg_seconds)
+    sla_7d = {
+        "total_p1": total_p1,
+        "claimed_under_sla": claimed_ok,
+        "sla_pct": round(sla_pct, 1) if sla_pct is not None else None,
+        "avg_claim_seconds": round(avg_seconds, 1) if avg_seconds is not None else None,
+    }
+
+    # ── Volume diário últimos 7 dias ──────────────────────────────
+    volume_rows = db.fetch_all(
+        """SELECT DATE_TRUNC('day', created_at)::date AS day,
+                  COUNT(*) AS n
+           FROM aia_health_human_handoff_queue
+           WHERE tenant_id = %s
+             AND priority = 'P1'
+             AND created_at >= NOW() - INTERVAL '7 days'
+           GROUP BY 1
+           ORDER BY 1""",
+        (tenant_id,),
+    )
+    p1_volume_7d = [
+        {
+            "day": r["day"].isoformat() if hasattr(r["day"], "isoformat") else r["day"],
+            "n": int(r.get("n") or 0),
+        }
+        for r in volume_rows
+    ]
+
+    # ── Contatos stale (alerta) ───────────────────────────────────
+    stale_contacts = db.fetch_all(
+        """SELECT id, contact_name, role, last_p1_received_at
+           FROM aia_health_tenant_escalation_contacts
+           WHERE tenant_id = %s
+             AND active = TRUE
+             AND (
+               last_p1_received_at IS NULL
+               OR last_p1_received_at < NOW() - INTERVAL '30 days'
+             )
+           ORDER BY last_p1_received_at NULLS FIRST
+           LIMIT 10""",
+        (tenant_id,),
+    )
+    for r in stale_contacts:
+        r["id"] = str(r["id"])
+        if r.get("last_p1_received_at") and hasattr(r["last_p1_received_at"], "isoformat"):
+            r["last_p1_received_at"] = r["last_p1_received_at"].isoformat()
+
+    return jsonify({
+        "status": "ok",
+        "tenant_id": tenant_id,
+        "summary": summary,
+        "by_contact": by_contact,
+        "sla_7d": sla_7d,
+        "p1_volume_7d": p1_volume_7d,
+        "stale_contacts": stale_contacts,
+    })
