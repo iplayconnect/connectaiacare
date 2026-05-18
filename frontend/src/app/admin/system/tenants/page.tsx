@@ -19,6 +19,7 @@ import { useAuth } from "@/context/auth-context";
 import { hasRole } from "@/lib/permissions";
 import { api } from "@/lib/api";
 import { formatDateTime } from "@/lib/utils";
+import { useToast } from "@/components/ui/toast";
 
 interface Tenant {
   id: string;
@@ -38,6 +39,7 @@ interface Tenant {
 
 export default function TenantsPage() {
   const { user } = useAuth();
+  const toast = useToast();
   const [tenants, setTenants] = useState<Tenant[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -87,7 +89,7 @@ export default function TenantsPage() {
       setNewAiName("Sofia");
       await load();
     } catch (e) {
-      alert(e instanceof Error ? e.message : "Erro ao criar tenant");
+      toast.error(e instanceof Error ? e.message : "Erro ao criar tenant");
     } finally {
       setCreating(false);
     }

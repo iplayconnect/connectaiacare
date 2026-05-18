@@ -17,6 +17,7 @@ import { useAuth } from "@/context/auth-context";
 import { api, type ProfileRecord } from "@/lib/api";
 import type { AuthUser, Role } from "@/lib/auth";
 import { ROLE_LABEL, hasRole } from "@/lib/permissions";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 
 // ═══════════════════════════════════════════════════════════════
 // /admin/usuarios — admin lista, cria, edita, desativa usuários
@@ -34,6 +35,7 @@ const ROLES: Role[] = [
 
 export default function AdminUsuariosPage() {
   const { user } = useAuth();
+  const confirm = useConfirm();
   const [users, setUsers] = useState<AuthUser[]>([]);
   const [profiles, setProfiles] = useState<ProfileRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -217,7 +219,13 @@ export default function AdminUsuariosPage() {
                       {(u as any).active !== false && u.id !== user?.id && (
                         <button
                           onClick={async () => {
-                            if (!confirm(`Desativar ${u.fullName}?`)) return;
+                            const ok = await confirm({
+                              title: `Desativar ${u.fullName}?`,
+                              description: "Usuário perde acesso ao painel. Histórico preservado.",
+                              confirmLabel: "Desativar",
+                              variant: "destructive",
+                            });
+                            if (!ok) return;
                             await api.deleteUser(u.id);
                             reload();
                           }}
