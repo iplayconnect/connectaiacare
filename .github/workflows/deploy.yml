@@ -1,0 +1,112 @@
+name: Deploy production
+
+# Dispara automaticamente toda vez que algo entra em main que afeta
+# código de aplicação (backend, frontend, sofia-service, voice-call,
+# livekit-agent, docker-compose ou scripts de deploy). Mudanças que
+# tocam apenas docs/, .github/, ou arquivos puramente de configuração
+# de IDE NÃO disparam — economiza minutos do runner.
+#
+# Pré-requisito: dois secrets configurados em
+# https://github.com/iplayconnect/connectaiacare/settings/secrets/actions
+#
+#   VPS_SSH_PRIVATE_KEY  -> chave privada (ed25519 ou rsa) com acesso
+#                           a root@72.60.242.245. Pode ser uma deploy
+#                           key dedicada (recomendado) ou a mesma que
+#                           você já usa pessoalmente.
+#   VPS_HOST_FINGERPRINT -> output de `ssh-keyscan -t ed25519 72.60.242.245`
+#                           (uma linha começando com 72.60.242.245)
+#
+# Para revogar: remova os secrets OU remova a chave do
+# /root/.ssh/authorized_keys na VPS.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'backend/**'
+      - 'frontend/**'
+      - 'sofia-service/**'
+      - 'voice-call-service/**'
+      - 'livekit-agent-service/**'
+      - 'docker-compose.yml'
+      - 'scripts/deploy.sh'
+      - '.github/workflows/deploy.yml'
+  workflow_dispatch:
+    # Permite disparo manual via UI do GitHub (botão "Run workflow").
+    # Útil pra forçar redeploy sem fazer novo commit.
+
+concurrency:
+  # Cancela deploys em fila se um novo commit chegar — evita duplicar
+  # rebuild quando vários PRs mergeam em sequência rápida.
+  group: production-deploy
+  cancel-in-progress: false  # Não cancela deploy em andamento (deixa terminar)
+
+jobs:
+  deploy:
+    name: SSH + deploy.sh
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout (precisa pra `paths` filter funcionar bem)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup SSH agent
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.VPS_SSH_PRIVATE_KEY }}
+
+      - name: Add VPS host fingerprint to known_hosts
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VPS_HOST_FINGERPRINT }}" >> ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Run deploy.sh na VPS
+        env:
+          VPS_USER: root
+          VPS_HOST: 72.60.242.245
+          PROJECT_DIR: /root/connectaiacare
+        run: |
+          ssh -o ConnectTimeout=15 -o ServerAliveInterval=30 \
+              "$VPS_USER@$VPS_HOST" \
+              "cd $PROJECT_DIR && bash scripts/deploy.sh"
+
+      - name: Validar health endpoint após deploy
+        run: |
+          # Espera até 60s pela API responder ok depois do restart.
+          for i in {1..30}; do
+            if curl -fsS --max-time 5 https://demo.connectaia.com.br/health \
+                 | grep -q '"status":"ok"'; then
+              echo "Health OK após $((i*2))s"
+              exit 0
+            fi
+            echo "Aguardando API subir... ($i/30)"
+            sleep 2
+          done
+          echo "API não respondeu ok em 60s — investigar logs em produção"
+          exit 1
+
+      - name: Sanity check de versão (workers compartilham build com api)
+        env:
+          VPS_USER: root
+          VPS_HOST: 72.60.242.245
+        run: |
+          # Garante que workers não ficaram com imagem antiga
+          # (pegadinha histórica do PR #85 — ver docs/DEPLOY.md).
+          ssh "$VPS_USER@$VPS_HOST" \
+            "docker inspect connectaiacare-api --format '{{.Created}}' && \
+             docker inspect connectaiacare-sofia-inbound-worker-1 --format '{{.Created}}' && \
+             docker inspect connectaiacare-delivery-worker-1 --format '{{.Created}}'"
+
+      - name: Notificar sucesso (commit status)
+        if: success()
+        run: echo "✅ Deploy concluído com sucesso em https://demo.connectaia.com.br/"
+
+      - name: Notificar falha
+        if: failure()
+        run: |
+          echo "❌ Deploy falhou. Verificar logs:"
+          echo "  ssh root@72.60.242.245 'docker logs --tail 50 connectaiacare-api'"
