@@ -41,7 +41,7 @@ const SERVICE_META: Record<string, { label: string; icon: React.ElementType }> =
   redis: { label: "Redis", icon: Zap },
   voice_call: { label: "Voice Call Service", icon: PhoneCall },
   sofia_service: { label: "Sofia Service", icon: Brain },
-  tecnosenior_local: { label: "Tecnosenior Sync (24h)", icon: Stethoscope },
+  tecnosenior_local: { label: "Parceiro CareNote Sync (24h)", icon: Stethoscope },
   voice_provider_quota: { label: "xAI Voice Quota", icon: Activity },
 };
 

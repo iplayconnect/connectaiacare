@@ -291,7 +291,7 @@ const NAV_ITEMS: NavItem[] = [
     roles: ["super_admin"],
     group: "system",
     subgroup: "Plataforma",
-    description: "Provisioning SaaS: criar/editar/suspender tenants (ILPI, clínicas, parceiros como Tecnosenior).",
+    description: "Provisioning SaaS: criar/editar/suspender tenants (ILPI, clínicas, parceiros integradores externos).",
   },
   {
     href: "/admin/system/health",

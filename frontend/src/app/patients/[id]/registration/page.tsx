@@ -189,11 +189,23 @@ export default function PatientRegistrationWizardPage() {
       .then((data) => {
         if (!alive) return;
         setState(data);
-        // Hidrata forms a partir do que já existe no paciente
-        const p = data.patient;
+        // Hidrata o form de demographics a partir do que ja existe no
+        // paciente — vem do modal de criacao rapida (full_name, nickname,
+        // cpf) ou de sessoes anteriores (birth_date, gender, etc.).
+        // Sem isso o wizard re-pergunta o que o usuario ja informou.
+        const p = data.patient as any;
         setDemographics((d) => ({
           ...d,
           full_name: p.full_name || "",
+          nickname: p.nickname || "",
+          cpf: p.cpf ? formatCpf(p.cpf) : "",
+          birth_date: p.birth_date || "",
+          gender: p.gender || "",
+          preferred_form_of_address: p.preferred_form_of_address || "",
+          is_self_reporting: !!p.is_self_reporting,
+          care_unit: p.care_unit || "",
+          room_number: p.room_number || "",
+          care_level: p.care_level || "",
         }));
         if (p.conditions?.length) setConditions(p.conditions);
         if (p.medications?.length) setMedications(p.medications);
@@ -773,7 +785,7 @@ function Step2Demographics({
     <div className="space-y-4">
       <p className="text-[15px] text-foreground/80">
         Identificação básica. <b>Nome completo</b> é obrigatório;{" "}
-        <b>CPF</b> destrava integrações externas (Tecnosenior, etc.).
+        <b>CPF</b> destrava integrações externas com parceiros.
       </p>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

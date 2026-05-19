@@ -202,8 +202,15 @@ def get_registration_state(patient_id: str):
     """Retorna sessão ativa + completude do paciente.
     Se não houver sessão ativa, retorna o estado atual sem session."""
     db = get_postgres()
+    # Inclui os campos demograficos que ja podem ter sido preenchidos
+    # no modal de criacao rapida (cpf, nickname) ou em sessoes anteriores
+    # (birth_date, gender, care_unit, etc.). Sem eles o wizard re-pergunta
+    # informacao que o usuario ja deu — UX ruim, especialmente CPF.
     patient = db.fetch_one(
-        """SELECT id::text AS id, full_name, conditions, medications,
+        """SELECT id::text AS id, full_name, nickname, cpf,
+                  birth_date, gender, care_unit, room_number, care_level,
+                  preferred_form_of_address,
+                  conditions, medications,
                   allergies, responsible, registration_completeness,
                   active_registration_session_id::text AS active_session_id,
                   last_self_review_at, is_self_reporting
@@ -230,6 +237,17 @@ def get_registration_state(patient_id: str):
         "patient": {
             "id": patient["id"],
             "full_name": patient["full_name"],
+            "nickname": patient.get("nickname"),
+            "cpf": patient.get("cpf"),
+            "birth_date": (
+                patient["birth_date"].isoformat()
+                if patient.get("birth_date") else None
+            ),
+            "gender": patient.get("gender"),
+            "care_unit": patient.get("care_unit"),
+            "room_number": patient.get("room_number"),
+            "care_level": patient.get("care_level"),
+            "preferred_form_of_address": patient.get("preferred_form_of_address"),
             "conditions": normalize_clinical_array(patient["conditions"] or []),
             "medications": normalize_clinical_array(patient["medications"] or []),
             "allergies": normalize_clinical_array(patient["allergies"] or []),

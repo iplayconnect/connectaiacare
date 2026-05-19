@@ -38,7 +38,8 @@ export type ItemSource =
   | "procurador_declared"
   | "manager_declared"
   | "clinician_validated"
-  | "imported_tecnosenior"
+  | "imported_partner"
+  | "imported_tecnosenior"  // legacy: backend ainda emite ate PR chore/remove-partner-references mergear
   | "imported_other";
 
 export interface ClinicalItem {
@@ -66,6 +67,15 @@ export interface PatientRegistrationState {
   patient: {
     id: string;
     full_name: string;
+    /** Pre-preenchidos do modal de criacao rapida ou sessoes anteriores. */
+    nickname?: string | null;
+    cpf?: string | null;
+    birth_date?: string | null;
+    gender?: string | null;
+    care_unit?: string | null;
+    room_number?: string | null;
+    care_level?: string | null;
+    preferred_form_of_address?: string | null;
     conditions: ClinicalItem[];
     medications: ClinicalItem[];
     allergies: ClinicalItem[];
@@ -232,7 +242,8 @@ export const ITEM_SOURCE_LABEL: Record<string, string> = {
   procurador_declared: "Declarado por procurador",
   manager_declared: "Declarado pela equipe",
   clinician_validated: "Validado por clínico",
-  imported_tecnosenior: "Importado (Tecnosenior)",
+  imported_partner: "Importado (parceiro externo)",
+  imported_tecnosenior: "Importado (parceiro externo)",  // legacy
   imported_other: "Importado",
 };
 

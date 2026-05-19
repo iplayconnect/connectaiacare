@@ -26,7 +26,7 @@ import { hasRole } from "@/lib/permissions";
 // /patients/[id]/editar
 //
 // Edição dos campos cadastrais do paciente. Inclui o CPF (campo novo
-// migration 054) que destrava integrações externas (Tecnosenior etc).
+// migration 054) que destrava integrações externas com parceiros.
 //
 // Hoje cobre os campos editáveis em produção. Faltando ainda: edição
 // de medicações ativas (vai pra /admin/governance/clinical-rules) e plantões
@@ -283,7 +283,7 @@ export default function PatientEditPage() {
           </Field>
           <Field
             label="CPF"
-            hint="Identificador estável pra integrações (Tecnosenior, etc.)"
+            hint="Identificador estável pra integrações com parceiros externos"
             icon={IdCard}
           >
             <input
@@ -445,8 +445,8 @@ export default function PatientEditPage() {
       {/* Integração */}
       <Section title="Integrações externas">
         <Field
-          label="Tecnosenior — Patient ID (numérico)"
-          hint="Mapping pra TotalCare. Geralmente preenchido automaticamente após primeiro lookup por CPF/phone."
+          label="Parceiro integrador — Patient ID (numérico)"
+          hint="Mapping pra plataforma do parceiro externo. Geralmente preenchido automaticamente após primeiro lookup por CPF/phone."
         >
           <input
             type="number"
