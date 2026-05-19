@@ -90,7 +90,17 @@ export interface Patient {
   care_unit: string | null;
   room_number: string | null;
   care_level: string | null;
-  conditions: Array<{ code?: string; description: string; severity?: string }>;
+  /** Condicoes podem vir em 2 shapes:
+   *  - Legacy (pre normalize_clinical_array): {description, code, severity}
+   *  - Novo (wizard + normalize): {name, source, declared_at, ...}
+   *  Ambos opcionais pra cobrir o periodo de migracao. UI le c.description
+   *  com fallback pra c.name. */
+  conditions: Array<{
+    code?: string;
+    description?: string;  // legacy
+    name?: string;          // novo (post normalize)
+    severity?: string;
+  }>;
   medications: Array<{ name: string; schedule: string; dose?: string }>;
   allergies: string[];
   responsible: { name?: string; relationship?: string; phone?: string } | null;
@@ -109,7 +119,7 @@ export interface Report {
   patient_room?: string;
   patient_birth_date?: string | null;
   patient_care_unit?: string | null;
-  patient_conditions?: Array<{ code?: string; description: string; severity?: string }>;
+  patient_conditions?: Array<{ code?: string; description?: string; name?: string; severity?: string }>;
   patient_medications?: Array<{ name: string; schedule: string; dose?: string }>;
 
   caregiver_name_claimed: string | null;
@@ -264,7 +274,7 @@ export interface CareEventDetail {
     photo_url: string | null;
     care_unit: string | null;
     room_number: string | null;
-    conditions: Array<{ code?: string; description: string; severity?: string }>;
+    conditions: Array<{ code?: string; description?: string; name?: string; severity?: string }>;
     medications: Array<{ name: string; schedule: string; dose?: string }>;
   } | null;
   timeline: TimelineItem[];
@@ -1714,7 +1724,7 @@ export interface TeleconsultaRecord {
   patient_birth_date: string | null;
   patient_gender: string | null;
   patient_care_level: string | null;
-  patient_conditions: Array<{ code?: string; description: string; severity?: string }> | null;
+  patient_conditions: Array<{ code?: string; description?: string; name?: string; severity?: string }> | null;
   patient_medications: Array<{ name: string; schedule: string; dose?: string }> | null;
   patient_allergies: string[] | null;
   doctor_id: string | null;

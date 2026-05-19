@@ -378,7 +378,7 @@ export default async function EventDetailPage({
                     <ul className="space-y-0.5">
                       {patient.conditions.slice(0, 5).map((c, i) => (
                         <li key={i} className="text-xs">
-                          • {c.description}
+                          • {c.description || c.name}
                           {c.severity && (
                             <span className="text-muted-foreground ml-1">
                               ({c.severity})
