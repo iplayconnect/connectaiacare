@@ -556,7 +556,7 @@ Vai pra `draft`. Marca `under_review` quando quiser que Conselho avalie.
 
 ### LGPD por artigo (resumo)
 
-Implementação no `MANUAL_PLATAFORMA.md §28`. Pontos chave pra você:
+Implementação no [`PLATAFORMA.md §28`](PLATAFORMA.md). Pontos chave pra você:
 
 | Artigo | O que você precisa saber |
 |---|---|

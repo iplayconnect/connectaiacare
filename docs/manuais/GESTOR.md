@@ -833,12 +833,13 @@ Coisa que recomendamos olhar **todo mês**:
 
 ### Documentação
 
-- **Manual completo**: `docs/MANUAL_PLATAFORMA.md` (referência técnica)
-- **Manual do cuidador**: `docs/MANUAL_CUIDADOR.md` (pra distribuir pra equipe)
-- **Manual do familiar**: `docs/MANUAL_FAMILIAR.md`
-- **Manual do idoso (B2C)**: `docs/MANUAL_IDOSO_B2C.md`
-- **Manual médico/enfermeiro**: `docs/MANUAL_MEDICO_ENFERMEIRO.md`
-- **Manual do operador central**: `docs/MANUAL_OPERADOR_CENTRAL.md`
+- **Índice geral**: [`INDICE.md`](INDICE.md) (porta de entrada para todos os manuais)
+- **Manual completo**: [`PLATAFORMA.md`](PLATAFORMA.md) (referência técnica)
+- **Manual do cuidador**: [`CUIDADOR.md`](CUIDADOR.md) (pra distribuir pra equipe)
+- **Manual do familiar**: [`FAMILIAR.md`](FAMILIAR.md)
+- **Manual do idoso (B2C)**: [`IDOSO_B2C.md`](IDOSO_B2C.md)
+- **Manual médico/enfermeiro**: [`MEDICO_ENFERMEIRO.md`](MEDICO_ENFERMEIRO.md)
+- **Manual do operador central**: [`OPERADOR_CENTRAL.md`](OPERADOR_CENTRAL.md)
 
 ---
 
