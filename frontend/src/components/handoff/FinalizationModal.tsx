@@ -249,7 +249,7 @@ export function FinalizationModal({
                       selected ? "opacity-80" : "text-muted-foreground/70",
                     )}
                   >
-                    {c.description}
+                    {c.description || c.name}
                   </div>
                 </button>
               );
