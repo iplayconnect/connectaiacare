@@ -7,7 +7,7 @@
 
 ## Context and Problem Statement
 
-ConnectaIACare tem um único tenant piloto no MVP (`connectaiacare_demo`), mas a estratégia comercial já prevê múltiplos clientes: SPAs da Tecnosenior, clínicas Amparo, hospitais Vita, operadoras de saúde futuras. Precisamos decidir se estruturamos multi-tenancy desde o dia 1 ou adicionamos posteriormente quando houver demanda real.
+ConnectaIACare tem um único tenant piloto no MVP (`connectaiacare_demo`), mas a estratégia comercial já prevê múltiplos clientes: SPAs da parceiro integrador, clínicas parceiro de atenção primária, hospitais Vita, operadoras de saúde futuras. Precisamos decidir se estruturamos multi-tenancy desde o dia 1 ou adicionamos posteriormente quando houver demanda real.
 
 ## Decision Drivers
 

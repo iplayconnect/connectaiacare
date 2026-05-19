@@ -2,7 +2,7 @@
 
 > Status: **Draft — pós-benchmark preliminar 2026-04-24**
 > Autores: Alexandre + Coder (pós-análise Opus Chat)
-> Contexto: pitch 28/04 com Tecnosenior + roadmap Q2-Q3 otimização custos voz
+> Contexto: pitch 28/04 com parceiro integrador + roadmap Q2-Q3 otimização custos voz
 
 ---
 

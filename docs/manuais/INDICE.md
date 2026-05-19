@@ -52,7 +52,7 @@ Tom clínico-técnico. Como funciona a triagem da Sofia, validação farmacológ
 ### 🏥 Sou gestora ou gestor (clínica, ILPI, home care, operadora)
 **→ [GESTOR.md](GESTOR.md)**
 
-Onboarding do tenant (7 dias). Cadastro de equipe. Configuração da Sofia. Importação de pacientes em escala. Plantão P1/P2/P3. Dashboards. Saúde do plantão. Métricas de SLA. Audit log e LGPD. Faturamento. Integrações (Tecnosenior CareNote, FHIR). Playbook quando algo dá errado.
+Onboarding do tenant (7 dias). Cadastro de equipe. Configuração da Sofia. Importação de pacientes em escala. Plantão P1/P2/P3. Dashboards. Saúde do plantão. Métricas de SLA. Audit log e LGPD. Faturamento. Integrações (Parceiro CareNote, FHIR). Playbook quando algo dá errado.
 
 **Tempo de leitura:** 60 minutos. Tem checklist mensal e contatos.
 
@@ -165,7 +165,7 @@ Toda mudança em manual passa por:
 
 Versões 1.x dos manuais traz:
 
-- **PARCEIRO_INTEGRADOR** — para empresas que vão integrar via FHIR/API (parceiros como Tecnosenior, MedMonitor, Atente/Vita)
+- **PARCEIRO_INTEGRADOR** — para empresas que vão integrar via FHIR/API (parceiros como parceiro integrador, MedMonitor, Atente/Vita)
 - **DPO** — específico para Encarregado de Dados (LGPD)
 - **AUDITOR_EXTERNO** — para acreditadoras (ONA, JCI)
 - **VISUAL** (PDF + vídeo) — versão ilustrada para distribuir em ILPIs

@@ -161,7 +161,7 @@ Quando alguém responde, **scheduler detecta no `list_due_checkins` do tipo `pos
 
 - **Compliance**: cada escalação é linha em tabela auditável com timestamps
 - **Redundância inteligente**: institucional em paralelo (sem esperar) + família em cascata (sem flood)
-- **Configurável por cliente**: Tecnosenior pode ter política diferente de Amparo
+- **Configurável por cliente**: parceiro integrador pode ter política diferente de parceiro de atenção primária
 - **Dois canais em urgent/critical**: WhatsApp + voz aumenta chance de contato em horas absurdas
 - **Interrompível**: quem responder primeiro cancela escalações pendentes
 

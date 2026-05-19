@@ -7,21 +7,21 @@
 
 ## 1. Visão do produto
 
-**ConnectaIACare** é uma plataforma SaaS-healthcare de cuidado geriátrico que combina relato por áudio via WhatsApp, triagem IA, teleconsulta virtual e ponte com a central humana da Tecnosenior/MedMonitor (TotalCare).
+**ConnectaIACare** é uma plataforma SaaS-healthcare de cuidado geriátrico que combina relato por áudio via WhatsApp, triagem IA, teleconsulta virtual e ponte com a central humana da parceiro integrador/MedMonitor (TotalCare).
 
 ### Parceria estratégica
 - **ConnectaIA** (Alexandre) — plataforma tecnológica + IA
-- **Tecnosenior** (CEO Murilo) — central de atendimento humano 24h + base de pacientes
+- **parceiro integrador** (CEO Murilo) — central de atendimento humano 24h + base de pacientes
 - **MedMonitor** — backend clínico legado (TotalCare) com dados reais de idosos assistidos
 - **Atente** — serviço humano final de escalação (substituiu SAMU automático — ADR-022)
 
 ### Demo
 - **Data**: terça-feira 28/04/2026
-- **Audiência**: Murilo (Tecnosenior CEO) + Maurício (sabe dados clínicos, não é médico)
+- **Audiência**: Murilo (parceiro integrador CEO) + Maurício (sabe dados clínicos, não é médico)
 - **Status**: Ondas 0–3 completas, Onda 4 em implementação
 
 ### Produto derivado planejado (B2C)
-Mesmo stack, voltado ao consumidor final (famílias que cuidam de idosos em casa, sem vinculação a Tecnosenior). Biometria de voz é **o componente chave que justifica esse fork**.
+Mesmo stack, voltado ao consumidor final (famílias que cuidam de idosos em casa, sem vinculação a parceiro integrador). Biometria de voz é **o componente chave que justifica esse fork**.
 
 ---
 
@@ -226,7 +226,7 @@ Em `pipeline.py._identify_caregiver_by_voice()`, toda vez que chega áudio via W
 | **Deepgram** | Transcrição nova-2 pt-BR (áudios WhatsApp, teleconsulta) | API key produção |
 | **Evolution API** | WhatsApp in/out — webhooks + send_text/send_media/set_presence | Instância V6 compartilhada |
 | **LiveKit** | Sala WebRTC (wss://meet.connectaia.com.br) | Key `connectaiacare` dedicada |
-| **MedMonitor (TotalCare)** | Pull de pacientes + caretakers + vitais + push de care-notes | Via Tecnosenior |
+| **MedMonitor (TotalCare)** | Pull de pacientes + caretakers + vitais + push de care-notes | Via parceiro integrador |
 | **Sofia Voz (Grok)** | TTS bidirecional (roadmap — não ativo na teleconsulta ainda) | `sofia-service:5030` interno |
 
 ---
@@ -288,7 +288,7 @@ Em `pipeline.py._identify_caregiver_by_voice()`, toda vez que chega áudio via W
 ### Onda 8 — Rehearsal + slides + demo 28/04
 
 ### Produto B2C (pós-MVP)
-- Mesma stack, sem vínculo Tecnosenior
+- Mesma stack, sem vínculo parceiro integrador
 - Fork do frontend com branding próprio
 - **Biometria de voz é o diferencial** que justifica o fork
 - Onboarding self-service (família + cuidador + paciente gravam separado)

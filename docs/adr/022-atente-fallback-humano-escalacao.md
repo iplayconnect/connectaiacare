@@ -14,7 +14,7 @@ Durante sprint review em 21/04, duas questões importantes vieram à tona:
 
 1. **Responsabilidade jurídica**: acionar SAMU via IA é terreno jurídico pantanoso — CFM 2.314/2022 limita autonomia de IA em decisões clínicas, e SAMU não tem API pública no Brasil (ligação automatizada via bot pode ser rejeitada pelo operador humano e gerar risco legal).
 
-2. **Ecossistema empresarial pertencente ao Alexandre/Milene**: a **Atente** (empresa do Alexandre + Milene, "BPO de atendimento humanizado 24h pra saúde") **já opera central humana** hoje, recebendo alertas de dispositivos Vidafone/botões SOS de idosos em parceria com a Tecnosenior. Atente é **operação irmã** da ConnectaIA, não terceiro.
+2. **Ecossistema empresarial pertencente ao Alexandre/Milene**: a **Atente** (empresa do Alexandre + Milene, "BPO de atendimento humanizado 24h pra saúde") **já opera central humana** hoje, recebendo alertas de dispositivos Vidafone/botões SOS de idosos em parceria com a parceiro integrador. Atente é **operação irmã** da ConnectaIA, não terceiro.
 
 Isso reformula o problema: **por que acionar SAMU via IA se temos central humana profissional operando 24/7 com equipe treinada?**
 
@@ -131,7 +131,7 @@ Essas notas são sincronizadas como `care-note` no TotalCare (ADR-019) marcando 
 - **Compliance CFM + LGPD simplificada** — IA faz triagem (permitido amplamente), humano decide (exigido pelo CFM)
 - **Reuso da operação existente** — Atente já tem processos, equipe, conhecimento de protocolos com famílias reais
 - **Atente ganha potência** — nossa plataforma entrega casos priorizados + contextualizados (menos ruído, mais qualidade). Produto deles melhora.
-- **Comercialmente forte pra demo**: Murilo entende que **Tecnosenior (hardware) + ConnectaIACare (IA) + Atente (operação) = ecossistema integrado** que a gente controla verticalmente
+- **Comercialmente forte pra demo**: Murilo entende que **parceiro integrador (hardware) + ConnectaIACare (IA) + Atente (operação) = ecossistema integrado** que a gente controla verticalmente
 - **Futuro parcerias**: outros SPAs contratam ConnectaIACare sabendo que escalação termina em central humana profissional
 
 ### Negative Consequences

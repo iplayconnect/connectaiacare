@@ -2,7 +2,7 @@
 
 - **Date**: 2026-04-21
 - **Status**: Accepted
-- **Deciders**: Alexandre (ConnectaIA), com input do Murilo (Tecnosenior) sobre visão estratégica
+- **Deciders**: Alexandre (ConnectaIA), com input do Murilo (parceiro integrador) sobre visão estratégica
 - **Tags**: architecture, agents, orchestration, framework, healthcare
 - **Relates to**: [RFC-001](../rfc/001-estrategia-ecossistema-agentico.md) (estratégia agêntica), [ADR-018](018-care-events-com-ciclo-de-vida.md) (care events)
 
@@ -38,7 +38,7 @@ Precisamos decidir **qual framework de orquestração agêntica adotar** (ou con
 ## Decision Drivers
 
 - **Independência arquitetural**: ConnectaIACare vai pra VPS dedicada (decisão de 2026-04-21). Framework não pode depender de runtime compartilhado com BBMD.
-- **Crescimento rápido**: dos atuais 45 pacientes (Tecnosenior) pra 500+ em 3-6 meses conforme parcerias. Orquestrador precisa suportar 100x sem refactor.
+- **Crescimento rápido**: dos atuais 45 pacientes (parceiro integrador) pra 500+ em 3-6 meses conforme parcerias. Orquestrador precisa suportar 100x sem refactor.
 - **Verticais radicalmente diferentes**: protocolo geriátrico (observacional + escalação familiar) é oposto de protocolo hospitalar (consulta agendada + prescrição).
 - **Compliance escopada**: auditoria CFM precisa olhar apenas nosso código, não acoplamento com outros produtos.
 - **Manutenção por time futuro**: dev que entrar depois precisa aprender 1 framework simples, não 3 (LangChain + ADK + interno).
@@ -260,9 +260,9 @@ async def fetch_vitals(patient_id: str, hours: int = 24) -> str:
 ### Policy por tenant (YAML)
 
 ```yaml
-# tenants/connectaiacare_tecnosenior.yaml
-tenant_id: connectaiacare_tecnosenior
-name: Tecnosenior
+# tenants/connectaiacare_partner.yaml
+tenant_id: connectaiacare_partner
+name: parceiro integrador
 verticals: [geriatric]   # só workflows desse vertical
 
 workflows:

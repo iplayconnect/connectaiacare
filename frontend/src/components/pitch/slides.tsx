@@ -504,7 +504,7 @@ export function SlideT6() {
               { icon: <Radio className="h-3 w-3" />, label: "ElevenLabs TTS" },
               { icon: <Users className="h-3 w-3" />, label: "Resemblyzer (biometria voz)" },
               { icon: <Watch className="h-3 w-3" />, label: "Apple Health · Android Health" },
-              { icon: <BellRing className="h-3 w-3" />, label: "Tecnosenior IoT (SOS)" },
+              { icon: <BellRing className="h-3 w-3" />, label: "parceiro integrador IoT (SOS)" },
               { icon: <Hospital className="h-3 w-3" />, label: "MedMonitor (clínico)" },
             ]}
           />

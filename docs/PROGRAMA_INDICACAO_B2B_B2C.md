@@ -10,7 +10,7 @@
 
 ## 1. Por que é poderoso
 
-O **cuidador profissional** da SPA Tecnosenior que recebe áudios do
+O **cuidador profissional** da SPA parceiro integrador que recebe áudios do
 ConnectaIACare hoje tem rede social natural:
 
 - Famílias dos 20-50 idosos assistidos pela SPA
@@ -41,7 +41,7 @@ LTV: 8-14 meses média setor healthcare, **R$500-2000 por cliente**.
 
 | Origem | Código exemplo | Comissão | Pagamento |
 |--------|----------------|----------|-----------|
-| **SPA Tecnosenior** | `SPA-VIDA-PLENA` | 1 mês grátis da mensalidade B2B | Crédito próxima fatura |
+| **SPA parceiro integrador** | `SPA-VIDA-PLENA` | 1 mês grátis da mensalidade B2B | Crédito próxima fatura |
 | **Cuidador profissional** | `CUIDADOR-MARIA123` | R$50 Pix | 2º mês pago do indicado |
 | **Familiar cliente B2C** | `FAMILIA-JOAO456` | 10% off próprios 3 meses | Crédito recorrente |
 

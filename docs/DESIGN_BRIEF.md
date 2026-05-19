@@ -6,7 +6,7 @@
 
 **ConnectaIACare** é uma plataforma de cuidado integrado com IA para **idosos e pacientes crônicos**. O foco inicial é **geriatria em SPAs / ILPIs / residências**. O fluxo central é o cuidador gravar um áudio no WhatsApp contando sobre o idoso; a IA transcreve, identifica o paciente, cruza com o histórico clínico e medicações, classifica em 4 níveis de urgência (ROTINA, ATENÇÃO, URGENTE, CRÍTICO) e aciona quem precisa ser acionado — equipe de enfermagem via painel, familiar via ligação de voz natural se for crítico.
 
-É uma parceria de 4 players: **ConnectaIA** (camada de IA), **Tecnosenior** (IoT ambiente + SPAs), **MedMonitor** (dispositivos clínicos homologados) e **Amparo** (atenção primária digital). O posicionamento é **"copiloto de saúde para o médico"** — IA apoia, médico decide (postura CFM 2.314/2022). A visão 18 meses é de **ecossistema em 4 camadas**: RELATO (MVP) → MONITOR (IoT + sinais vitais) → TELEMED (consulta vídeo com insights live + prescrição digital) → INTEGRA (FHIR hospitalar).
+É uma parceria de 4 players: **ConnectaIA** (camada de IA), **parceiro integrador** (IoT ambiente + SPAs), **MedMonitor** (dispositivos clínicos homologados) e **parceiro de atenção primária** (atenção primária digital). O posicionamento é **"copiloto de saúde para o médico"** — IA apoia, médico decide (postura CFM 2.314/2022). A visão 18 meses é de **ecossistema em 4 camadas**: RELATO (MVP) → MONITOR (IoT + sinais vitais) → TELEMED (consulta vídeo com insights live + prescrição digital) → INTEGRA (FHIR hospitalar).
 
 O produto é **multi-tenant desde o dia 1** (ADR-010) e **locale-aware desde o dia 1** (ADR-011) — começando em pt-BR, previsto para es-LATAM e Europa. Uma política crítica: **compliance CFM + LGPD + ANVISA** já embutidas no design. Dados médicos são sensíveis (Art. 11 LGPD) — a UI reflete isso (sem reciclagem casual de patterns de SaaS comercial).
 
@@ -104,7 +104,7 @@ Ver `frontend/tailwind.config.ts` e `frontend/src/app/globals.css`. Resumo:
 
 ### P2 — Fase MONITOR (Q3 2026)
 
-5. **Mapa do quarto** — visualização SVG do quarto com status dos sensores Tecnosenior em tempo real (movimento, cama, banheiro, gás). Inspiração: security dashboards tipo Home Assistant, simplificado.
+5. **Mapa do quarto** — visualização SVG do quarto com status dos sensores parceiro integrador em tempo real (movimento, cama, banheiro, gás). Inspiração: security dashboards tipo Home Assistant, simplificado.
 6. **Gráficos de sinais vitais** — integração MedMonitor. Séries temporais de pressão, glicemia, SpO₂, peso. Recharts/Visx recomendado.
 7. **Timeline integrado** — 3 tracks sincronizados: relatos + sinais vitais + sensores.
 8. **Configuração de alertas por paciente** — regras customizadas (ex: "se pressão > 160/100 por 3 medições consecutivas → alerta").
@@ -293,7 +293,7 @@ Ver `CLAUDE.md §10.2`. Em material externo (site, landing, press), **nunca nome
 
 - **Projeto**: `iplayconnect/connectaiacare` no GitHub
 - **Design Lead**: Alexandre (CEO ConnectaIA)
-- **Parceiros clínicos** (não design, mas contexto): Tecnosenior, MedMonitor, Amparo, Grupo Vita
+- **Parceiros clínicos** (não design, mas contexto): parceiro integrador, MedMonitor, parceiro de atenção primária, Grupo Vita
 - **Documentação viva** deste brief: abrir PR em `docs/DESIGN_BRIEF.md`
 
 ---

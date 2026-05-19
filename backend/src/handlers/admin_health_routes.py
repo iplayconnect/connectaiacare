@@ -8,7 +8,7 @@ Roda checks paralelos em todos os serviços críticos da stack:
   - Evolution API (instâncias ativas, se EVOLUTION_API_URL setada)
   - xAI Realtime (WS handshake test, opcional — caro)
   - DeepSeek API (chat completion teste, opcional)
-  - Tecnosenior API (health endpoint deles, se cliente enabled)
+  - parceiro integrador API (health endpoint deles, se cliente enabled)
 
 Retorna JSON estruturado: { service: { status, latency_ms, detail } }.
 Status: ok | degraded | down.
@@ -117,8 +117,8 @@ def _check_sofia_service() -> dict:
     return _check_http("sofia-service", f"{url}/health")
 
 
-def _check_tecnosenior_carenote_count() -> dict:
-    """Conta CareNotes sincronizadas com Tecnosenior nas últimas 24h.
+def _check_partner_carenote_count() -> dict:
+    """Conta CareNotes sincronizadas com parceiro integrador nas últimas 24h.
     Não bate na API deles direto pra não gastar quota — verifica
     nosso registro local de syncs ok.
     """
@@ -131,7 +131,7 @@ def _check_tecnosenior_carenote_count() -> dict:
                 COUNT(*) FILTER (WHERE sync_error IS NOT NULL
                     AND last_sync_attempt_at >= NOW() - INTERVAL '24 hours')
                     AS errors_24h
-               FROM aia_health_tecnosenior_sync"""
+               FROM aia_health_partner_carenote_sync"""
         )
         return {
             "status": "ok",
@@ -186,7 +186,7 @@ def aggregated_health():
         "redis": _check_redis,
         "voice_call": _check_voice_call,
         "sofia_service": _check_sofia_service,
-        "tecnosenior_local": _check_tecnosenior_carenote_count,
+        "partner_carenote_local": _check_partner_carenote_count,
         "voice_provider_quota": _check_recent_quota_exhausted_audit,
     }
     results: dict = {}

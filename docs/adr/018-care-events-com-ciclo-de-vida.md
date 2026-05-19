@@ -2,7 +2,7 @@
 
 - **Date**: 2026-04-20
 - **Status**: Accepted
-- **Deciders**: Alexandre (ConnectaIA), com input do Murilo (Tecnosenior)
+- **Deciders**: Alexandre (ConnectaIA), com input do Murilo (parceiro integrador)
 - **Tags**: domain-model, state-machine, orchestration, clinical-protocol
 - **Supersedes**: [ADR-017](017-sessao-conversacional-persistente.md)
 
@@ -16,7 +16,7 @@ ADR-017 introduziu a noção de "sessão conversacional persistente" — uma ún
 
 3. **Protocolos temporais não cabem em "sessão"**: o cuidado real tem SLAs temporais — aos +5min rodar análise de padrão histórico, aos +10min pingar o cuidador, aos +30min decidir encerrar, com escalação hierárquica se sem resposta em N minutos. Esse **workflow** não é uma "sessão" — é uma **máquina de estados temporal** que precisa de scheduler, persistência dedicada, e auditoria clara.
 
-A visão articulada pelo Murilo (Tecnosenior) consolidou: *"cada evento tem início, meio e fim, passa por etapas com personas diferentes (cuidador, enfermagem, família), e precisa aparecer no dashboard como um item clínico, não como uma conversa técnica"*.
+A visão articulada pelo Murilo (parceiro integrador) consolidou: *"cada evento tem início, meio e fim, passa por etapas com personas diferentes (cuidador, enfermagem, família), e precisa aparecer no dashboard como um item clínico, não como uma conversa técnica"*.
 
 ## Decision Drivers
 
@@ -134,7 +134,7 @@ Ao encerrar, o sistema:
 - **Scheduler desacoplado**: thread background com `pg_try_advisory_lock` roda sem bloquear HTTP
 - **Encerramento estruturado**: motivos enum alimentam relatórios operacionais (quantos falsos alarmes/semana, etc)
 - **TotalCare sincronizado**: cada evento encerrado vira anotação oficial no sistema mestre
-- **Tenants configuram protocolo**: Tecnosenior pode ter SLA diferente de Amparo sem deploy
+- **Tenants configuram protocolo**: parceiro integrador pode ter SLA diferente de parceiro de atenção primária sem deploy
 
 ### Negative Consequences
 

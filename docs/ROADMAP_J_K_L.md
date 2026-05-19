@@ -151,7 +151,7 @@ L muda o paradigma: **Sofia inicia o enrollment via WhatsApp** assim que detecta
 ## Ordem sugerida pra próxima sessão dedicada
 
 1. **L** primeiro — maior valor de produto, destrava B2C real (idoso solo no WhatsApp). 3-5 dias.
-2. **J** depois — operacional, voz idosa vai precisar refresh em 90 dias mesmo (caso piloto Tecnosenior dure). 3-4h.
+2. **J** depois — operacional, voz idosa vai precisar refresh em 90 dias mesmo (caso piloto parceiro integrador dure). 3-4h.
 3. **K** por último — robustez de canal, importante mas não bloqueia features. 4-5h.
 
 ---

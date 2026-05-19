@@ -201,7 +201,7 @@ function NewPatientModal({
           />
           <span className="text-[10px] text-muted-foreground/60 block">
             Pode ser preenchido depois no wizard. Necessário pra
-            integrações externas (Tecnosenior).
+            integrações externas (parceiro integrador).
           </span>
         </label>
 

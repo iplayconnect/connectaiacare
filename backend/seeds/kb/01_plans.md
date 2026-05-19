@@ -94,19 +94,19 @@ O **Plano Premium** é o mais completo sem dispositivo físico — cuidado clín
 
 ## [plans/plano_premium_device] Plano Premium + Dispositivo — R$ 199,90/mês
 
-> keywords: dispositivo, pulseira, sos, tecnosenior, 199, 199.90, botão
+> keywords: dispositivo, pulseira, sos, parceiro_integrador, 199, 199.90, botão
 > applies_to_plans: premium_device
 > priority: 95
 
-O **Plano Premium + Dispositivo** combina tudo do Premium com o **dispositivo IoT Tecnosenior** — a proteção máxima.
+O **Plano Premium + Dispositivo** combina tudo do Premium com o **dispositivo IoT parceiro integrador** — a proteção máxima.
 
 **Tudo do Premium, mais:**
-- **Pulseira SOS Tecnosenior** homologada (incluída, sem taxa extra)
+- **Pulseira SOS parceiro integrador** homologada (incluída, sem taxa extra)
 - Botão de emergência que aciona central 24h com localização
 - Detecção automática de **queda** por acelerômetro
 - Monitoramento de sinais vitais 24h (batimento, variabilidade cardíaca)
 - Integração automática com prontuário (cada anomalia vira alerta)
-- **Assistência em domicílio** em caso de emergência (contrato Tecnosenior)
+- **Assistência em domicílio** em caso de emergência (contrato parceiro integrador)
 
 **Para quem é indicado:**
 - Idoso com histórico de quedas

@@ -1,15 +1,15 @@
-"""Tecnosenior Care Notes Sync — orquestra envio de care_events
+"""parceiro integrador Care Notes Sync — orquestra envio de care_events
 nossos pra CareNotes/Addendums do TotalCare.
 
 Resolve mapping UUID↔INT via lookup por phone (Matheus 2026-04-28)
 ou CPF (após Matheus subir endpoint 2026-04-29). Cacheia ID resolvido
-em aia_health_patients.tecnosenior_patient_id e
-aia_health_caregivers.tecnosenior_caretaker_id.
+em aia_health_patients.external_partner_patient_id e
+aia_health_caregivers.external_partner_caretaker_id.
 
 Idempotency local (Matheus ainda não tem header nativo):
-- aia_health_tecnosenior_sync.care_event_id é UNIQUE
+- aia_health_partner_carenote_sync.care_event_id é UNIQUE
 - Antes de POST, verifica se já existe linha de sync com
-  tecnosenior_carenote_id != NULL → reusa
+  partner_carenote_id != NULL → reusa
 - Em caso de falha de rede, retry usa o estado salvo
 """
 from __future__ import annotations
@@ -21,10 +21,10 @@ from typing import Any
 from src.services.medmonitor_client import get_medmonitor_client
 from src.services.postgres import get_postgres
 
-logger = logging.getLogger("connectaiacare.tecnosenior_sync")
+logger = logging.getLogger("connectaiacare.partner_carenote_sync")
 
 
-class TecnoseniorCareNoteSyncService:
+class PartnerCareNoteSyncService:
     """Orquestrador de envio CareNote pro TotalCare."""
 
     def __init__(self):
@@ -40,10 +40,10 @@ class TecnoseniorCareNoteSyncService:
     # ══════════════════════════════════════════════════════════════════
 
     def resolve_patient_id(self, patient_uuid: str) -> int | None:
-        """Resolve patient_uuid (nosso) → tecnosenior_patient_id (deles).
+        """Resolve patient_uuid (nosso) → external_partner_patient_id (deles).
 
         Cascata:
-        1. Cache local (aia_health_patients.tecnosenior_patient_id)
+        1. Cache local (aia_health_patients.external_partner_patient_id)
         2. Lookup remoto por CPF (se temos CPF do paciente)
         3. Lookup remoto por phone (se temos phone do paciente)
 
@@ -51,14 +51,14 @@ class TecnoseniorCareNoteSyncService:
         (geralmente: marca sync_error e retry depois).
         """
         row = self.db.fetch_one(
-            "SELECT tecnosenior_patient_id, cpf FROM aia_health_patients "
+            "SELECT external_partner_patient_id, cpf FROM aia_health_patients "
             "WHERE id = %s",
             (patient_uuid,),
         )
         if not row:
             return None
-        if row.get("tecnosenior_patient_id"):
-            return int(row["tecnosenior_patient_id"])
+        if row.get("external_partner_patient_id"):
+            return int(row["external_partner_patient_id"])
 
         # Tenta CPF se temos
         if row.get("cpf"):
@@ -98,12 +98,12 @@ class TecnoseniorCareNoteSyncService:
 
         if caregiver_uuid:
             row = self.db.fetch_one(
-                "SELECT tecnosenior_caretaker_id, cpf, phone FROM aia_health_caregivers "
+                "SELECT external_partner_caretaker_id, cpf, phone FROM aia_health_caregivers "
                 "WHERE id = %s",
                 (caregiver_uuid,),
             )
             if row:
-                cached_id = row.get("tecnosenior_caretaker_id")
+                cached_id = row.get("external_partner_caretaker_id")
                 cpf = row.get("cpf")
                 phone_local = phone_local or row.get("phone")
 
@@ -130,7 +130,7 @@ class TecnoseniorCareNoteSyncService:
         try:
             self.db.execute(
                 "UPDATE aia_health_patients "
-                "SET tecnosenior_patient_id = %s WHERE id = %s",
+                "SET external_partner_patient_id = %s WHERE id = %s",
                 (tec_id, patient_uuid),
             )
         except Exception as exc:
@@ -140,7 +140,7 @@ class TecnoseniorCareNoteSyncService:
         try:
             self.db.execute(
                 "UPDATE aia_health_caregivers "
-                "SET tecnosenior_caretaker_id = %s WHERE id = %s",
+                "SET external_partner_caretaker_id = %s WHERE id = %s",
                 (tec_id, caregiver_uuid),
             )
         except Exception as exc:
@@ -166,22 +166,22 @@ class TecnoseniorCareNoteSyncService:
           care_event_id: UUID do nosso aia_health_care_events.id
           force: True ignora idempotency (re-envia mesmo já sincronizado)
 
-        Retorna dict com status, error?, tecnosenior_carenote_id?, etc.
+        Retorna dict com status, error?, partner_carenote_id?, etc.
         """
         if not self.enabled:
             return {"status": "error", "reason": "client_disabled"}
 
         # Idempotência local: já enviado?
         existing = self.db.fetch_one(
-            "SELECT tecnosenior_carenote_id, tecnosenior_status, sync_error "
-            "FROM aia_health_tecnosenior_sync WHERE care_event_id = %s",
+            "SELECT partner_carenote_id, partner_sync_status, sync_error "
+            "FROM aia_health_partner_carenote_sync WHERE care_event_id = %s",
             (care_event_id,),
         )
-        if existing and existing.get("tecnosenior_carenote_id") and not force:
+        if existing and existing.get("partner_carenote_id") and not force:
             return {
                 "status": "already_synced",
-                "tecnosenior_carenote_id": existing["tecnosenior_carenote_id"],
-                "tecnosenior_status": existing.get("tecnosenior_status"),
+                "partner_carenote_id": existing["partner_carenote_id"],
+                "partner_sync_status": existing.get("partner_sync_status"),
             }
 
         # Carrega care_event
@@ -206,7 +206,7 @@ class TecnoseniorCareNoteSyncService:
             self._mark_error(care_event_id, "patient_not_resolved")
             return {
                 "status": "error",
-                "reason": "patient_not_found_in_tecnosenior",
+                "reason": "patient_not_found_in_partner",
                 "patient_uuid": ev["patient_id"],
             }
 
@@ -217,7 +217,7 @@ class TecnoseniorCareNoteSyncService:
             self._mark_error(care_event_id, "caretaker_not_resolved")
             return {
                 "status": "error",
-                "reason": "caretaker_not_found_in_tecnosenior",
+                "reason": "caretaker_not_found_in_partner",
                 "phone": ev.get("caregiver_phone"),
             }
 
@@ -260,13 +260,13 @@ class TecnoseniorCareNoteSyncService:
         carenote_id = int(result["id"])
         self.db.execute(
             """
-            INSERT INTO aia_health_tecnosenior_sync
-                (care_event_id, tecnosenior_carenote_id, tecnosenior_status,
+            INSERT INTO aia_health_partner_carenote_sync
+                (care_event_id, partner_carenote_id, partner_sync_status,
                  last_synced_at, last_response_payload)
             VALUES (%s, %s, %s, NOW(), %s)
             ON CONFLICT (care_event_id) DO UPDATE SET
-                tecnosenior_carenote_id = EXCLUDED.tecnosenior_carenote_id,
-                tecnosenior_status = EXCLUDED.tecnosenior_status,
+                partner_carenote_id = EXCLUDED.partner_carenote_id,
+                partner_sync_status = EXCLUDED.partner_sync_status,
                 last_synced_at = NOW(),
                 sync_error = NULL,
                 last_response_payload = EXCLUDED.last_response_payload
@@ -275,13 +275,13 @@ class TecnoseniorCareNoteSyncService:
              self.db.json_adapt(result)),
         )
         logger.info(
-            "tecnosenior_sync_ok care_event=%s carenote_id=%s status=%s",
+            "partner_carenote_sync_ok care_event=%s carenote_id=%s status=%s",
             care_event_id, carenote_id, target_status,
         )
         return {
             "status": "ok",
-            "tecnosenior_carenote_id": carenote_id,
-            "tecnosenior_status": target_status,
+            "partner_carenote_id": carenote_id,
+            "partner_sync_status": target_status,
             "patient_int": patient_int,
             "caretaker_int": caretaker_int,
         }
@@ -290,14 +290,14 @@ class TecnoseniorCareNoteSyncService:
         try:
             self.db.execute(
                 """
-                INSERT INTO aia_health_tecnosenior_sync
+                INSERT INTO aia_health_partner_carenote_sync
                     (care_event_id, sync_error, last_sync_attempt_at,
                      retry_count)
                 VALUES (%s, %s, NOW(), 1)
                 ON CONFLICT (care_event_id) DO UPDATE SET
                     sync_error = EXCLUDED.sync_error,
                     last_sync_attempt_at = NOW(),
-                    retry_count = aia_health_tecnosenior_sync.retry_count + 1
+                    retry_count = aia_health_partner_carenote_sync.retry_count + 1
                 """,
                 (care_event_id, reason),
             )
@@ -350,23 +350,23 @@ class TecnoseniorCareNoteSyncService:
             return {"status": "error", "reason": "client_disabled"}
 
         sync = self.db.fetch_one(
-            "SELECT tecnosenior_carenote_id, tecnosenior_status "
-            "FROM aia_health_tecnosenior_sync WHERE care_event_id = %s",
+            "SELECT partner_carenote_id, partner_sync_status "
+            "FROM aia_health_partner_carenote_sync WHERE care_event_id = %s",
             (care_event_id,),
         )
-        if not sync or not sync.get("tecnosenior_carenote_id"):
+        if not sync or not sync.get("partner_carenote_id"):
             return {
                 "status": "error",
                 "reason": "carenote_not_synced_yet",
                 "hint": "Chame sync_care_event primeiro com status=OPEN",
             }
-        if sync.get("tecnosenior_status") == "CLOSED" and not closes_note:
+        if sync.get("partner_sync_status") == "CLOSED" and not closes_note:
             return {
                 "status": "error",
                 "reason": "carenote_already_closed",
             }
 
-        carenote_id = int(sync["tecnosenior_carenote_id"])
+        carenote_id = int(sync["partner_carenote_id"])
         result = self.client.add_addendum(
             care_note_id=carenote_id,
             content=content,
@@ -385,9 +385,9 @@ class TecnoseniorCareNoteSyncService:
         try:
             self.db.execute(
                 """
-                INSERT INTO aia_health_tecnosenior_addendums
-                    (care_event_id, tecnosenior_carenote_id,
-                     tecnosenior_addendum_id, content, content_resume,
+                INSERT INTO aia_health_partner_carenote_addendums
+                    (care_event_id, partner_carenote_id,
+                     partner_addendum_id, content, content_resume,
                      occurred_at, closes_note, last_synced_at,
                      last_response_payload)
                 VALUES (%s, %s, %s, %s, %s, COALESCE(%s, NOW()),
@@ -406,16 +406,16 @@ class TecnoseniorCareNoteSyncService:
         # Se fechou a CareNote, atualiza status local
         if closes_note:
             self.db.execute(
-                "UPDATE aia_health_tecnosenior_sync "
-                "SET tecnosenior_status = 'CLOSED', closed_at_remote = NOW() "
+                "UPDATE aia_health_partner_carenote_sync "
+                "SET partner_sync_status = 'CLOSED', closed_at_remote = NOW() "
                 "WHERE care_event_id = %s",
                 (care_event_id,),
             )
 
         return {
             "status": "ok",
-            "tecnosenior_carenote_id": carenote_id,
-            "tecnosenior_addendum_id": addendum_id,
+            "partner_carenote_id": carenote_id,
+            "partner_addendum_id": addendum_id,
             "closes_note": closes_note,
         }
 
@@ -430,15 +430,15 @@ class TecnoseniorCareNoteSyncService:
             return {"status": "error", "reason": "client_disabled"}
 
         existing = self.db.fetch_one(
-            "SELECT tecnosenior_carenote_id, tecnosenior_status "
-            "FROM aia_health_tecnosenior_sync WHERE care_event_id = %s",
+            "SELECT partner_carenote_id, partner_sync_status "
+            "FROM aia_health_partner_carenote_sync WHERE care_event_id = %s",
             (care_event_id,),
         )
-        if existing and existing.get("tecnosenior_carenote_id"):
+        if existing and existing.get("partner_carenote_id"):
             return {
                 "status": "already_synced",
-                "tecnosenior_carenote_id": existing["tecnosenior_carenote_id"],
-                "tecnosenior_status": existing.get("tecnosenior_status"),
+                "partner_carenote_id": existing["partner_carenote_id"],
+                "partner_sync_status": existing.get("partner_sync_status"),
             }
 
         ev = self.db.fetch_one(
@@ -479,33 +479,33 @@ class TecnoseniorCareNoteSyncService:
 
         carenote_id = int(result["id"])
         self.db.execute(
-            """INSERT INTO aia_health_tecnosenior_sync
-                  (care_event_id, tecnosenior_carenote_id, tecnosenior_status,
+            """INSERT INTO aia_health_partner_carenote_sync
+                  (care_event_id, partner_carenote_id, partner_sync_status,
                    last_synced_at, last_response_payload)
                VALUES (%s, %s, 'OPEN', NOW(), %s)
                ON CONFLICT (care_event_id) DO UPDATE SET
-                  tecnosenior_carenote_id = EXCLUDED.tecnosenior_carenote_id,
-                  tecnosenior_status = 'OPEN', last_synced_at = NOW(),
+                  partner_carenote_id = EXCLUDED.partner_carenote_id,
+                  partner_sync_status = 'OPEN', last_synced_at = NOW(),
                   sync_error = NULL""",
             (care_event_id, carenote_id, self.db.json_adapt(result)),
         )
         logger.info(
-            "tecnosenior_carenote_opened care_event=%s carenote_id=%s",
+            "partner_carenote_opened care_event=%s carenote_id=%s",
             care_event_id, carenote_id,
         )
         return {
-            "status": "ok", "tecnosenior_carenote_id": carenote_id,
-            "tecnosenior_status": "OPEN",
+            "status": "ok", "partner_carenote_id": carenote_id,
+            "partner_sync_status": "OPEN",
             "patient_int": patient_int, "caretaker_int": caretaker_int,
         }
 
     def get_sync_state(self, care_event_id: str) -> dict | None:
         row = self.db.fetch_one(
             """
-            SELECT tecnosenior_carenote_id, tecnosenior_status,
+            SELECT partner_carenote_id, partner_sync_status,
                    last_synced_at, last_sync_attempt_at,
                    sync_error, retry_count
-            FROM aia_health_tecnosenior_sync WHERE care_event_id = %s
+            FROM aia_health_partner_carenote_sync WHERE care_event_id = %s
             """,
             (care_event_id,),
         )
@@ -518,11 +518,11 @@ class TecnoseniorCareNoteSyncService:
         return d
 
 
-_instance: TecnoseniorCareNoteSyncService | None = None
+_instance: PartnerCareNoteSyncService | None = None
 
 
-def get_tecnosenior_sync() -> TecnoseniorCareNoteSyncService:
+def get_partner_carenote_sync() -> PartnerCareNoteSyncService:
     global _instance
     if _instance is None:
-        _instance = TecnoseniorCareNoteSyncService()
+        _instance = PartnerCareNoteSyncService()
     return _instance

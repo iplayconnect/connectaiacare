@@ -8,7 +8,7 @@
 
 ## 1. Decisão de produto que motivou
 
-A ATENT é a operação humana 24/7 que atende clientes da Tecnosenior (botão de emergência, pulseira de queda) e os clientes diretos da ConnectaIACare. Hoje os operadores trabalham respondendo WhatsApp manualmente sem audit estruturado. Com volume crescente (~900 SOS Tecnosenior + clientes ConnectaIACare em onboarding), isso não escala.
+A ATENT é a operação humana 24/7 que atende clientes da parceiro integrador (botão de emergência, pulseira de queda) e os clientes diretos da ConnectaIACare. Hoje os operadores trabalham respondendo WhatsApp manualmente sem audit estruturado. Com volume crescente (~900 SOS parceiro integrador + clientes ConnectaIACare em onboarding), isso não escala.
 
 A decisão (Alexandre 2026-05-08) é trazer o operador pra dentro da plataforma com:
 - Painel próprio (`/admin/system/operations/central`)

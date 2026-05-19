@@ -96,7 +96,7 @@ Cap rígido só acima de 100/dia/paciente sustentado por 5+ dias
 | Plantões (cadastro) | ❌ B2B sim, B2C não | ✅ | ✅ |
 | Sofia voz (PJSIP) | ❌ | ✅ | ✅ |
 | Teleconsulta (LiveKit) | ❌ | Opcional add-on | ✅ |
-| Integração Tecnosenior | ❌ | Opcional add-on | ✅ B2B |
+| Integração parceiro integrador | ❌ | Opcional add-on | ✅ B2B |
 | Atendimento humano prioritário | ❌ | ❌ | ✅ |
 | Push proativo (Sofia liga) | ❌ | ❌ | ✅ |
 | Risco / Score baseline | ❌ | ✅ | ✅ |
@@ -155,7 +155,7 @@ Os preços ficam a cargo do Alexandre. Variáveis que afetam:
 Independente do tier, oferecer:
 
 - **Teleconsulta agendada**: R$ X por consulta + médico (ConnectaLive)
-- **Integração Tecnosenior** (B2B): R$ Y/mês adicional
+- **Integração parceiro integrador** (B2B): R$ Y/mês adicional
 - **Pacote ampliado de mensagens**: 500 msg adicionais por R$ Z
 - **Biometria de voz** (em B2C Essencial onde não inclui): R$ K/mês
 

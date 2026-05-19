@@ -1,18 +1,18 @@
-# Integração Tecnosenior — Care Notes / Addendums
+# Integração parceiro integrador — Care Notes / Addendums
 
 **Status**: análise + arquitetura proposta. Não implementado.
 **Data**: 2026-04-28
-**Origem**: API de care_notes documentada por Matheus (Tecnosenior)
-em `docs/tecnosenior_care_notes_api.md`.
+**Origem**: API de care_notes documentada por Matheus (parceiro integrador)
+em `docs/partner_care_notes_api.md`.
 
 ---
 
 ## 1. Objetivo
 
-Devolver para a plataforma TotalCare (Tecnosenior) as anotações de
+Devolver para a plataforma TotalCare (parceiro integrador) as anotações de
 cuidado geradas a partir de relatos que cuidadores fazem via
 WhatsApp para a Sofia. Hoje o relato vive só no nosso lado; com a
-integração, ele passa a aparecer no prontuário da Tecnosenior em
+integração, ele passa a aparecer no prontuário da parceiro integrador em
 tempo quase-real.
 
 **Arquitetura pretendida**: outbound webhook do nosso lado para a
@@ -25,7 +25,7 @@ permanece como fonte primária; TotalCare recebe espelhamento.
 
 ### 2.1 Tabela de equivalências
 
-| Tecnosenior | ConnectaIACare | Notas |
+| parceiro integrador | ConnectaIACare | Notas |
 |-------------|----------------|-------|
 | `CareNote` | `aia_health_care_events` (1 linha) | Hub do evento clínico |
 | `CareNote.status` (OPEN/CLOSED) | `care_events.status` | Mapping abaixo |
@@ -39,7 +39,7 @@ permanece como fonte primária; TotalCare recebe espelhamento.
 
 ### 2.2 Mapping de status
 
-A Tecnosenior tem só `OPEN` / `CLOSED`. A gente tem 7 estados
+A parceiro integrador tem só `OPEN` / `CLOSED`. A gente tem 7 estados
 (`analyzing` → `awaiting_ack` → `pattern_analyzed` → `escalating` →
 `awaiting_status_update` → `resolved` / `expired`).
 
@@ -77,19 +77,19 @@ Regra de tradução:
 
 ## 3. Lacuna crítica — IDs numéricos
 
-A API da Tecnosenior usa `caretaker: int` e `patient: int`. A gente
+A API da parceiro integrador usa `caretaker: int` e `patient: int`. A gente
 usa UUID. **Sem mapping não dá pra integrar**.
 
 ### 3.1 Opções
 
-**A. Eles enriquecem nosso schema** — Tecnosenior fornece um arquivo
+**A. Eles enriquecem nosso schema** — parceiro integrador fornece um arquivo
 com `(uuid_paciente_nosso, id_paciente_deles)` e a gente importa.
 
 **B. Eles batem por outro identificador** — CPF do paciente, telefone
 do cuidador, ou nome+data_nascimento. Match probabilístico do lado
 deles.
 
-**C. Tecnosenior cria dois IDs** — usuário cadastrado nos dois lados,
+**C. parceiro integrador cria dois IDs** — usuário cadastrado nos dois lados,
 guardamos ambos no nosso DB.
 
 ### 3.2 Recomendação
@@ -98,17 +98,17 @@ guardamos ambos no nosso DB.
 
 ```sql
 ALTER TABLE aia_health_patients
-    ADD COLUMN tecnosenior_patient_id INTEGER UNIQUE;
+    ADD COLUMN external_partner_patient_id INTEGER UNIQUE;
 ALTER TABLE aia_health_caregivers
-    ADD COLUMN tecnosenior_caretaker_id INTEGER UNIQUE;
+    ADD COLUMN external_partner_caretaker_id INTEGER UNIQUE;
 
-CREATE INDEX idx_patients_tecnosenior_id
-    ON aia_health_patients(tecnosenior_patient_id)
-    WHERE tecnosenior_patient_id IS NOT NULL;
+CREATE INDEX idx_patients_external_partner_id
+    ON aia_health_patients(external_partner_patient_id)
+    WHERE external_partner_patient_id IS NOT NULL;
 ```
 
 População inicial: enquanto não temos mapping, paciente sem
-`tecnosenior_patient_id` = não sincroniza. Painel admin mostra alerta
+`external_partner_patient_id` = não sincroniza. Painel admin mostra alerta
 "sincronização pendente". Conforme Matheus envia o mapping, a gente
 preenche.
 
@@ -124,16 +124,16 @@ arquivo manual.
 ### 4.1 Tabela de outbound sync
 
 ```sql
-CREATE TABLE aia_health_tecnosenior_sync (
+CREATE TABLE aia_health_partner_carenote_sync (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     care_event_id UUID NOT NULL REFERENCES aia_health_care_events(id)
         ON DELETE CASCADE,
 
-    -- ID retornado pela Tecnosenior na criação
-    tecnosenior_carenote_id INTEGER UNIQUE,
+    -- ID retornado pela parceiro integrador na criação
+    partner_carenote_id INTEGER UNIQUE,
 
     -- Espelho local do estado deles
-    tecnosenior_status TEXT CHECK (tecnosenior_status IN ('OPEN', 'CLOSED')),
+    partner_sync_status TEXT CHECK (partner_sync_status IN ('OPEN', 'CLOSED')),
     closed_at_remote TIMESTAMPTZ,
 
     -- Sincronização
@@ -149,22 +149,22 @@ CREATE TABLE aia_health_tecnosenior_sync (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_tecnosenior_sync_pending
-    ON aia_health_tecnosenior_sync(last_sync_attempt_at NULLS FIRST)
+CREATE INDEX idx_partner_carenote_sync_pending
+    ON aia_health_partner_carenote_sync(last_sync_attempt_at NULLS FIRST)
     WHERE sync_error IS NOT NULL OR last_synced_at IS NULL;
 ```
 
 ### 4.2 Tabela de outbound addendums
 
 ```sql
-CREATE TABLE aia_health_tecnosenior_addendums (
+CREATE TABLE aia_health_partner_carenote_addendums (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     care_event_id UUID NOT NULL REFERENCES aia_health_care_events(id)
         ON DELETE CASCADE,
     report_id UUID REFERENCES aia_health_reports(id) ON DELETE SET NULL,
 
-    tecnosenior_carenote_id INTEGER NOT NULL,
-    tecnosenior_addendum_id INTEGER UNIQUE,  -- preenchido após POST
+    partner_carenote_id INTEGER NOT NULL,
+    partner_addendum_id INTEGER UNIQUE,  -- preenchido após POST
 
     content TEXT NOT NULL,
     content_resume TEXT NOT NULL,
@@ -178,19 +178,19 @@ CREATE TABLE aia_health_tecnosenior_addendums (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_tecnosenior_add_pending
-    ON aia_health_tecnosenior_addendums(care_event_id, occurred_at)
+CREATE INDEX idx_partner_carenote_add_pending
+    ON aia_health_partner_carenote_addendums(care_event_id, occurred_at)
     WHERE last_synced_at IS NULL;
 ```
 
 ---
 
-## 5. Service `tecnosenior_sync_service.py`
+## 5. Service `partner_carenote_sync_service.py`
 
 ### 5.1 Métodos principais
 
 ```python
-class TecnoseniorSyncService:
+class PartnerCarenoteSyncService:
     def sync_care_event(self, care_event_id: str) -> dict:
         """Cria ou atualiza CareNote remota a partir do evento local.
 
@@ -220,14 +220,14 @@ class TecnoseniorSyncService:
 
 ### 5.2 Idempotência
 
-A API da Tecnosenior **não menciona idempotency-key**. Estratégia
+A API da parceiro integrador **não menciona idempotency-key**. Estratégia
 do nosso lado:
 
-- Antes de cada POST, gravar `aia_health_tecnosenior_sync` com
+- Antes de cada POST, gravar `aia_health_partner_carenote_sync` com
   `idempotency_key = uuid4()` no nosso DB.
 - Se POST tiver timeout ou falha de rede, marca `sync_error` com
   o erro. Worker tenta de novo na próxima janela.
-- Se resposta voltar com `id`, gravamos `tecnosenior_carenote_id`
+- Se resposta voltar com `id`, gravamos `partner_carenote_id`
   e marcamos sucesso.
 
 **Risco**: se POST chega no servidor deles e a resposta se perde no
@@ -246,13 +246,13 @@ Hook em `aia_health_care_events`:
   sync_addendum
 
 Implementação: PostgreSQL trigger que insere em
-`aia_health_tecnosenior_sync_queue` (Redis com BullMQ-equivalente
+`aia_health_partner_carenote_sync_queue` (Redis com BullMQ-equivalente
 em Python ou tabela PG simples) + worker assíncrono em
 voice-call-service ou container dedicado.
 
 ---
 
-## 6. Cenários da Tecnosenior na nossa realidade
+## 6. Cenários da parceiro integrador na nossa realidade
 
 | Cenário deles | Quando cabe na ConnectaIACare |
 |---------------|-------------------------------|
@@ -269,12 +269,12 @@ pra retroativo.
 
 ## 7. Tratamento de erros
 
-### 7.1 Mapping com erros da Tecnosenior
+### 7.1 Mapping com erros da parceiro integrador
 
 | Erro deles | Causa nossa | Ação |
 |------------|-------------|------|
-| `Patient does not belong to this organization` | `patient_id` errado ou paciente sem `tecnosenior_patient_id` | Não retentar; flag em painel admin pra mapping manual |
-| `Cannot add addendum: care note is not open` | A gente acha que tá OPEN, mas Tecnosenior fechou (ou alguém fechou no painel deles) | `GET /agent/care-notes/{id}/`, atualizar nosso espelho, marcar como dessincronizado |
+| `Patient does not belong to this organization` | `patient_id` errado ou paciente sem `external_partner_patient_id` | Não retentar; flag em painel admin pra mapping manual |
+| `Cannot add addendum: care note is not open` | A gente acha que tá OPEN, mas parceiro integrador fechou (ou alguém fechou no painel deles) | `GET /agent/care-notes/{id}/`, atualizar nosso espelho, marcar como dessincronizado |
 | `Addendum occurred_at must be greater than parent's` | `occurred_at` retroativo | Ajustar para `>= parent.occurred_at`. Logar warning |
 | Timeout / 5xx | Rede, indisponibilidade | Backoff + retry |
 
@@ -289,16 +289,16 @@ automático."`
 
 ## 8. UI / painel admin
 
-Adicionar em `/admin/integracoes/tecnosenior`:
+Adicionar em `/admin/integracoes/parceiro_integrador`:
 
 - Status geral: % sincronizado, fila pendente, erros últimos 24h.
-- Tabela: `care_event_id ↔ tecnosenior_carenote_id ↔ status` com
+- Tabela: `care_event_id ↔ partner_carenote_id ↔ status` com
   filtro por erro.
 - Botão "Resincronizar agora" pra um evento específico.
-- Tabela de pacientes/cuidadores **sem** `tecnosenior_id`
+- Tabela de pacientes/cuidadores **sem** `external_partner_id`
   (pendência de mapping).
 
-Sidebar: "Integrações → Tecnosenior" sob admin.
+Sidebar: "Integrações → parceiro integrador" sob admin.
 
 ---
 
@@ -343,15 +343,15 @@ Antes de implementar:
 - Decidir Opção A/B/C de mapping (§3).
 
 **Fase 1 — Schema + service básico** (~1 dia)
-- Migration: tabelas tecnosenior_sync + addendums + colunas
-  `tecnosenior_*_id` em patients/caregivers.
-- `tecnosenior_sync_service.py` com métodos principais.
-- Endpoint admin `/api/integrations/tecnosenior/status`.
+- Migration: tabelas partner_carenote_sync + addendums + colunas
+  `external_partner_*_id` em patients/caregivers.
+- `partner_carenote_sync_service.py` com métodos principais.
+- Endpoint admin `/api/integrations/parceiro_integrador/status`.
 
 **Fase 2 — Worker + retry + UI** (~1 dia)
 - Worker periódico chama `retry_failed`.
-- Painel `/admin/integracoes/tecnosenior`.
-- Smoke test em ambiente de homologação da Tecnosenior.
+- Painel `/admin/integracoes/parceiro_integrador`.
+- Smoke test em ambiente de homologação da parceiro integrador.
 
 **Fase 3 — Hooks automáticos** (~1 dia)
 - Trigger PG ou hook no service quando care_event muda.
@@ -359,6 +359,6 @@ Antes de implementar:
 - Testes E2E.
 
 **Fase 4 — Webhook reverso (se aplicável)** (~0.5 dia)
-- Endpoint pra receber updates da Tecnosenior.
+- Endpoint pra receber updates da parceiro integrador.
 
 **Total**: ~3.5 dias de eng se as decisões da §9 estiverem fechadas.

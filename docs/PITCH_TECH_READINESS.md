@@ -162,7 +162,7 @@
 - **ElevenLabs** — TTS pra Sofia Voz (modo futuro)
 - **Resemblyzer** — biometria de voz 256-dim (identifica cuidador por áudio)
 - **Apple Health + Android Health Connect** — wearables (plano Premium+Device)
-- **Tecnosenior IoT** — botão SOS + detector queda + sinais vitais (pulseira homologada)
+- **parceiro integrador IoT** — botão SOS + detector queda + sinais vitais (pulseira homologada)
 
 **Schema pronto, integração em construção:**
 - **MedMonitor** — dispositivos clínicos homologados (fase 2 MONITOR) — pipeline FHIR Observation já modelado
@@ -251,7 +251,7 @@
 - Estatuto do Idoso = convenção ONU envelhecimento (signatários incluem México, Argentina, Chile)
 
 **Comercial:**
-- White-label: um ConnectaIACare por parceiro local (ex: Tecnosenior Brasil, Tecnosenior México) — mesmo código, tenants diferentes, compliance por jurisdição
+- White-label: um ConnectaIACare por parceiro local (ex: parceiro integrador Brasil, parceiro integrador México) — mesmo código, tenants diferentes, compliance por jurisdição
 - B2B pipeline: operadoras de saúde, ILPIs, redes de clínicas — mesmo schema FHIR
 
 ---
@@ -265,7 +265,7 @@ LLM router tem fallback cascade configurado em YAML. Troca 1 linha, restart cont
 Encryption at rest + in transit, audit chain imutável, LGPD Art. 11, nenhum log com PII. No futuro, opção on-premise pra contratos enterprise (ILPIs grandes, hospitais).
 
 ### "Vocês são responsáveis se a IA errar?"
-Não. Constituição Sofia impede diagnóstico/prescrição (CFM 2.314). Todo alerta crítico escala pra humano. Nossa responsabilidade é processo, não decisão clínica. Contratualmente alinhado com Tecnosenior (parceria já em curso com ~15k assistidos via Dossiê do Assistido).
+Não. Constituição Sofia impede diagnóstico/prescrição (CFM 2.314). Todo alerta crítico escala pra humano. Nossa responsabilidade é processo, não decisão clínica. Contratualmente alinhado com parceiro integrador (parceria já em curso com ~15k assistidos via Dossiê do Assistido).
 
 ### "Como vocês escalam pra 1M de usuários?"
 Arquitetura stateless (Flask + Gunicorn + Docker) horizontal. pgvector no Postgres escala até ~100M vetores com ivfflat → migramos pra Weaviate/Pinecone se necessário. Evolution API suporta ~10k msgs/segundo/instância. WhatsApp Business BSP com Twilio/Gupshup pra volume alto. Custos lineares com receita.

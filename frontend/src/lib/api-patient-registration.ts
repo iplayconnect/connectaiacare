@@ -38,7 +38,7 @@ export type ItemSource =
   | "procurador_declared"
   | "manager_declared"
   | "clinician_validated"
-  | "imported_tecnosenior"
+  | "imported_partner"
   | "imported_other";
 
 export interface ClinicalItem {
@@ -232,7 +232,7 @@ export const ITEM_SOURCE_LABEL: Record<string, string> = {
   procurador_declared: "Declarado por procurador",
   manager_declared: "Declarado pela equipe",
   clinician_validated: "Validado por clínico",
-  imported_tecnosenior: "Importado (Tecnosenior)",
+  imported_partner: "Importado (parceiro integrador)",
   imported_other: "Importado",
 };
 

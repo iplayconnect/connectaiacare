@@ -416,7 +416,7 @@ export const mockAntonio: Patient = {
   birth_date: "1944-02-08",
   gender: "M",
   photo_url: "https://i.pravatar.cc/300?img=12",
-  care_unit: "SPA Tecnosenior Moema",
+  care_unit: "SPA parceiro integrador Moema",
   room_number: "214",
   care_level: "semi_dependente",
   conditions: [

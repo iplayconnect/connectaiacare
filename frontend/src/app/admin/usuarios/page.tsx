@@ -461,7 +461,7 @@ function UserModal({
             <input
               value={partnerOrg}
               onChange={(e) => setPartnerOrg(e.target.value)}
-              placeholder="ex: Tecnosenior"
+              placeholder="ex: parceiro integrador"
               className="input"
             />
           </Field>

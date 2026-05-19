@@ -112,7 +112,7 @@ CREATE TABLE aia_health_subscription_referrals (
 
 | Origem da indicação | Comissão | Pagamento |
 |---------------------|----------|-----------|
-| SPA (Tecnosenior parceira) | 1 mês grátis do contrato B2B por conversão | Crédito na próxima fatura |
+| SPA (parceiro integrador parceira) | 1 mês grátis do contrato B2B por conversão | Crédito na próxima fatura |
 | Cuidador profissional pessoal | R$50 Pix no 2º mês de pagamento B2C | Via Pix/PagBank |
 | Familiar já cliente | 10% off na própria mensalidade por 3 meses | Crédito recorrente |
 
@@ -205,7 +205,7 @@ Restam 7 — todos têm escopo conhecido e estimativa, nada é desconhecido-desc
 - [ ] Módulo Cadastros (Pacientes/Familiares/Profissionais/Usuários)
 - [ ] Programa indicação B2B→B2C (MVP)
 - [ ] Rehearsal + slides demo 28/04
-- [ ] Piloto 30 dias Tecnosenior com 10 SPAs
+- [ ] Piloto 30 dias parceiro integrador com 10 SPAs
 
 ### Fase 2.A — B2C MVP Essencial (mai–jul/2026)
 - Auth independente (ADR-024) com MFA
@@ -243,7 +243,7 @@ Restam 7 — todos têm escopo conhecido e estimativa, nada é desconhecido-desc
 ## 5. Canais de aquisição (atualizados)
 
 **B2B (primários)**:
-- Tecnosenior (parceria já ativa)
+- parceiro integrador (parceria já ativa)
 - Outras SPAs afiliadas via Murilo
 - Grupo Abrates (associação operadoras geriátricas)
 

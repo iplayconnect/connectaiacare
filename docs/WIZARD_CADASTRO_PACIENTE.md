@@ -82,7 +82,7 @@ Esse papel fica **congelado na sessão** — uma vez iniciado, mudar de quem inf
 
 Campos padrão: nome, "como é chamado(a)", CPF (com validação de dígitos verificadores), data de nascimento, gênero, forma de tratamento que a Sofia vai usar, "paciente reporta sobre si mesmo" (idoso solo), e dados de acomodação (unidade, quarto, nível de cuidado I-IV).
 
-CPF é o gancho pra integrações externas (Tecnosenior).
+CPF é o gancho pra integrações externas (parceiro integrador).
 
 ### Passo 3 — Condições de saúde
 
@@ -156,8 +156,8 @@ Botão "Finalizar cadastro" → marca sessão como completa, atualiza `registrat
 
 Vou abrir a plataforma e mostrar:
 
-1. **Prontuário de um paciente já importado** da Tecnosenior — vocês veem os dados em formato antigo (string array) sendo lidos corretamente.
-2. **Backfill rodado** — esse mesmo paciente agora tem cada item com `source = imported_tecnosenior` (sem perder o nome original).
+1. **Prontuário de um paciente já importado** da parceiro integrador — vocês veem os dados em formato antigo (string array) sendo lidos corretamente.
+2. **Backfill rodado** — esse mesmo paciente agora tem cada item com `source = imported_partner` (sem perder o nome original).
 3. **Wizard aberto pelo botão "Cadastro" no prontuário** — começamos do zero pra mostrar os 5 passos.
 4. **Autocomplete CID-10** funcionando (limitado ao subset que vocês têm aprovado em `aia_health_cid10_curated`).
 5. **Lookup de classe terapêutica** com losartana / metformina / donepezila.

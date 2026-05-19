@@ -2,7 +2,7 @@
 
 > ⚠️ **Atualizado em 2026-05-01 com 4 decisões do Alexandre:**
 > 1. Hospital piloto pode pedir número Zap próprio em <3 meses → multi-instance vai pra Phase A (infra preparada, mas começa com 1 instância ativa).
-> 2. **Política white-label**: nome "Sofia" é fixo da plataforma. Não transferimos pra concorrente comercial (caso Tecnosenior — declinado). White-label completo só sob NDA + contrato uso interno.
+> 2. **Política white-label**: nome "Sofia" é fixo da plataforma. Não transferimos pra concorrente comercial (caso parceiro integrador — declinado). White-label completo só sob NDA + contrato uso interno.
 > 3. Volume target 6 meses: **10k msgs/dia** → webhook async + worker pool 5-10 + cost tracking obrigatórios desde Phase A.
 > 4. **Tenant central unificado** (Leitura A): TODO phone não-identificado entra em `connectaiacare_central` ("ConnectaIA Care Central"). Super Sofia classifica intent e ramifica pra B2C/B2B/suporte/clínico via sub-agentes. `sofiacuida_b2c` mantém só assinantes JÁ CONVERTIDOS — não recebe mais entrada direta de phone novo.
 
@@ -538,7 +538,7 @@ Decisões fixas que alimentam o design:
    - Contrato com cláusula de não-concorrência + NDA.
    - Decisão caso a caso (super_admin manual).
 4. **Casos fechados**:
-   - **Tecnosenior**: declinado. Vai ser concorrente. Sem branding,
+   - **parceiro integrador**: declinado. Vai ser concorrente. Sem branding,
      sem white-label, sem nada.
 5. **Implicação técnica**: campo `aia_health_tenants.ai_name`
    default = `"Sofia"`. Override permitido apenas com flag
@@ -881,7 +881,7 @@ desviar tráfego gradualmente.
 | # | Decisão | Resolvido |
 |---|---|---|
 | **A** | Multi-instance Evolution | **Phase A — infra preparada, mas só 1 instância ativa hoje. Hospital piloto pode pedir número próprio em <3 meses → adicionar = config + provisionamento, não código.** |
-| **B** | White-label / branding Sofia | **Nome "Sofia" é fixo da plataforma. Não transferimos pra concorrente comercial. Customização permitida (greeting com tenant, footer, cores). White-label completo só sob NDA + uso interno (decisão caso a caso). Tecnosenior declinado.** Detalhes em §7.5. |
+| **B** | White-label / branding Sofia | **Nome "Sofia" é fixo da plataforma. Não transferimos pra concorrente comercial. Customização permitida (greeting com tenant, footer, cores). White-label completo só sob NDA + uso interno (decisão caso a caso). parceiro integrador declinado.** Detalhes em §7.5. |
 | **C** | Volume target 6 meses | **10k msgs/dia** → webhook async, worker pool 5-10, cost tracking obrigatórios desde Phase A. Headroom 3x = 30k/dia capacidade dimensionada. |
 | **D** | Tenant central unificado (Leitura A) | **Todo phone não-identificado entra em `connectaiacare_central` ("ConnectaIA Care Central"). Super Sofia classifica intent e ramifica pra B2C/B2B/suporte/clínico via sub-agentes. `sofiacuida_b2c` continua existindo MAS só abriga assinantes JÁ CONVERTIDOS — não recebe mais entrada direta de phone novo via webhook.** Detalhes em §0.1. |
 

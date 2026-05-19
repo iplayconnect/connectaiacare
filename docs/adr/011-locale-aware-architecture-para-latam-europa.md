@@ -8,7 +8,7 @@
 ## Context and Problem Statement
 
 Estratégia comercial do ConnectaIACare prevê expansão:
-1. **Brasil (Q2-Q3 2026)** — Tecnosenior + Amparo + Grupo Vita → Português
+1. **Brasil (Q2-Q3 2026)** — parceiro integrador + parceiro de atenção primária + Grupo Vita → Português
 2. **LATAM (Q4 2026 - Q2 2027)** — Argentina, Chile, México, Colômbia → Espanhol (variantes por país)
 3. **Europa (2027+)** — Portugal, Espanha, Reino Unido, Alemanha → Português Europeu, Espanhol Europeu, Inglês, Alemão
 
@@ -202,7 +202,7 @@ Ordem de precedência:
 
 ## When to Revisit
 
-- Se Tecnosenior quiser expansão Argentina/Chile antes de 2027 — adiantar Fase 1
+- Se parceiro integrador quiser expansão Argentina/Chile antes de 2027 — adiantar Fase 1
 - Se houver parceria com rede hospitalar espanhola — adiantar Fase 3
 - Se a Anthropic lançar modelos multi-locale nativos que simplifiquem prompts (ex: "Claude pt" vs "Claude es") — revisitar arquitetura de prompts
 - Se aparecer requisito de variante regional que não prevemos (ex: `pt-AO` Angolano para expansão africana)

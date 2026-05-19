@@ -16,7 +16,7 @@
 6. [Diferenciais técnicos](#6-diferenciais-técnicos)
 7. [Compliance + Segurança Clínica](#7-compliance--segurança-clínica)
 8. [Modelo de operação 24/7](#8-modelo-de-operação-247)
-9. [Integração com parceiros (Tecnosenior, ILPIs)](#9-integração-com-parceiros)
+9. [Integração com parceiros (parceiro integrador, ILPIs)](#9-integração-com-parceiros)
 10. [Roadmap e estado atual](#10-roadmap-e-estado-atual)
 11. [FAQ](#11-faq)
 12. [Glossário](#12-glossário)
@@ -68,7 +68,7 @@ A consequência: **eventos clínicos perdidos**, retrabalho, judicialização, c
 | Pre-check de sintomas agudos (P1) | ✅ regex + LLM bypass em 27ms |
 | Fila de handoff humano 24/7 | ✅ com SLA + push WhatsApp P1 |
 | Bases curadas (CID-10, medicamentos, cross-validation) | ✅ + painel de revisão pra clínicos |
-| Pacientes em piloto | Tecnosenior validado · 200+ importados |
+| Pacientes em piloto | parceiro integrador validado · 200+ importados |
 | Equipe clínica de validação | Henrique Bordin (Biomédico + Farmácia) · Coord. PUC (Farmácia Geriátrica) · Geriatra UFRGS (em convite) |
 
 ### Próximas entregas (Q3 2026)
@@ -94,7 +94,7 @@ A consequência: **eventos clínicos perdidos**, retrabalho, judicialização, c
 | **Clínica geriátrica** | Acompanhamento longitudinal de pacientes ambulatoriais. Família reporta sinais entre consultas. |
 | **Atendimento domiciliar** | Cuidador profissional contratado pela família relata via WhatsApp. Médico vê tudo na mesma timeline. |
 | **B2C — Idoso solo** | Idoso autônomo conversa direto com Sofia. Filhos cadastrados recebem alertas críticos. |
-| **Parceiro tecnológico** (Tecnosenior, etc.) | Integra dados de prontuário próprio + recebe enriquecimento da Sofia. |
+| **Parceiro tecnológico** (parceiro integrador, etc.) | Integra dados de prontuário próprio + recebe enriquecimento da Sofia. |
 
 ### Arquitetura conceitual
 
@@ -402,7 +402,7 @@ Tabela `aia_health_tenants` é a mãe — todos os outros dados (pacientes, cuid
 - Persona própria da IA (nome, voz, frase de abertura)
 - Whatsapp_evolution_instance dedicado
 - Branding (logo, cores primária/accent)
-- Integrações configuráveis (Tecnosenior, FHIR endpoint, etc.)
+- Integrações configuráveis (parceiro integrador, FHIR endpoint, etc.)
 
 ### 2. Provenance por dado clínico
 
@@ -586,11 +586,11 @@ Sistema parametrizado por **tenant** (multi-tenant ready):
 | **REST API** | `/api/external/*` (com token tenant) | Importação batch de pacientes, sincronização de prontuário |
 | **Webhook outbound** | Receber notificação de care_events | Quando parceiro tem sistema próprio que precisa saber |
 | **FHIR R4** | `/api/fhir/*` (em roadmap) | Sistemas hospitalares que falam FHIR |
-| **Limites custom de vitais** | `GET /patient/<id>/vital-thresholds` (Tecnosenior) | Parceiro define limites individualizados, Sofia consome |
+| **Limites custom de vitais** | `GET /patient/<id>/vital-thresholds` (parceiro integrador) | Parceiro define limites individualizados, Sofia consome |
 
-### Caso real: parceria com Tecnosenior
+### Caso real: parceria com parceiro integrador
 
-- Tecnosenior tem produto **TotalCare** (cuidado de idosos em casa via dispositivos)
+- parceiro integrador tem produto **TotalCare** (cuidado de idosos em casa via dispositivos)
 - ConnectaIACare integra **lado conversacional** (WhatsApp + IA + plantão)
 - Eles têm **médico de plantão próprio** — nossa plataforma roteia direto pra fila deles
 - Compartilhamento bidirecional de dados de paciente (com consentimento)
@@ -729,7 +729,7 @@ R: Métricas que tracking:
 | `PROPOSTA_PARCERIA_COORDENADORA_PUC.md` | Modelo de Conselho Científico |
 | `PLANO_PLANTAO_E_MENSAGEM_MURILO.md` | Estrutura operacional do plantão |
 | `CONFIGURAR_PLANTAO_TENANT.md` | Como cadastrar plantonistas via SQL/API |
-| `RESPOSTA_MATHEUS_LIMITES_SAUDE.md` | Integração com limites custom Tecnosenior |
+| `RESPOSTA_MATHEUS_LIMITES_SAUDE.md` | Integração com limites custom parceiro integrador |
 | `ANALISE_SIDEBAR_2026-05-16.md` | Análise funcional dos 34 itens de menu |
 | `ROADMAP_J_K_L.md` | Próximas 3 evoluções com spec |
 
@@ -751,7 +751,7 @@ O documento inteiro é denso (~30 páginas). Pra o parceiro comercial, sugiro ab
 2. **Personas e fluxos** (seção 3) — 10min com exemplos do Murilo
 3. **Diferenciais técnicos** (seção 6) — 5min destacando provenance + cross-validation + multi-tenant
 4. **Compliance** (seção 7) — 5min se for cliente saúde institucional
-5. **Casos de uso e integração** (seções 9 + 10) — 10min mostrando piloto Tecnosenior + roadmap
+5. **Casos de uso e integração** (seções 9 + 10) — 10min mostrando piloto parceiro integrador + roadmap
 
 Total: **35-40min de apresentação + tempo de perguntas.**
 

@@ -81,7 +81,7 @@ export interface PatientRecord {
   responsible: any;
   preferred_form_of_address: string | null;
   is_self_reporting: boolean | null;
-  tecnosenior_patient_id: number | null;
+  external_partner_patient_id: number | null;
   photo_url: string | null;
   notes: string | null;
 }

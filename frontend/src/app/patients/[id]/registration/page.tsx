@@ -773,7 +773,7 @@ function Step2Demographics({
     <div className="space-y-4">
       <p className="text-xs text-muted-foreground">
         Identificação básica. <b>Nome completo</b> é obrigatório;{" "}
-        <b>CPF</b> destrava integrações externas (Tecnosenior, etc.).
+        <b>CPF</b> destrava integrações externas (parceiro integrador, etc.).
       </p>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

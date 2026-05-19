@@ -22,7 +22,7 @@ def _now_iso() -> str:
 def normalize_clinical_item(
     item: Any,
     *,
-    default_source: str = "tecnosenior_import",
+    default_source: str = "partner_import",
     default_user_id: str | None = None,
 ) -> dict[str, Any]:
     """Converte item antigo (string) ou novo (dict) pra formato canônico.
@@ -72,7 +72,7 @@ def normalize_clinical_item(
 def normalize_clinical_array(
     arr: Any,
     *,
-    default_source: str = "tecnosenior_import",
+    default_source: str = "partner_import",
     default_user_id: str | None = None,
 ) -> list[dict[str, Any]]:
     """Aceita array vazio, None, lista de strings, lista de dicts, mix."""

@@ -4,7 +4,7 @@ Acesso: super_admin, admin_tenant (gestor da unidade), enfermeiro
 (coordenador de cuidados).
 
 Eventos de wellness são SEPARADOS do prontuário do paciente — não
-viram CareNote no Tecnosenior, não disparam cascata clínica.
+viram CareNote no parceiro integrador, não disparam cascata clínica.
 """
 from __future__ import annotations
 

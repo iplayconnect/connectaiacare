@@ -17,7 +17,7 @@ nível de risco:
 Tenant config decide o que fazer no final:
   - mode='no_clinical_team' (B2C/ILPI): T3 decide direto + notifica
   - mode='clinical_team' (clínica/hospital): T3 enfileira pra fila humana
-  - mode='hybrid_partner' (Tecnosenior tipo): webhook pro parceiro
+  - mode='hybrid_partner' (parceiro integrador tipo): webhook pro parceiro
 
 Audit completo persiste em aia_health_classification_cascade.
 """

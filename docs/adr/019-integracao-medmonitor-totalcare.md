@@ -2,18 +2,18 @@
 
 - **Date**: 2026-04-20
 - **Status**: Accepted
-- **Deciders**: Alexandre (ConnectaIA), Murilo (Tecnosenior), Matheus Campello (dev TotalCare)
-- **Tags**: integration, tecnosenior, api, sync, positioning
+- **Deciders**: Alexandre (ConnectaIA), Murilo (parceiro integrador), Matheus Campello (dev TotalCare)
+- **Tags**: integration, parceiro_integrador, api, sync, positioning
 
 ## Context and Problem Statement
 
-O cliente de lançamento (Tecnosenior) já opera o TotalCare — sistema da Contactto.care que gerencia dispositivos (Vidafone, GPS), cadastro de assistidos, cuidadores e anotações de cuidado (`care-notes`). É um sistema **estático e difícil de operar** (relato do próprio time), mas é onde está **a base de assistidos reais, os dispositivos de monitoramento e a base de cuidadores profissionais**.
+O cliente de lançamento (parceiro integrador) já opera o TotalCare — sistema da Contactto.care que gerencia dispositivos (Vidafone, GPS), cadastro de assistidos, cuidadores e anotações de cuidado (`care-notes`). É um sistema **estático e difícil de operar** (relato do próprio time), mas é onde está **a base de assistidos reais, os dispositivos de monitoramento e a base de cuidadores profissionais**.
 
 A visão estratégica articulada pelo Murilo (2026-04-20, 18h) é:
 
 > *"A nossa plataforma precisa ser a principal. A médio prazo, a plataforma deles vai ficar como backend dos dispositivos e leitores de sinais — o cérebro e a operação ficam no ConnectaIACare."*
 
-A Tecnosenior nos forneceu acesso à **"Agent API"** do TotalCare (documento `Documentação Agente de API.pdf`, 2026-04-20):
+A parceiro integrador nos forneceu acesso à **"Agent API"** do TotalCare (documento `Documentação Agente de API.pdf`, 2026-04-20):
 - URL base: `https://<tenant>.contactto.care/agent/` (nosso tenant: `totalcare-vidafone`)
 - Auth: `Authorization: Api-Key <plaintext-key>`
 - Leitura: `/patients/`, `/caretakers/`, `/members/`, `/care-notes/`
@@ -26,7 +26,7 @@ Precisamos decidir **como integrar** — e o mais importante: **em que sentido o
 - **Visão estratégica Murilo**: ConnectaIACare = plataforma principal, TotalCare = camada de dispositivos
 - **Source of truth de cadastros**: TotalCare é onde o vínculo legal/comercial está (Vidafone ativo, contrato com a família)
 - **Source of truth de eventos clínicos**: ConnectaIACare precisa ser (porque é onde a IA analisa, a escalação executa, o dashboard vive)
-- **Legado não-invasivo**: não podemos exigir que Tecnosenior reescreva nada — nossa integração precisa ser append-only
+- **Legado não-invasivo**: não podemos exigir que parceiro integrador reescreva nada — nossa integração precisa ser append-only
 - **Compliance (LGPD Art. 11)**: dado sensível de saúde não pode ser duplicado sem DPIA clara — mirror local tem que ter justificativa técnica
 - **Resiliência**: API externa pode cair (como caiu temporariamente em 2026-04-20 devido a endpoint errado) — plataforma não pode ficar offline
 - **Custos de API**: rate limit não declarado; uso moderado (sync inicial + create on close)
@@ -122,8 +122,8 @@ Phone é a chave de ponte entre os dois sistemas — não temos SSO.
 
 - **Plataforma principal honesta**: pipeline + IA + dashboard rodam 100% com dados locais — nenhuma chamada TotalCare no caminho crítico
 - **TotalCare fica leve**: só recebe 1 POST por evento encerrado (∼dezenas/dia por tenant) — zero carga de leitura
-- **Dados ficam sincronizados automaticamente**: cada care-note aparece no sistema oficial da Tecnosenior sem intervenção manual
-- **Visibilidade para Tecnosenior**: Matheus/Murilo veem na interface deles tudo que nossa plataforma analisou — reforça confiança
+- **Dados ficam sincronizados automaticamente**: cada care-note aparece no sistema oficial da parceiro integrador sem intervenção manual
+- **Visibilidade para parceiro integrador**: Matheus/Murilo veem na interface deles tudo que nossa plataforma analisou — reforça confiança
 - **Migração futura fácil**: quando TotalCare expor dispositivos/sinais via API, basta adicionar métodos ao `medmonitor_client` sem refatorar resto
 - **Dev-friendly**: client com `httpx` + normalização de phone + graceful degradation = plugar outro provedor (SulAmérica, Hapvida, etc) é trocar o URL base
 
@@ -132,7 +132,7 @@ Phone é a chave de ponte entre os dois sistemas — não temos SSO.
 - **Dado duplicado**: nome, foto, birthdate ficam em 2 lugares. Mitigação: sync on-demand + refresh periódico (a implementar) mantém consistência eventual.
 - **Split-brain possível**: se TotalCare atualizar nome de paciente depois do sync, nossa cópia fica desatualizada até próximo sync. Aceitável pra dados que mudam pouco; mitigação futura: webhook TotalCare → nosso refresh.
 - **Dependência forte de phone como chave**: se cuidador mudar de número sem atualizar TotalCare, biometria 1:1 falha na primeira interação. Mitigação: fallback 1:N via embeddings de voz (ADR-005).
-- **API key do TotalCare é por organização (plaintext-key)**: perda da key exige rotação manual pela Tecnosenior. Mitigação: armazenar em `.env` (chmod 600) + nunca commitar.
+- **API key do TotalCare é por organização (plaintext-key)**: perda da key exige rotação manual pela parceiro integrador. Mitigação: armazenar em `.env` (chmod 600) + nunca commitar.
 
 ## Pros and Cons of the Options
 
@@ -171,12 +171,12 @@ Phone é a chave de ponte entre os dois sistemas — não temos SSO.
 `.env` na Hostinger:
 ```
 MEDMONITOR_API_URL=https://totalcare-vidafone.contactto.care/agent
-MEDMONITOR_API_KEY=<plaintext-key fornecida por Tecnosenior>
+MEDMONITOR_API_KEY=<plaintext-key fornecida por parceiro integrador>
 ```
 
 ### Sincronização inicial realizada (2026-04-20)
 
-- **37 pacientes** espelhados (TotalCare ids 1-148 da organização Tecnosenior)
+- **37 pacientes** espelhados (TotalCare ids 1-148 da organização parceiro integrador)
 - **8 cuidadores** espelhados (Matheus, Murilo, Cleuza, Emmilyn, Vilson, Martim, Marlene, Teste Assistente)
 - Script: `/tmp/sync_from_medmonitor.py` — executado via `docker exec`
 
@@ -191,7 +191,7 @@ MEDMONITOR_API_KEY=<plaintext-key fornecida por Tecnosenior>
 - Se TotalCare expuser API de dispositivos (Vidafone, GPS) → expandir integração pra puxar sinais
 - Se rate limit começar a morder → adicionar cache local com TTL
 - Se houver mais de 1 tenant → migrar credenciais pra `aia_health_tenant_config` com criptografia
-- Se a Tecnosenior quiser integração com outra fonte (Hapvida, etc) → abstrair `MedMonitorClient` como interface
+- Se a parceiro integrador quiser integração com outra fonte (Hapvida, etc) → abstrair `MedMonitorClient` como interface
 
 ## Links
 

@@ -210,7 +210,7 @@ CREATE TABLE aia_health_doctors (
 - **Não substituir a consulta presencial** — tele-consulta é uma modalidade adicional, não exclusiva
 - **Não fazer diagnóstico autônomo** — IA gera **insights**, médico decide (mesma postura do pipeline ConnectaIACare)
 - **Não substituir prontuário hospitalar** — consultas tele-med integram via FHIR (roadmap) com prontuário da rede
-- **Não fazer triagem clínica** pelo chat do paciente — isso fica com atenção primária (Amparo integration futura)
+- **Não fazer triagem clínica** pelo chat do paciente — isso fica com atenção primária (parceiro de atenção primária integration futura)
 
 ## Links
 

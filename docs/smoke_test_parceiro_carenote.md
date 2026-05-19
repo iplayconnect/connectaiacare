@@ -1,4 +1,4 @@
-# Smoke Test — Integração Tecnosenior CareNotes
+# Smoke Test — Integração parceiro integrador CareNotes
 
 **Data**: 2026-04-28
 **Status**: pronto pra rodar após merge + migration 055.
@@ -24,7 +24,7 @@ Você precisa ter pelo menos 1 paciente e 1 cuidador cadastrados
 **dos dois lados** com phone batendo. Lookup atual é por phone
 (CPF chega 2026-04-29, aí trocamos).
 
-Como saber se está cadastrado do lado da Tecnosenior:
+Como saber se está cadastrado do lado da parceiro integrador:
 
 ```bash
 curl -H "Authorization: Api-Key $KEY" \
@@ -44,7 +44,7 @@ Esperado: lista com 1+ resultados contendo `id`.
 
 ```bash
 curl -H "Authorization: Bearer $JWT" \
-  https://care.connectaia.com.br/api/integrations/tecnosenior/health
+  https://care.connectaia.com.br/api/integrations/parceiro_integrador/health
 ```
 
 Esperado:
@@ -62,7 +62,7 @@ Se `client_enabled=false`, env vars não chegaram. Confere
 # Patient lookup
 curl -X POST -H "Authorization: Bearer $JWT" \
   -H "content-type: application/json" \
-  https://care.connectaia.com.br/api/integrations/tecnosenior/resolve-patient \
+  https://care.connectaia.com.br/api/integrations/parceiro_integrador/resolve-patient \
   -d '{"patient_id": "bbb4967e-da4b-4e0d-9518-f8e77a02266e"}'
 ```
 
@@ -70,7 +70,7 @@ Esperado:
 ```json
 {"status":"ok",
  "patient_uuid":"bbb4967e-...",
- "tecnosenior_patient_id": 7,
+ "external_partner_patient_id": 7,
  "resolved": true}
 ```
 
@@ -78,7 +78,7 @@ Esperado:
 # Caretaker lookup por phone
 curl -X POST -H "Authorization: Bearer $JWT" \
   -H "content-type: application/json" \
-  https://care.connectaia.com.br/api/integrations/tecnosenior/resolve-caretaker \
+  https://care.connectaia.com.br/api/integrations/parceiro_integrador/resolve-caretaker \
   -d '{"phone": "5551996161700"}'
 ```
 
@@ -86,13 +86,13 @@ Esperado:
 ```json
 {"status":"ok",
  "phone":"5551996161700",
- "tecnosenior_caretaker_id": 12,
+ "external_partner_caretaker_id": 12,
  "resolved": true}
 ```
 
-Side effect: o tecnosenior_id resolvido fica cacheado em
-`aia_health_patients.tecnosenior_patient_id` /
-`aia_health_caregivers.tecnosenior_caretaker_id`. Próxima
+Side effect: o external_partner_id resolvido fica cacheado em
+`aia_health_patients.external_partner_patient_id` /
+`aia_health_caregivers.external_partner_caretaker_id`. Próxima
 resolução é instantânea (sem chamada remota).
 
 ### 2.3 Roundtrip completo
@@ -103,7 +103,7 @@ Pega um `care_event_id` real (ex: do `/alertas` ou
 ```bash
 curl -X POST -H "Authorization: Bearer $JWT" \
   -H "content-type: application/json" \
-  https://care.connectaia.com.br/api/integrations/tecnosenior/test-roundtrip \
+  https://care.connectaia.com.br/api/integrations/parceiro_integrador/test-roundtrip \
   -d '{"care_event_id": "<uuid_do_care_event>"}'
 ```
 
@@ -111,13 +111,13 @@ Sucesso:
 ```json
 {
   "status": "ok",
-  "tecnosenior_carenote_id": 431,
-  "tecnosenior_status": "OPEN",
+  "partner_carenote_id": 431,
+  "partner_sync_status": "OPEN",
   "patient_int": 7,
   "caretaker_int": 12,
   "sync_state": {
-    "tecnosenior_carenote_id": 431,
-    "tecnosenior_status": "OPEN",
+    "partner_carenote_id": 431,
+    "partner_sync_status": "OPEN",
     "last_synced_at": "2026-04-28T...",
     "sync_error": null,
     "retry_count": 0
@@ -131,8 +131,8 @@ Sucesso:
 |----------|-------|---------------|
 | `client_disabled` | env vars MEDMONITOR_* faltando | Setar no compose |
 | `event_not_found` | UUID não existe | Conferir |
-| `patient_not_found_in_tecnosenior` | Phone do paciente não cadastrado lá | Pedir Matheus pra cadastrar paciente de teste |
-| `caretaker_not_found_in_tecnosenior` | Idem cuidador | Idem |
+| `patient_not_found_in_partner` | Phone do paciente não cadastrado lá | Pedir Matheus pra cadastrar paciente de teste |
+| `caretaker_not_found_in_partner` | Idem cuidador | Idem |
 | `remote_create_failed` | API deles retornou 4xx/5xx | Olhar logs do api container, conferir auth + payload |
 
 ### 2.5 Idempotência
@@ -144,7 +144,7 @@ curl -X POST ... -d '{"care_event_id": "<mesmo>"}'
 ```
 
 Esperado: `status: "already_synced"` retornando o mesmo
-`tecnosenior_carenote_id`. Não faz nova POST pro Tecnosenior.
+`partner_carenote_id`. Não faz nova POST pro parceiro integrador.
 
 Pra forçar re-envio:
 ```bash
@@ -185,9 +185,9 @@ worker de retry.
 - [ ] Resolve patient por CPF retorna `resolved: true` (após
       Matheus subir 2026-04-29)
 - [ ] Resolve caretaker por CPF retorna `resolved: true` (idem)
-- [ ] Roundtrip retorna `status: "ok"` + `tecnosenior_carenote_id` numérico
+- [ ] Roundtrip retorna `status: "ok"` + `partner_carenote_id` numérico
 - [ ] Mesmo POST 2× retorna `already_synced` (idempotência local)
-- [ ] CareNote criada aparece no painel da Tecnosenior (Matheus
+- [ ] CareNote criada aparece no painel da parceiro integrador (Matheus
       confirma via screenshot ou GET pelo lado dele)
 - [ ] content_resume segue formato `[CLASSE] / Resumo: / Severidade: /`
 - [ ] occurred_at do evento está correto no painel deles

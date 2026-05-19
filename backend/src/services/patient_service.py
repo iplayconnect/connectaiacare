@@ -102,9 +102,9 @@ class PatientService:
         "metadata",
         # Campos novos (migrations 053, 054)
         "preferred_form_of_address", "is_self_reporting", "cpf",
-        # Mapping Tecnosenior — só super_admin deveria mexer em
+        # Mapping parceiro integrador — só super_admin deveria mexer em
         # produção; por enquanto liberamos no PATCH e a UI controla.
-        "tecnosenior_patient_id",
+        "external_partner_patient_id",
     }
 
     JSONB_FIELDS = {

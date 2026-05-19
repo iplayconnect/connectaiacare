@@ -89,9 +89,9 @@ def f2_patients_crud() -> Flow:
     f.assert_(
         db_exists(
             "SELECT 1 FROM aia_health_patients "
-            "WHERE active = TRUE AND tecnosenior_patient_id IS NOT NULL"
+            "WHERE active = TRUE AND external_partner_patient_id IS NOT NULL"
         ),
-        "≥1 paciente com mapeamento Tecnosenior (pra teste sync)",
+        "≥1 paciente com mapeamento parceiro integrador (pra teste sync)",
     )
     f.assert_(
         db_exists(
@@ -119,9 +119,9 @@ def f3_caregivers() -> Flow:
     f.assert_(
         db_exists(
             "SELECT 1 FROM aia_health_caregivers "
-            "WHERE active = TRUE AND tecnosenior_caretaker_id IS NOT NULL"
+            "WHERE active = TRUE AND external_partner_caretaker_id IS NOT NULL"
         ),
-        "≥1 cuidador com mapeamento Tecnosenior",
+        "≥1 cuidador com mapeamento parceiro integrador",
     )
     return f
 
@@ -273,27 +273,27 @@ def f8_admin_panel_data() -> Flow:
     return f
 
 
-def f9_tecnosenior_sync() -> Flow:
-    f = Flow(9, "Tecnosenior sync (one-off + streaming)")
+def f9_partner_carenote_sync() -> Flow:
+    f = Flow(9, "parceiro integrador sync (one-off + streaming)")
     db = get_postgres()
     syncs = db_count(
-        "SELECT * FROM aia_health_tecnosenior_sync"
+        "SELECT * FROM aia_health_partner_carenote_sync"
     )
     f.assert_(syncs >= 1, f"≥1 sync registrado ({syncs})")
     closed = db_count(
-        "SELECT * FROM aia_health_tecnosenior_sync "
-        "WHERE tecnosenior_status = 'CLOSED'"
+        "SELECT * FROM aia_health_partner_carenote_sync "
+        "WHERE partner_sync_status = 'CLOSED'"
     )
     f.assert_(closed >= 1, f"≥1 CareNote CLOSED ({closed}) — sync funcionou")
     f.assert_(
         db_exists(
             "SELECT 1 FROM information_schema.tables "
-            "WHERE table_name = 'aia_health_tecnosenior_addendums'"
+            "WHERE table_name = 'aia_health_partner_carenote_addendums'"
         ),
         "Tabela addendums existe (streaming)",
     )
     errors = db_count(
-        "SELECT * FROM aia_health_tecnosenior_sync "
+        "SELECT * FROM aia_health_partner_carenote_sync "
         "WHERE sync_error IS NOT NULL"
     )
     f.assert_(
@@ -309,7 +309,7 @@ FLOWS = [
     f1_login_auth, f2_patients_crud, f3_caregivers,
     f4_whatsapp_audio_pipeline, f5_sofia_outbound_infra,
     f6_alerts_escalation, f7_medication, f8_admin_panel_data,
-    f9_tecnosenior_sync,
+    f9_partner_carenote_sync,
 ]
 
 

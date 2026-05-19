@@ -13,7 +13,7 @@
 ## 1. Contexto
 
 A ConnectaIACare hoje é produto B2B para SPAs/clínicas geriátricas (demo 28/04
-com Murilo/Tecnosenior). O roadmap estratégico prevê expansão para B2C
+com Murilo/parceiro integrador). O roadmap estratégico prevê expansão para B2C
 in-house — idoso assinando serviço de acompanhamento via WhatsApp+IA+central
 humana (Atente) a partir de R$49,90/mês.
 
@@ -390,7 +390,7 @@ CREATE TABLE aia_health_community_responders (
 
 ### Por que esse time
 - Alexandre + Milene: operação Atente já rodando (fallback humano caro e difícil)
-- Parceria Tecnosenior: dispositivos + base instalada
+- Parceria parceiro integrador: dispositivos + base instalada
 - Stack vertical IA em produção (não MVP)
 - ConnectaIA comercial valida modelo de SaaS vertical
 

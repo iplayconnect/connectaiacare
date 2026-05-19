@@ -21,9 +21,9 @@ Plataforma de cuidado integrado com IA para idosos e pacientes crônicos em suas
 | Parceiro | Aporta |
 |----------|--------|
 | **ConnectaIA** | Camada de IA em produção (orquestração de agentes, voz conversacional natural, integração WhatsApp, roteador de LLMs de última geração) |
-| **Tecnosenior** | IoT ambiente + SPAs + central humana 24h + expertise geriátrica |
+| **parceiro integrador** | IoT ambiente + SPAs + central humana 24h + expertise geriátrica |
 | **MedMonitor** | Dispositivos clínicos homologados + plataforma de aferição |
-| **Amparo** | Atenção primária digital + base de pacientes crônicos |
+| **parceiro de atenção primária** | Atenção primária digital + base de pacientes crônicos |
 
 ## Produto (MVP geriátrico)
 
@@ -67,8 +67,8 @@ Plataforma de cuidado integrado com IA para idosos e pacientes crônicos em suas
 ## Próximos passos
 
 1. NDA + Carta de Intenções entre os 4 parceiros.
-2. Piloto SPA Tecnosenior: 10 idosos, 4 semanas.
-3. Integração MedMonitor + piloto Amparo.
+2. Piloto SPA parceiro integrador: 10 idosos, 4 semanas.
+3. Integração MedMonitor + piloto parceiro de atenção primária.
 4. DPIA LGPD conjunta.
 5. Formalização societária em 12 meses (conforme tração).
 

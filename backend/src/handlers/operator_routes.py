@@ -411,7 +411,7 @@ def patient_context(handoff_id: str):
                       gender, care_unit, room_number, care_level,
                       conditions, medications, allergies, responsible,
                       preferred_form_of_address, is_self_reporting,
-                      tecnosenior_patient_id, photo_url, notes,
+                      external_partner_patient_id, photo_url, notes,
                       created_at, updated_at
                FROM aia_health_patients WHERE id = %s""",
             (handoff["patient_id"],),

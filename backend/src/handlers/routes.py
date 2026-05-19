@@ -158,7 +158,7 @@ def update_patient(patient_id: str):
             care_unit?, room_number?, care_level?,
             conditions?, medications?, allergies?, responsible?,
             preferred_form_of_address?, is_self_reporting?,
-            tecnosenior_patient_id?, photo_url?, ... }
+            external_partner_patient_id?, photo_url?, ... }
 
     CPF é normalizado pra dígitos (sem máscara).
     """

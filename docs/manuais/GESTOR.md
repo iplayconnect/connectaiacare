@@ -23,7 +23,7 @@
 13. [Faturamento, créditos e consumo de IA](#13-faturamento-créditos-e-consumo-de-ia)
 14. [Governança da Sofia — Conselho Científico](#14-governança-da-sofia--conselho-científico)
 15. [Quando algo dá errado — playbook do gestor](#15-quando-algo-dá-errado--playbook-do-gestor)
-16. [Integrações (FHIR, Tecnosenior, CareNote, MedMonitor)](#16-integrações-fhir-tecnosenior-carenote-medmonitor)
+16. [Integrações (FHIR, parceiro integrador, CareNote, MedMonitor)](#16-integrações-fhir-parceiro_integrador-carenote-medmonitor)
 17. [FAQ do Gestor](#17-faq-do-gestor)
 18. [Checklist mensal](#18-checklist-mensal)
 19. [Contatos e suporte](#19-contatos-e-suporte)
@@ -720,13 +720,13 @@ Sidebar → **Clínico** → **Conselho Científico** → **Atas e Resoluções*
 
 ---
 
-## 16. Integrações (FHIR, Tecnosenior, CareNote, MedMonitor)
+## 16. Integrações (FHIR, parceiro integrador, CareNote, MedMonitor)
 
 ### Status atual
 
 | Integração | Status | O que faz |
 |---|---|---|
-| **Tecnosenior CareNote** | ✅ Produção (validado 29/04 com Armindo+Matheus) | Importa anotações de enfermagem do CareNote (id=2) |
+| **Parceiro CareNote** | ✅ Produção (validado 29/04 com Armindo+Matheus) | Importa anotações de enfermagem do CareNote (id=2) |
 | **Evolution API (WhatsApp)** | ✅ Produção | Canal de mensageria |
 | **Deepgram STT** | ✅ Produção | Transcrição de voz |
 | **MedMonitor** | 🔜 Em desenvolvimento | Importação de sinais vitais de dispositivos |
@@ -743,7 +743,7 @@ Cada integração tem:
 - Mapeamento de campos (qual campo do parceiro vira qual campo da Sofia)
 - Log de sincronização
 
-### Tecnosenior CareNote (caso de uso real)
+### Parceiro CareNote (caso de uso real)
 
 Cuidador da ILPI registra rotina no CareNote (tablet beira-leito). Conector:
 1. Lê novas anotações a cada 5 min

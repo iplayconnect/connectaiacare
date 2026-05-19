@@ -845,7 +845,7 @@ class EldercarePipeline:
         if local:
             return local
 
-        # Fallback: busca MedMonitor (assistidos reais Tecnosenior)
+        # Fallback: busca MedMonitor (assistidos reais parceiro integrador)
         if not self.medmonitor.enabled:
             return None
 

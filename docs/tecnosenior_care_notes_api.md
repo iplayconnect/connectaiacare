@@ -1,6 +1,6 @@
-# Tecnosenior — API de Care Notes (agente externo)
+# parceiro integrador — API de Care Notes (agente externo)
 
-**Origem**: documento enviado por Matheus (Tecnosenior) sobre como
+**Origem**: documento enviado por Matheus (parceiro integrador) sobre como
 integrar a Sofia/ConnectaIACare como agente externo emitindo
 anotações de cuidado pra plataforma deles.
 

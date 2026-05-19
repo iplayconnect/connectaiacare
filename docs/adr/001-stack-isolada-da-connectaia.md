@@ -7,7 +7,7 @@
 
 ## Context and Problem Statement
 
-O ConnectaIACare começa como MVP sprint para uma reunião de sexta (24/04/2026) com Tecnosenior, MedMonitor e Amparo. A ConnectaIA produção atende clientes pagantes do CRM de automação comercial (SDRs/Closers) 24/7. Qualquer bug ou regressão no MVP não pode afetar o CRM em produção. Além disso, dados médicos são sensíveis sob LGPD Art. 11 — superfície de risco muito diferente da do CRM.
+O ConnectaIACare começa como MVP sprint para uma reunião de sexta (24/04/2026) com parceiro integrador, MedMonitor e parceiro de atenção primária. A ConnectaIA produção atende clientes pagantes do CRM de automação comercial (SDRs/Closers) 24/7. Qualquer bug ou regressão no MVP não pode afetar o CRM em produção. Além disso, dados médicos são sensíveis sob LGPD Art. 11 — superfície de risco muito diferente da do CRM.
 
 ## Decision Drivers
 

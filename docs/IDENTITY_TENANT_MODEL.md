@@ -11,7 +11,7 @@ ConnectaIACare hoje amarra TODA identidade a um único `tenant_id` por linha:
 - `aia_health_patients` — `tenant_id NOT NULL`
 
 Isso funciona pra ILPI grande mas **quebra** em 6 cenários reais que vão aparecer
-no piloto Tecnosenior, Hospital Divina Providência e em qualquer cliente B2C.
+no piloto parceiro integrador, Hospital Divina Providência e em qualquer cliente B2C.
 
 ## Tipos de tenant atuais (migration 052)
 
@@ -51,10 +51,10 @@ Central. Hoje `users.tenant_id NOT NULL` o trava em um tenant. Funciona porque
 `alexandre@connectaia.com.br` é `super_admin` (cross-tenant by design). Mas
 operador comum não é super_admin — precisa de scope cross-tenant intermediário.
 
-### 5. Parceiros institucionais (Henrique PUC/RS, Murilo Tecnosenior)
+### 5. Parceiros institucionais (Henrique PUC/RS, Murilo parceiro integrador)
 
 Henrique revisa regras clínicas — atravessa tenants por definição (regras
-farmacológicas são plataforma-wide). Murilo opera Tecnosenior mas integra com
+farmacológicas são plataforma-wide). Murilo opera parceiro integrador mas integra com
 o ConnectaIACare via API — pode precisar visão consolidada.
 
 ### 6. Paciente individual que muda de contexto
@@ -131,7 +131,7 @@ Identity(
 | Canal | Tenant ativo |
 |---|---|
 | WhatsApp via instância `Connectaiacare` | `connectaiacare_demo` |
-| WhatsApp via futura instância `Tecnosenior` | `tecnosenior` |
+| WhatsApp via futura instância `parceiro integrador` | `parceiro_integrador` |
 | Voice via DID `5130624363` | `connectaiacare_demo` |
 | Voice via futuro DID Hospital Divina Providência | `hospital_divina` |
 
@@ -145,7 +145,7 @@ Operador da Central 24h fica como user com:
 - `memberships`:
   - `(connectaiacare_demo, central_operator_24h)`
   - `(hospital_divina, central_operator_24h)`
-  - `(tecnosenior, central_operator_24h)`
+  - `(parceiro_integrador, central_operator_24h)`
   - …todo cliente que contratou a Central
 
 Painel de handoff filtra por tenant_id da fila + verifica que operador tem
@@ -157,7 +157,7 @@ User com `home_tenant_id = NULL` e memberships em todos os tenants com
 role `clinical_reviewer`. Acessa endpoints `/clinical-rules/*` direto
 (curadoria global) sem necessidade de tenant scope.
 
-Murilo Tecnosenior fica como `parceiro` em `tenant=tecnosenior`. Vê só
+Murilo parceiro integrador fica como `parceiro` em `tenant=parceiro_integrador`. Vê só
 dados do próprio tenant. APIs externas (totalcare-vidafone) continuam
 mediadas por integration tokens.
 
@@ -217,7 +217,7 @@ Caregiver autônomo passa a poder atender N famílias sem N rows duplicadas.
 - Pro: schema correto desde já. Phase C v3+ nasce em cima do modelo certo.
 - Con: atrasa entregas clínicas (CareSofiaAgent + Familia + Paciente).
 
-**(B) Migrar depois do piloto Tecnosenior validar** (3-4 meses adiante)
+**(B) Migrar depois do piloto parceiro integrador validar** (3-4 meses adiante)
 - Pro: piloto valida produto antes de mexer em fundação.
 - Con: refactor maior porque mais rows pra migrar; possível dor com
   médicos N-orgs em hospitais.

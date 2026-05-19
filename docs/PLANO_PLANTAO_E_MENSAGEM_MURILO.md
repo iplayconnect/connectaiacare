@@ -8,7 +8,7 @@
 
 > Oi Murilo, tudo bem? Vi aqui que você fez um teste no dia 13 enviando "dor no peito" — o sistema respondeu corretamente em 3 segundos, escalou como emergência P1 e abriu uma chamada pra equipe clínica. Mas como ainda estamos em ambiente de testes, **não teve retorno do plantão médico** (não tem ninguém de plantão ainda, era teste técnico).
 >
-> Quando entrarmos em piloto real com Tecnosenior, o plantão fica ativo e a resposta humana acontece em até 5 minutos pro P1. Por enquanto, agradeço muito o teste — me ajudou a identificar exatamente onde o sistema está pronto e onde ainda precisa de gente atrás.
+> Quando entrarmos em piloto real com parceiro integrador, o plantão fica ativo e a resposta humana acontece em até 5 minutos pro P1. Por enquanto, agradeço muito o teste — me ajudou a identificar exatamente onde o sistema está pronto e onde ainda precisa de gente atrás.
 >
 > Posso te pedir mais um teste? Manda mais alguns relatos como se você fosse cuidador real do Sr. Armindo — coisas do dia-a-dia ("ele tomou o losartana hoje", "ele dormiu mal", "PA tá 140x90") + algum cenário mais sério. Quero ver se a Sofia conversa bem com você e se as classificações dela batem com o que faria sentido na vida real. Qualquer feedback ajuda.
 
@@ -36,11 +36,11 @@
    - É emergência? → liga pro cuidador, confirma SAMU foi acionado
 5. **Marca como resolvido** na Central com nota da resolução
 
-### Quando piloto Tecnosenior entrar em produção real
+### Quando piloto parceiro integrador entrar em produção real
 
 Modelo escala pra:
-- Tecnosenior já tem plantão médico próprio → integrar com fila deles
-- Equipe ConnectaIACare faz triagem L1 e roteia pra fila Tecnosenior pra P1/P2 clínicos
+- parceiro integrador já tem plantão médico próprio → integrar com fila deles
+- Equipe ConnectaIACare faz triagem L1 e roteia pra fila parceiro integrador pra P1/P2 clínicos
 - L1 cobre 24/7 (turnos: você + Murilo? + 1 contratação operacional?)
 
 ### Itens operacionais a definir (decisão sua)

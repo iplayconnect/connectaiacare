@@ -1,6 +1,6 @@
 # Demo Script — Reunião ConnectaIACare (sexta 24/04/2026)
 
-> **Contexto**: reunião com Murilo (Tecnosenior+MedMonitor) e Vinicius (Amparo) para discutir parceria em cuidado clínico in-house.
+> **Contexto**: reunião com Murilo (parceiro integrador+MedMonitor) e Vinicius (parceiro de atenção primária) para discutir parceria em cuidado clínico in-house.
 > **Objetivo do Alexandre**: apresentar MVP funcional de surpresa no momento certo.
 > **Duração ideal da demo**: 5-7 minutos.
 
@@ -88,7 +88,7 @@ Voz natural do agente de ligação proativa:
 
 ### Fase 4 — Fechamento (pausa de silêncio, depois…)
 
-> *"Isso aqui está rodando há [X] dias. Funciona em português nativo. Respeita CFM, LGPD, integra FHIR. Murilo, o MedMonitor entra aqui [apontando pra sinais vitais]. Amparo entra aqui [apontando pra relatos de crônicos em casa]. Tecnosenior entra com sensores aqui [apontando pro ambiente]."*
+> *"Isso aqui está rodando há [X] dias. Funciona em português nativo. Respeita CFM, LGPD, integra FHIR. Murilo, o MedMonitor entra aqui [apontando pra sinais vitais]. parceiro de atenção primária entra aqui [apontando pra relatos de crônicos em casa]. parceiro integrador entra com sensores aqui [apontando pro ambiente]."*
 >
 > *"A gente pode escalar isso juntos. Como vocês veem?"*
 
@@ -140,5 +140,5 @@ Ver passo 1 acima (caso Dona Maria da Silva).
 
 - [ ] Enviar o PITCH_DECK.md em PDF e o ONE_PAGER.md impresso (ou por email) no mesmo dia.
 - [ ] Agendar DPIA conjunta (60 min) com jurídicos das 4 empresas nas 2 semanas seguintes.
-- [ ] Propor kick-off técnico com times de Tecnosenior e MedMonitor para API integration.
+- [ ] Propor kick-off técnico com times de parceiro integrador e MedMonitor para API integration.
 - [ ] NDA + Carta de Intenções rascunhada para assinatura em até 10 dias úteis.

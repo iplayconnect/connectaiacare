@@ -269,7 +269,7 @@ template:
 
 Sinais de que é hora de implementar a Fase 1+:
 - Mais de 1 sócio ativo no painel super_admin (Alexandre + outro).
-- Mais de 1 tenant em produção (ConnectaIACare + Tecnosenior + outro).
+- Mais de 1 tenant em produção (ConnectaIACare + parceiro integrador + outro).
 - Volume de notificações manuais > 5/semana — vale automatizar.
 - Algum incidente onde "ninguém viu o alerta" — precisa do canal
   institucional.

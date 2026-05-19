@@ -38,7 +38,7 @@ from src.handlers.shifts_routes import bp as shifts_bp
 from src.handlers.sofia_routes import bp as sofia_bp
 from src.handlers.synthetic_tests_routes import bp as synthetic_tests_bp
 from src.handlers.system_tenants_routes import bp as system_tenants_bp
-from src.handlers.tecnosenior_routes import bp as tecnosenior_bp
+from src.handlers.partner_integrations_routes import bp as partner_integrations_bp
 from src.handlers.teleconsulta_routes import bp as teleconsulta_bp
 from src.handlers.users_routes import bp as users_bp
 from src.handlers.voip_routes import bp as voip_bp
@@ -104,7 +104,7 @@ def create_app() -> Flask:
     app.register_blueprint(shifts_bp)
     app.register_blueprint(synthetic_tests_bp)
     app.register_blueprint(system_tenants_bp)
-    app.register_blueprint(tecnosenior_bp)
+    app.register_blueprint(partner_integrations_bp)
     app.register_blueprint(corpus_review_bp)
     app.register_blueprint(curated_review_bp)       # Phase D — revisão das bases curadas (Henrique + Coord. PUC)
     app.register_blueprint(webhook_async_bp)  # Phase B — webhook v2 async

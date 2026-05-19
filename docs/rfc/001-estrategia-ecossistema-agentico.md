@@ -3,7 +3,7 @@
 - **Status**: Accepted
 - **Date**: 2026-04-20
 - **Driver**: Alexandre (ConnectaIA)
-- **Approver**: Alexandre + alinhamento futuro com Murilo (Tecnosenior/MedMonitor) e Vinicius (Amparo)
+- **Approver**: Alexandre + alinhamento futuro com Murilo (parceiro integrador/MedMonitor) e Vinicius (parceiro de atenção primária)
 - **Impact**: **HIGH** — define arquitetura de IA pelos próximos 12-24 meses
 - **Tags**: architecture, ai, agents, strategy
 
@@ -218,13 +218,13 @@ Reinventar tudo.
 |-----------|----------------|
 | Prompts clínicos em pt-BR clinicamente correto | Demanda calibração + consulta médica local; cada refinamento agrega |
 | Regras de cruzamento sintoma × vital × medicação × condição | É medicina aplicada BR; sem equivalente comercial |
-| Ranges populacionais de idosos brasileiros (SBH/SBD/Beers adaptado) | Nosso research + parceria Tecnosenior/Amparo |
+| Ranges populacionais de idosos brasileiros (SBH/SBD/Beers adaptado) | Nosso research + parceria parceiro integrador/parceiro de atenção primária |
 | Motor de interações medicamentosas BR (ANVISA + Beers + polipharmacy geriátrica) | Dados brasileiros; diferencial vs DrugBank (EUA) |
 | Biometria de voz treinada com vozes pt-BR + perfil cuidador geriátrico | Asset de ML; melhora com dados reais |
 | Dashboard clínico (UX médica em pt-BR) | Nosso design system; aprendizado com uso real |
 | Hash-chain + OpenTimestamps (compliance auditoria) | Nossa arquitetura LGPD-compatible |
 | Pipeline de classificação urgent/critical com keyword guard | Nossa sensibilidade calibrada — `_escalated_by_keywords` |
-| Integrações com parceiros (Tecnosenior/MedMonitor/Amparo) | Relações comerciais + contratuais nossas |
+| Integrações com parceiros (parceiro integrador/MedMonitor/parceiro de atenção primária) | Relações comerciais + contratuais nossas |
 | **Ensemble agêntico** (orquestração multi-agent específica para saúde geriátrica BR) | **Esse é o IP principal do ecossistema** |
 
 ### Plumbing intercambiável (pode ser terceiro, preferencialmente open-source)

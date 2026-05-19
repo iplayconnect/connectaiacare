@@ -46,7 +46,7 @@ Sistema de fallback cascade garante que se um provider falhar, o próximo tenta 
 essencial       R$  49,90/mês — Check-in + 3 contatos + medicação
 familia         R$  89,90/mês — Essencial + grupo familiar + rede comunitária
 premium         R$ 149,90/mês — Família + teleconsulta + Atente 24h
-premium_device  R$ 199,90/mês — Premium + pulseira SOS Tecnosenior
+premium_device  R$ 199,90/mês — Premium + pulseira SOS parceiro integrador
 ```
 
 **Regras de negócio implementadas** (conforme sua decisão):

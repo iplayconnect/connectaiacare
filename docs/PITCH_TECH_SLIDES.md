@@ -175,7 +175,7 @@ Multi-locale    13 migrations       SOC 2 audit           LatAm 3 países
                     │  🎙️  Resemblyzer (bio voz)│
                     │  ⌚ Apple Health         │
                     │  🟢 Android Health       │
-                    │  📟 Tecnosenior IoT      │
+                    │  📟 parceiro integrador IoT      │
                     │  🏥 MedMonitor           │
                     │                           │
                     └───────────────────────────┘

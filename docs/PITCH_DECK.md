@@ -2,7 +2,7 @@
 
 > **Uso**: formato markdown pronto para conversão a PPTX/Keynote/Google Slides.
 > **Duração alvo**: 15-20 minutos + Q&A.
-> **Audiência**: Murilo (Tecnosenior + MedMonitor), Vinicius (Amparo), e futuros investidores.
+> **Audiência**: Murilo (parceiro integrador + MedMonitor), Vinicius (parceiro de atenção primária), e futuros investidores.
 
 ---
 
@@ -13,7 +13,7 @@
 
 Plataforma de cuidado integrado com Inteligência Artificial para idosos e pacientes crônicos.
 
-*Uma parceria ConnectaIA · Tecnosenior · MedMonitor · Amparo*
+*Uma parceria ConnectaIA · parceiro integrador · MedMonitor · parceiro de atenção primária*
 
 Abril 2026
 
@@ -72,13 +72,13 @@ Três camadas integradas:
 ### ConnectaIA
 Infraestrutura de IA vertical em saúde em produção. Multi-tenant, orquestração de agentes especializados, voz bidirecional conversacional natural, integração nativa com WhatsApp, roteador de modelos de raciocínio de última geração, biometria de voz de produção, conectores padronizados para integrações externas. **Já roda 24/7 em clientes pagantes.**
 
-### Tecnosenior
+### parceiro integrador
 10+ anos em tele-assistência geriátrica. SPAs e residências com sensores instalados. Central humana 24h. **Parceria existente com ConnectaIA (SOS + Queda).**
 
 ### MedMonitor
 Plataforma homologada de aferição de sinais vitais. Dispositivos clinicamente validados em uso real.
 
-### Amparo
+### parceiro de atenção primária
 Atenção primária digital em escala. Monitoramento de pacientes crônicos.
 
 *Quatro especialidades, um produto. Fortemente complementares.*
@@ -134,9 +134,9 @@ Equipe médica recebe no painel web em tempo real
 | Fase | Prazo | Entrega |
 |------|-------|---------|
 | **MVP Geriatria** | Abril 2026 (sexta) | Relato cuidador + análise + classificação (demo funcional) |
-| **Piloto SPA** | Maio-Jun 2026 | 10 idosos em SPA Tecnosenior, validação real |
+| **Piloto SPA** | Maio-Jun 2026 | 10 idosos em SPA parceiro integrador, validação real |
 | **Integração MedMonitor** | Jul-Set 2026 | Sinais vitais contínuos entram na análise |
-| **Piloto Amparo** | Ago-Out 2026 | Crônicos em casa via atenção primária digital |
+| **Piloto parceiro de atenção primária** | Ago-Out 2026 | Crônicos em casa via atenção primária digital |
 | **Adesivos monitoramento contínuo** | Q4 2026 | Evolução para patch wearable (ECG + SpO₂ 24/7) |
 | **Hospital-at-Home** | 2027 | Modelo de reembolso via operadoras de saúde |
 | **Expansão verticais** | 2027 | Oncologia, cardiologia, pós-operatório |
@@ -149,7 +149,7 @@ Equipe médica recebe no painel web em tempo real
 - **B2B2C**: SPAs/ILPIs pagam R$ 80-150 por idoso/mês.
 - **Margem**: ~80% (LLM é custo marginal baixo com cache).
 
-### Vertical Crônicos (Amparo)
+### Vertical Crônicos (parceiro de atenção primária)
 - **B2B**: atenção primária paga por paciente acompanhado.
 - **R$ 50-120/paciente/mês** conforme pacote de monitoramento.
 
@@ -168,18 +168,18 @@ Equipe médica recebe no painel web em tempo real
 
 **Imediatos (próximos 30 dias):**
 1. Formalização NDA + Carta de Intenções entre as 4 partes.
-2. Piloto SPA Tecnosenior: 10 idosos, 4 semanas de validação.
+2. Piloto SPA parceiro integrador: 10 idosos, 4 semanas de validação.
 3. Integração técnica MedMonitor (API).
 4. DPIA conjunta (Relatório de Impacto LGPD).
 
 **90 dias:**
-5. Piloto Amparo: 20 pacientes crônicos.
+5. Piloto parceiro de atenção primária: 20 pacientes crônicos.
 6. Primeira rodada de ajustes de produto com feedback clínico real.
 7. Definição da estrutura societária final (JV vs contratos).
 
 **12 meses:**
-8. 200+ idosos monitorados em rede Tecnosenior.
-9. 500+ pacientes crônicos em Amparo.
+8. 200+ idosos monitorados em rede parceiro integrador.
+9. 500+ pacientes crônicos em parceiro de atenção primária.
 10. Primeiros contratos hospital-at-home via operadoras.
 
 ---

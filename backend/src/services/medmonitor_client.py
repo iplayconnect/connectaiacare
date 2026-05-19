@@ -146,7 +146,7 @@ class MedMonitorClient:
         return self._request("GET", f"/caretakers/{caretaker_id}/")
 
     def find_caretaker_by_phone(self, phone: str) -> dict | None:
-        """Busca caretaker testando 3 variantes do phone — Tecnosenior
+        """Busca caretaker testando 3 variantes do phone — parceiro integrador
         guarda formatos diferentes dependendo do cadastro.
 
         Variantes testadas, em ordem:
@@ -195,7 +195,7 @@ class MedMonitorClient:
         return None
 
     def find_patient_by_phone(self, phone: str) -> dict | None:
-        """Busca paciente por phone testando variantes — Tecnosenior
+        """Busca paciente por phone testando variantes — parceiro integrador
         guarda em formatos diferentes."""
         return self._find_with_phone_variants("/patients/", phone)
 
@@ -286,7 +286,7 @@ class MedMonitorClient:
     ) -> dict | None:
         """Cria CareNote com status explícito (OPEN ou CLOSED).
 
-        Cenário 2 da API Tecnosenior: abre CareNote OPEN pra receber
+        Cenário 2 da API parceiro integrador: abre CareNote OPEN pra receber
         addendums depois. Quando passa CLOSED, vira one-off do cenário 1.
         """
         if not content or not content.strip():
@@ -321,7 +321,7 @@ class MedMonitorClient:
         occurred_at: str | None = None,
         status: str = "OPEN",
     ) -> dict | None:
-        """Cenário 3/4 da Tecnosenior: cria CareNote + addendums em chamada
+        """Cenário 3/4 da parceiro integrador: cria CareNote + addendums em chamada
         atômica. Cada addendum é {content, content_resume, occurred_at}.
 
         Atômico: se 1 addendum falhar validação, NADA é gravado.

@@ -65,7 +65,7 @@ class Settings:
 
     # MedMonitor / TotalCare API (ADR-019)
     # Base URL: https://<tenant>.contactto.care/agent
-    # Fornecido pela Tecnosenior em 2026-04-20 (tenant vf-totalcare).
+    # Fornecido pela parceiro integrador em 2026-04-20 (tenant vf-totalcare).
     medmonitor_api_url: str = os.getenv("MEDMONITOR_API_URL", "")
     medmonitor_api_key: str = os.getenv("MEDMONITOR_API_KEY", "")
 

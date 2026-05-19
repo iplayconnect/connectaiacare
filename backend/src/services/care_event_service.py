@@ -372,15 +372,15 @@ class CareEventService:
             closed_reason=closed_reason,
         )
 
-        # Hook automático Tecnosenior — quando paciente está mapeado
-        # (tecnosenior_patient_id NOT NULL), dispara sync em background
+        # Hook automático parceiro integrador — quando paciente está mapeado
+        # (external_partner_patient_id NOT NULL), dispara sync em background
         # pra criar CareNote CLOSED no painel deles. Idempotente via
-        # aia_health_tecnosenior_sync.care_event_id UNIQUE: se já
+        # aia_health_partner_carenote_sync.care_event_id UNIQUE: se já
         # sincronizado, retorna already_synced sem efeito.
-        self._trigger_tecnosenior_sync_async(event_id)
+        self._trigger_partner_carenote_sync_async(event_id)
 
-    def _trigger_tecnosenior_sync_async(self, event_id: str) -> None:
-        """Dispara sync Tecnosenior em thread separada pra não bloquear
+    def _trigger_partner_carenote_sync_async(self, event_id: str) -> None:
+        """Dispara sync parceiro integrador em thread separada pra não bloquear
         request HTTP. Falhas vão pro log mas não derrubam a operação
         principal (encerrar care_event).
         """
@@ -388,33 +388,33 @@ class CareEventService:
 
         def _worker():
             try:
-                from src.services.tecnosenior_carenote_sync_service import (
-                    get_tecnosenior_sync,
+                from src.services.partner_carenote_sync_service import (
+                    get_partner_carenote_sync,
                 )
-                svc = get_tecnosenior_sync()
+                svc = get_partner_carenote_sync()
                 if not svc.enabled:
                     logger.debug(
-                        "tecnosenior_auto_sync_skipped reason=client_disabled "
+                        "partner_carenote_auto_sync_skipped reason=client_disabled "
                         "event_id=%s", event_id,
                     )
                     return
                 result = svc.sync_care_event(event_id, force=False)
                 logger.info(
-                    "tecnosenior_auto_sync_done event_id=%s status=%s "
+                    "partner_carenote_auto_sync_done event_id=%s status=%s "
                     "carenote_id=%s reason=%s",
                     event_id,
                     result.get("status"),
-                    result.get("tecnosenior_carenote_id"),
+                    result.get("partner_carenote_id"),
                     result.get("reason"),
                 )
             except Exception:
                 logger.exception(
-                    "tecnosenior_auto_sync_failed event_id=%s", event_id,
+                    "partner_carenote_auto_sync_failed event_id=%s", event_id,
                 )
 
         threading.Thread(
             target=_worker, daemon=True,
-            name=f"tecnosenior-sync-{event_id[:8]}",
+            name=f"parceiro_integrador-sync-{event_id[:8]}",
         ).start()
 
     def expire_silent(self, event_id: str) -> None:

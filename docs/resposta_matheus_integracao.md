@@ -1,7 +1,7 @@
-# Resposta ConnectaIACare → Tecnosenior — Integração Care Notes
+# Resposta ConnectaIACare → parceiro integrador — Integração Care Notes
 
 **De**: Alexandre / ConnectaIACare
-**Para**: Matheus / Tecnosenior
+**Para**: Matheus / parceiro integrador
 **Data**: 2026-04-28
 **Referência**: API Care Notes / Addendums (docx enviado por Matheus)
 + conversa WhatsApp 28/04/2026.
@@ -80,7 +80,7 @@ Dados extraídos: trauma=nasal, consciência=preservada
 Severidade: urgente
 ```
 
-Formato fixo permite que você (Tecnosenior) faça parsing simples no
+Formato fixo permite que você (parceiro integrador) faça parsing simples no
 front pra destacar visualmente, e quando subirmos pra estruturado
 não precisamos mudar nada do conteúdo — só promover os campos a
 colunas.
@@ -90,7 +90,7 @@ colunas.
 ## 4. Pontos da nossa arquitetura que NÃO mudam
 
 Confirmando o que conversamos: **a integração é unidirecional
-ConnectaIACare → Tecnosenior**. Nosso modelo de dados, fluxo de
+ConnectaIACare → parceiro integrador**. Nosso modelo de dados, fluxo de
 classificação, pipeline de áudio e Sofia ficam exatamente como
 estão. A API care_notes é um **espelhamento**, não uma fonte de
 verdade.
@@ -207,7 +207,7 @@ Tudo certo. Só registrando.
 | Fase | Prazo | O que entra |
 |------|-------|-------------|
 | Demo | esta semana | content + content_resume com tipificação inline (sem mudança schema) |
-| MVP integração | próxima semana | Schema novo nosso (`aia_health_tecnosenior_sync`), service de envio com fila + retry, smoke test em sandbox |
+| MVP integração | próxima semana | Schema novo nosso (`aia_health_partner_carenote_sync`), service de envio com fila + retry, smoke test em sandbox |
 | Produção | 2 semanas | Após respostas de §5.1-5.3, vai pra produção |
 | V2 (estruturado) | quando taxonomia estabilizar | Promovemos campos do `content_resume` pra estruturado (JSON ou colunas próprias do lado de vocês) |
 
@@ -221,7 +221,7 @@ Matheus, me responde:
 2. Se tem disponibilidade pra uma call de 30min pra fechar §5.4-5.8.
 
 Se quiser, te mando o nosso doc interno
-`docs/integracao_tecnosenior_care_notes.md` que tem o desenho
+`docs/integracao_parceiro_care_notes.md` que tem o desenho
 arquitetural do nosso lado (schema, service, retry, idempotência).
 Não precisa, mas se ajudar pra você dimensionar do lado de vocês,
 fala.

@@ -26,7 +26,7 @@ import { hasRole } from "@/lib/permissions";
 // /patients/[id]/editar
 //
 // Edição dos campos cadastrais do paciente. Inclui o CPF (campo novo
-// migration 054) que destrava integrações externas (Tecnosenior etc).
+// migration 054) que destrava integrações externas (parceiro integrador etc).
 //
 // Hoje cobre os campos editáveis em produção. Faltando ainda: edição
 // de medicações ativas (vai pra /admin/governance/clinical-rules) e plantões
@@ -68,7 +68,7 @@ type PatientForm = {
   responsible_name: string;
   responsible_phone: string;
   responsible_relationship: string;
-  tecnosenior_patient_id: string;
+  external_partner_patient_id: string;
 };
 
 function formatCpf(digits: string): string {
@@ -141,8 +141,8 @@ export default function PatientEditPage() {
           responsible_name: respLegacy.name || "",
           responsible_phone: respLegacy.phone || "",
           responsible_relationship: respLegacy.relationship || "",
-          tecnosenior_patient_id:
-            String((patient as any).tecnosenior_patient_id || ""),
+          external_partner_patient_id:
+            String((patient as any).external_partner_patient_id || ""),
         });
       })
       .catch((e: any) => setErr(e?.message || "Erro ao carregar paciente"))
@@ -217,9 +217,9 @@ export default function PatientEditPage() {
           relationship: form.responsible_relationship.trim() || null,
         },
       };
-      if (form.tecnosenior_patient_id) {
-        const n = parseInt(form.tecnosenior_patient_id, 10);
-        if (Number.isFinite(n)) payload.tecnosenior_patient_id = n;
+      if (form.external_partner_patient_id) {
+        const n = parseInt(form.external_partner_patient_id, 10);
+        if (Number.isFinite(n)) payload.external_partner_patient_id = n;
       }
       await api.patientUpdate(patientId, payload);
       setSuccess(true);
@@ -283,7 +283,7 @@ export default function PatientEditPage() {
           </Field>
           <Field
             label="CPF"
-            hint="Identificador estável pra integrações (Tecnosenior, etc.)"
+            hint="Identificador estável pra integrações (parceiro integrador, etc.)"
             icon={IdCard}
           >
             <input
@@ -445,14 +445,14 @@ export default function PatientEditPage() {
       {/* Integração */}
       <Section title="Integrações externas">
         <Field
-          label="Tecnosenior — Patient ID (numérico)"
+          label="parceiro integrador — Patient ID (numérico)"
           hint="Mapping pra TotalCare. Geralmente preenchido automaticamente após primeiro lookup por CPF/phone."
         >
           <input
             type="number"
             className="input"
-            value={form.tecnosenior_patient_id}
-            onChange={(e) => update("tecnosenior_patient_id", e.target.value)}
+            value={form.external_partner_patient_id}
+            onChange={(e) => update("external_partner_patient_id", e.target.value)}
             placeholder="(vazio = lookup automático)"
           />
         </Field>

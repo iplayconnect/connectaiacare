@@ -2,7 +2,7 @@
 
 Inspirado no padrão da ConnectaIA (system_admin_routes.py). Adaptado
 pra contexto saúde — tenants podem ser ILPI, clínica, hospital, B2C
-ou parceiro (tipo Tecnosenior). Multi-tenant é pré-requisito pra
+ou parceiro (tipo parceiro integrador). Multi-tenant é pré-requisito pra
 Sofia/Emília (cada tenant tem sua persona IA).
 
 Rotas:

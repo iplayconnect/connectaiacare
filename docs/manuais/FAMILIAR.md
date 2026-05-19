@@ -94,7 +94,7 @@ Se você marca "familiar" ou "paciente B2C", precisa **aceitar termo LGPD** (lei
 Campos:
 - Nome completo
 - Apelido / como é chamado(a) ("Dona Maria", "Seu Antônio")
-- CPF (opcional — mas **importante** se quiser integração com Tecnosenior ou outros)
+- CPF (opcional — mas **importante** se quiser integração com parceiro integrador ou outros)
 - Data de nascimento
 - Gênero
 - Forma de tratamento que Sofia vai usar
@@ -454,7 +454,7 @@ Planos típicos (sujeitos a mudança, ver site):
 Idealmente sim. Vitaminas e suplementos podem interagir com medicamentos sérios (vitamina K vs anticoagulante, por exemplo). Pelo menos os de uso regular.
 
 ### "E se o paciente não tem CPF (estrangeiro, sem documentação)?"
-Sistema funciona sem CPF. Só limita algumas integrações externas (Tecnosenior, etc.).
+Sistema funciona sem CPF. Só limita algumas integrações externas (parceiro integrador, etc.).
 
 ### "Posso compartilhar prontuário com médico fora da plataforma?"
 Sim — você exporta (PDF ou JSON) e manda. Médico não precisa ter acesso à plataforma.

@@ -7,7 +7,7 @@ da plataforma, injetada no system prompt do commercial agent.
 Tabela: aia_health_platform_capabilities (migration 062).
 Seeds iniciais: whatsapp_atendimento_24h, voice_call_sofia,
 classificacao_relatos_clinicos, alertas_familia,
-validacao_medicacao_beers_rename, integracao_tecnosenior.
+validacao_medicacao_beers_rename, integracao_parceiro.
 
 API:
     capabilities = get_capabilities_service()

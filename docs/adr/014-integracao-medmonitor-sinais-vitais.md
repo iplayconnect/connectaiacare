@@ -7,7 +7,7 @@
 
 ## Context and Problem Statement
 
-O ConnectaIACare tem 4 parceiros formais (ConnectaIA + Tecnosenior + MedMonitor + Amparo). MedMonitor é o parceiro técnico que provê **dispositivos clínicos homologados de aferição de sinais vitais** — oximetro, esfigmomanômetro, glicosímetro, termômetro, balança. Segundo www.medmonitor.com.br, os parâmetros principais são: **pressão arterial, glicose, oximetria, temperatura, frequência cardíaca e outros**.
+O ConnectaIACare tem 4 parceiros formais (ConnectaIA + parceiro integrador + MedMonitor + parceiro de atenção primária). MedMonitor é o parceiro técnico que provê **dispositivos clínicos homologados de aferição de sinais vitais** — oximetro, esfigmomanômetro, glicosímetro, termômetro, balança. Segundo www.medmonitor.com.br, os parâmetros principais são: **pressão arterial, glicose, oximetria, temperatura, frequência cardíaca e outros**.
 
 Precisamos decidir **agora** o modelo de dados + arquitetura de ingestão, porque:
 1. O Prontuário longitudinal (sendo desenhado pelo Claude Design) precisa exibir vital signs

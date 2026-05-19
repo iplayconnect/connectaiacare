@@ -1,7 +1,7 @@
 # Próxima sessão — Onde paramos e por onde continuar
 
 > **Data do último handoff**: 2026-04-24 (sexta, 22h)
-> **Contexto do dia**: reunião com Murilo (Tecnosenior) + Vinicius (MedMonitor) — sucesso. Eles ofereceram sociedade. Decisão: rodar POCs primeiro, formato societário depois.
+> **Contexto do dia**: reunião com Murilo (parceiro integrador) + Vinicius (MedMonitor) — sucesso. Eles ofereceram sociedade. Decisão: rodar POCs primeiro, formato societário depois.
 
 ---
 
@@ -111,7 +111,7 @@
 - [ ] **Áudio TTS Sofia (Gemini)**: testar 4 samples em `docs/testes/gemini/audios/`. Decidir migração ElevenLabs → Gemini Flash TTS (ADR-028).
 - [ ] **Glossário de nomes próprios**: prompt engineering pra STT acertar "Armindo Trevisan" (hoje vira "Arlindo Trevizan"). Bloqueador da migração Gemini STT.
 - [ ] **Relatório semanal automático em PDF**: gerar e enviar pro grupo familiar todo domingo (`weekly_report_service.py` já pronto, falta conectar agendador).
-- [ ] **Modo "Parceiro" white label**: visão restrita do CRM com co-branding sutil (logo Tecnosenior + ConnectaIACare).
+- [ ] **Modo "Parceiro" white label**: visão restrita do CRM com co-branding sutil (logo parceiro integrador + ConnectaIACare).
 - [ ] **Pacote demo pra Murilo**: ambiente staging dedicado com 5-10 pacientes seed pra ele testar com cuidadoras reais sem misturar com produção.
 
 ### Wave 4 — Robustez B2B / multi-tenant
@@ -119,7 +119,7 @@
 - [ ] Onboarding de novo tenant via dashboard (formulário admin → cria tenant + usuário admin)
 - [ ] Limites por plano (msgs/dia, pacientes, teleconsultas/mês)
 - [ ] Faturamento + integração com Stripe/Pagar.me
-- [ ] Webhook de saída pra integrações com hardware Tecnosenior (sinais vitais → ConnectaIACare)
+- [ ] Webhook de saída pra integrações com hardware parceiro integrador (sinais vitais → ConnectaIACare)
 - [ ] FHIR export real (hoje só tem o stub)
 
 ---
@@ -225,8 +225,8 @@
 - [ ] **Auth + audit log** (PRIORIDADE absoluta)
 - [ ] Módulo Cadastros (Pacientes/Familiares/Profissionais/Usuários)
 - [ ] Programa indicação B2B→B2C MVP
-- [ ] **MoU de POC remunerado 60-90d com Tecnosenior**
-- [ ] Piloto 30 dias com 10 SPAs Tecnosenior (Murilo)
+- [ ] **MoU de POC remunerado 60-90d com parceiro integrador**
+- [ ] Piloto 30 dias com 10 SPAs parceiro integrador (Murilo)
 
 ### Fase 2.A — B2C MVP Essencial (mai-jul/2026)
 - [ ] Auth independente com MFA (extensão do Wave 1)
@@ -296,7 +296,7 @@
 - Próximo passo: **MoU de POC remunerado 60-90 dias** (sem equity, sem exclusividade).
 - Métricas claras de sucesso documentadas no MoU.
 - Só falar de formato societário depois de validar pipeline deles.
-- Plataforma ConnectaIACare permanece 100% sua independente do que rolar com Tecnosenior/MedMonitor.
+- Plataforma ConnectaIACare permanece 100% sua independente do que rolar com parceiro integrador/MedMonitor.
 
 ### Compromissos de comunicação externa
 - ❌ NUNCA citar fornecedores de IA (Claude/Anthropic, Deepgram, OpenAI, ElevenLabs, etc.) em material externo.
