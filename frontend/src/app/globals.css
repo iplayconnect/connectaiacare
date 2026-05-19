@@ -34,6 +34,14 @@
   }
 
   .dark {
+    /* Sinaliza pro browser que estamos em dark mode. Sem isso, os
+       elementos nativos (select option, input date picker, scrollbar
+       padrao em alguns OS) renderizam em light theme — o que deixa o
+       texto das opcoes do <select> quase invisivel num popup branco.
+       Henrique reportou em 2026-05-19 testando o cadastro da avo.
+       Ver https://web.dev/articles/color-scheme */
+    color-scheme: dark;
+
     /* ═══ Dark mode — Modern Glass Health 2026 ═══ */
     --background: 225 80% 7%;
     --foreground: 214 32% 93%;
@@ -216,6 +224,33 @@
            text-sm placeholder:text-muted-foreground/60
            focus:outline-none focus:border-accent-cyan/40 focus:bg-white/[0.06]
            transition-all;
+  }
+
+  /* ── Select native — dropdown de opcoes no dark mode ──
+     O <select> custom no projeto usa .input pra ficar com fundo escuro,
+     mas o popup de opcoes que abre quando clica e renderizado pelo OS/
+     browser e por padrao vem com bg branco (Chrome/Windows ignora
+     herencia de cor). Resultado: texto escuro em fundo escuro do popup,
+     ou ainda pior, opcao destacada azul com texto branco e demais
+     opcoes com texto cinza-claro quase invisivel.
+
+     Fix em duas camadas:
+       1. color-scheme: dark no :root.dark (acima) — Chrome/Edge/Firefox
+          modernos respeitam e usam tema escuro no popup.
+       2. Override explicito de <option> e <optgroup> abaixo — fallback
+          para Safari iOS, Chrome Windows mais antigo e usuarios que
+          forcam Windows high-contrast.
+
+     Henrique reportou em 2026-05-19 testando o cadastro da avo, o
+     "Nivel de cuidado" abria popup com I/II/III/IV ilegiveis. */
+  .dark select option,
+  .dark select optgroup {
+    background-color: hsl(var(--popover));
+    color: hsl(var(--popover-foreground));
+  }
+  /* Placeholder option "" fica mais discreta */
+  .dark select option[value=""] {
+    color: hsl(var(--muted-foreground));
   }
 
   /* ── Classification badges ── */
