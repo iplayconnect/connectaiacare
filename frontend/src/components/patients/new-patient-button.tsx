@@ -71,7 +71,7 @@ export function NewPatientButton() {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg accent-gradient text-slate-900 text-xs font-medium hover:shadow-[0_0_24px_rgba(49,225,255,0.35)] transition"
+        className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg accent-gradient text-slate-900 text-sm font-medium hover:shadow-[0_0_24px_rgba(49,225,255,0.35)] transition"
       >
         <Plus className="h-3.5 w-3.5" />
         Novo paciente
@@ -147,7 +147,7 @@ function NewPatientModal({
         <div className="flex items-center justify-between gap-3">
           <div>
             <h2 className="text-base font-semibold">Novo paciente</h2>
-            <p className="text-[11px] text-muted-foreground mt-0.5">
+            <p className="text-sm text-muted-foreground mt-0.5">
               Cadastro rápido — apenas o nome é obrigatório. O resto vem
               no wizard logo em seguida.
             </p>
@@ -163,7 +163,7 @@ function NewPatientModal({
         </div>
 
         <label className="block space-y-1">
-          <span className="text-[11px] text-muted-foreground">
+          <span className="text-sm text-muted-foreground">
             Nome completo *
           </span>
           <input
@@ -177,7 +177,7 @@ function NewPatientModal({
         </label>
 
         <label className="block space-y-1">
-          <span className="text-[11px] text-muted-foreground">
+          <span className="text-sm text-muted-foreground">
             Como é chamado(a)
           </span>
           <input
@@ -189,7 +189,7 @@ function NewPatientModal({
         </label>
 
         <label className="block space-y-1">
-          <span className="text-[11px] text-muted-foreground">
+          <span className="text-sm text-muted-foreground">
             CPF (opcional)
           </span>
           <input
@@ -199,14 +199,14 @@ function NewPatientModal({
             placeholder="000.000.000-00"
             maxLength={14}
           />
-          <span className="text-[10px] text-muted-foreground/60 block">
+          <span className="text-sm text-muted-foreground block">
             Pode ser preenchido depois no wizard. Necessário pra
-            integrações externas (Tecnosenior).
+            integrações externas com parceiros.
           </span>
         </label>
 
         {err && (
-          <div className="rounded-lg border border-classification-attention/20 bg-classification-attention/5 p-2.5 text-[11px] text-classification-attention">
+          <div className="rounded-lg border border-classification-attention/20 bg-classification-attention/5 p-2.5 text-sm text-classification-attention">
             {err}
           </div>
         )}
@@ -216,14 +216,14 @@ function NewPatientModal({
             type="button"
             onClick={onClose}
             disabled={saving}
-            className="text-xs px-3 py-2 rounded-lg hover:bg-white/[0.04] disabled:opacity-40"
+            className="text-sm px-3 py-2 rounded-lg hover:bg-white/[0.04] disabled:opacity-40"
           >
             Cancelar
           </button>
           <button
             type="submit"
             disabled={saving}
-            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg accent-gradient text-slate-900 text-xs font-medium disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg accent-gradient text-slate-900 text-sm font-medium disabled:opacity-50"
           >
             {saving ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
