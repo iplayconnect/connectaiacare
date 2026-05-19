@@ -1,20 +1,20 @@
 # Manuais ConnectaIACare — Índice Geral
 
-**Versão:** 1.0
+**Versão:** 1.0.1
 **Data:** 2026-05-18
 
 Bem-vindo. Esta é a porta de entrada da documentação da ConnectaIACare.
 
 Aqui você encontra o **manual certo para cada perfil**. Cada manual é escrito na linguagem de quem vai ler — o cuidador não precisa ler o manual do gestor, o gestor não precisa ler o manual do operador.
 
-Quem precisa de **referência técnica completa**, consulte o `MANUAL_PLATAFORMA.md` (49 seções, 11 partes, ~118KB).
+Quem precisa de **referência técnica completa**, consulte o `PLATAFORMA.md` (49 seções, 11 partes, ~118KB).
 
 ---
 
 ## Encontre seu manual
 
 ### 👩 Sou cuidadora / cuidador
-**→ [MANUAL_CUIDADOR.md](MANUAL_CUIDADOR.md)**
+**→ [CUIDADOR.md](CUIDADOR.md)**
 
 Linguagem do dia a dia. Como usar a Sofia pelo WhatsApp, como reportar sinal vital, como pedir socorro. Inclui frases que funcionam e erros comuns.
 
@@ -23,7 +23,7 @@ Linguagem do dia a dia. Como usar a Sofia pelo WhatsApp, como reportar sinal vit
 ---
 
 ### 👨‍👩‍👧 Sou familiar / responsável por um idoso
-**→ [MANUAL_FAMILIAR.md](MANUAL_FAMILIAR.md)**
+**→ [FAMILIAR.md](FAMILIAR.md)**
 
 Como ativar a plataforma para sua mãe/pai. O que você verá. Quando vai receber alerta. Como conversar com a Sofia. Quem cuida de quê.
 
@@ -32,7 +32,7 @@ Como ativar a plataforma para sua mãe/pai. O que você verá. Quando vai recebe
 ---
 
 ### 👴 Sou idoso e vou usar diretamente
-**→ [MANUAL_IDOSO_B2C.md](MANUAL_IDOSO_B2C.md)**
+**→ [IDOSO_B2C.md](IDOSO_B2C.md)**
 
 Linguagem bem simples, letra confortável. A Sofia é uma assistente que conversa com você pelo WhatsApp. Aqui está como.
 
@@ -41,7 +41,7 @@ Linguagem bem simples, letra confortável. A Sofia é uma assistente que convers
 ---
 
 ### 👩‍⚕️ Sou médica, médico, enfermeira ou enfermeiro
-**→ [MANUAL_MEDICO_ENFERMEIRO.md](MANUAL_MEDICO_ENFERMEIRO.md)**
+**→ [MEDICO_ENFERMEIRO.md](MEDICO_ENFERMEIRO.md)**
 
 Tom clínico-técnico. Como funciona a triagem da Sofia, validação farmacológica, cross-validation, drug safety review, prontuário 360°, teleconsulta com SOAP estruturado, governança Sofia (Conselho Científico), compliance LGPD.
 
@@ -50,7 +50,7 @@ Tom clínico-técnico. Como funciona a triagem da Sofia, validação farmacológ
 ---
 
 ### 🏥 Sou gestora ou gestor (clínica, ILPI, home care, operadora)
-**→ [MANUAL_GESTOR.md](MANUAL_GESTOR.md)**
+**→ [GESTOR.md](GESTOR.md)**
 
 Onboarding do tenant (7 dias). Cadastro de equipe. Configuração da Sofia. Importação de pacientes em escala. Plantão P1/P2/P3. Dashboards. Saúde do plantão. Métricas de SLA. Audit log e LGPD. Faturamento. Integrações (Tecnosenior CareNote, FHIR). Playbook quando algo dá errado.
 
@@ -59,7 +59,7 @@ Onboarding do tenant (7 dias). Cadastro de equipe. Configuração da Sofia. Impo
 ---
 
 ### 🎧 Sou operador da Central 24/7
-**→ [MANUAL_OPERADOR_CENTRAL.md](MANUAL_OPERADOR_CENTRAL.md)**
+**→ [OPERADOR_CENTRAL.md](OPERADOR_CENTRAL.md)**
 
 Como ler a fila priorizada. Como reivindicar e atender. Quando escalonar para L2/L3/L4. Outcomes possíveis. SLA pessoal. Como pausar plantão. Métricas de avaliação. Playbook de casos típicos (peito, glicemia, família ansiosa, falso alarme, recusa). Frases prontas por tipo de interlocutor.
 
@@ -68,7 +68,7 @@ Como ler a fila priorizada. Como reivindicar e atender. Quando escalonar para L2
 ---
 
 ### 🔧 Sou implementador, dev ou auditor técnico
-**→ [MANUAL_PLATAFORMA.md](MANUAL_PLATAFORMA.md)**
+**→ [PLATAFORMA.md](PLATAFORMA.md)**
 
 Referência completa: arquitetura multi-tenant, Sofia Phase C v2, safety guardrail, cross-validation engine, provenance, voice biometrics, identity resolver, care events state machine, handoff queue, plantão multi-camada, integrações, deploy, observabilidade.
 
@@ -80,37 +80,37 @@ Referência completa: arquitetura multi-tenant, Sofia Phase C v2, safety guardra
 
 ### Se você acabou de assinar a plataforma (gestor)
 
-1. Leia o **MANUAL_GESTOR** completo
-2. Distribua **MANUAL_CUIDADOR** para sua equipe de cuidadores
-3. Distribua **MANUAL_FAMILIAR** para famílias dos pacientes
-4. Distribua **MANUAL_MEDICO_ENFERMEIRO** para sua equipe clínica
-5. Se contratou Central 24/7, mande **MANUAL_OPERADOR_CENTRAL** para a operação
-6. Mantenha **MANUAL_PLATAFORMA** como referência para questões técnicas
+1. Leia o **GESTOR** completo
+2. Distribua **CUIDADOR** para sua equipe de cuidadores
+3. Distribua **FAMILIAR** para famílias dos pacientes
+4. Distribua **MEDICO_ENFERMEIRO** para sua equipe clínica
+5. Se contratou Central 24/7, mande **OPERADOR_CENTRAL** para a operação
+6. Mantenha **PLATAFORMA** como referência para questões técnicas
 
 ### Se você é cuidador iniciante
 
-1. Leia **MANUAL_CUIDADOR** uma vez
+1. Leia **CUIDADOR** uma vez
 2. Faça seu **cadastro de voz** (1 minuto)
 3. Envie seu **primeiro relato de teste**
 4. Releia a seção 9 (frases que funcionam) algumas vezes na primeira semana
 
 ### Se você é familiar recém-cadastrado
 
-1. Leia **MANUAL_FAMILIAR** seção 1 a 6 (45 min)
+1. Leia **FAMILIAR** seção 1 a 6 (45 min)
 2. Confira que recebeu **alerta de teste** da Sofia
 3. Salve o contato da Sofia nos seus favoritos
 4. Volte ao manual sempre que tiver dúvida
 
 ### Se você é médico ou enfermeiro entrando na operação
 
-1. Leia **MANUAL_MEDICO_ENFERMEIRO** seções 1-8 (45 min)
+1. Leia **MEDICO_ENFERMEIRO** seções 1-8 (45 min)
 2. Faça uma **revisão piloto** de prontuário (acompanhado por colega)
 3. Familiarize-se com **drug safety review queue** e **cross-validation alerts**
 4. Participe da próxima reunião do **Conselho Científico** (se aplicável)
 
 ### Se você é operador novo na Central
 
-1. Leia **MANUAL_OPERADOR_CENTRAL** **completo** (50 min)
+1. Leia **OPERADOR_CENTRAL** **completo** (50 min)
 2. Faça turno **shadowing** (acompanha colega) por 1 turno
 3. Faça turno **assistido** (você atende, colega revisa) por 1 turno
 4. Vai pra plantão autônomo na 3ª semana
@@ -140,14 +140,15 @@ Todos os manuais estão **versionados em git** no repositório `ConnectaIACare`:
 
 ```
 docs/
-├── MANUAIS_INDICE.md             ← você está aqui
-├── MANUAL_PLATAFORMA.md          ← referência técnica completa
-├── MANUAL_CUIDADOR.md
-├── MANUAL_FAMILIAR.md
-├── MANUAL_IDOSO_B2C.md
-├── MANUAL_MEDICO_ENFERMEIRO.md
-├── MANUAL_GESTOR.md
-└── MANUAL_OPERADOR_CENTRAL.md
+└── manuais/
+    ├── INDICE.md              ← você está aqui
+    ├── PLATAFORMA.md          ← referência técnica completa
+    ├── CUIDADOR.md
+    ├── FAMILIAR.md
+    ├── IDOSO_B2C.md
+    ├── MEDICO_ENFERMEIRO.md
+    ├── GESTOR.md
+    └── OPERADOR_CENTRAL.md
 ```
 
 Toda mudança em manual passa por:
@@ -164,10 +165,10 @@ Toda mudança em manual passa por:
 
 Versões 1.x dos manuais traz:
 
-- **MANUAL_PARCEIRO_INTEGRADOR** — para empresas que vão integrar via FHIR/API (parceiros como Tecnosenior, MedMonitor, Atente/Vita)
-- **MANUAL_DPO** — específico para Encarregado de Dados (LGPD)
-- **MANUAL_AUDITOR_EXTERNO** — para acreditadoras (ONA, JCI)
-- **MANUAL_VISUAL** (PDF + vídeo) — versão ilustrada para distribuir em ILPIs
+- **PARCEIRO_INTEGRADOR** — para empresas que vão integrar via FHIR/API (parceiros como Tecnosenior, MedMonitor, Atente/Vita)
+- **DPO** — específico para Encarregado de Dados (LGPD)
+- **AUDITOR_EXTERNO** — para acreditadoras (ONA, JCI)
+- **VISUAL** (PDF + vídeo) — versão ilustrada para distribuir em ILPIs
 
 ---
 
