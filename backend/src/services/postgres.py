@@ -46,13 +46,23 @@ class PostgresService:
             cur.execute(query, params or ())
 
     def fetch_one(self, query: str, params: Iterable[Any] | None = None) -> dict | None:
-        with self.get_cursor(commit=False) as cur:
+        # commit=True por default: SELECT-only e um commit é no-op, mas
+        # várias rotas usam fetch_one para INSERT/UPDATE/DELETE ... RETURNING
+        # (operator_routes, admin_quick_replies, tenant_escalation,
+        # patient_service.create, etc.). Sem commit, a mutação fica numa
+        # transação pendurada na conexão e é rollback-ada quando outra
+        # request usa a mesma conexão e dispara exceção. Foi a causa raiz
+        # do "patient_not_found" reportado pelo Henrique em 2026-05-18.
+        with self.get_cursor(commit=True) as cur:
             cur.execute(query, params or ())
             row = cur.fetchone()
             return dict(row) if row else None
 
     def fetch_all(self, query: str, params: Iterable[Any] | None = None) -> list[dict]:
-        with self.get_cursor(commit=False) as cur:
+        # Mesma razão de fetch_one: commit=True por default. Codebase
+        # não usa transações explícitas (BEGIN), então commitar SELECT
+        # vazio é no-op seguro.
+        with self.get_cursor(commit=True) as cur:
             cur.execute(query, params or ())
             return [dict(r) for r in cur.fetchall()]
 

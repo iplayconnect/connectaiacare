@@ -68,7 +68,15 @@ class PatientService:
         if cpf_clean == "":
             cpf_clean = None
 
-        row = self.db.fetch_one(
+        # IMPORTANTE: usar insert_returning (commit=True garantido) e não
+        # fetch_one. Bug histórico (2026-05-18, Henrique reportou): com
+        # fetch_one antigo (commit=False), o INSERT retornava o id mas a
+        # transação ficava pendente — o wizard redirecionava pra
+        # /patients/<id>/registration e o GET seguinte não encontrava o
+        # paciente (404 patient_not_found). Hoje fetch_one já commita por
+        # default, mas mantemos insert_returning aqui pra deixar a intenção
+        # explícita e à prova de regressão.
+        row = self.db.insert_returning(
             """INSERT INTO aia_health_patients
                 (tenant_id, full_name, nickname, cpf,
                  conditions, medications, allergies,
