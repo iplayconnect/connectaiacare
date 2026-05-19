@@ -244,7 +244,7 @@ export default function PatientRegistrationWizardPage() {
       <div className="rounded-xl border border-classification-attention/20 bg-classification-attention/5 p-6 text-center max-w-md mx-auto mt-12">
         <ShieldAlert className="h-8 w-8 mx-auto text-classification-attention mb-2" />
         <h2 className="text-sm font-semibold">Acesso restrito</h2>
-        <p className="text-xs text-muted-foreground mt-1">
+        <p className="text-[15px] text-foreground/80 mt-1">
           Cadastro de paciente disponível para equipe clínica, gestão e
           familiar responsável.
         </p>
@@ -262,7 +262,7 @@ export default function PatientRegistrationWizardPage() {
 
   if (err && !state) {
     return (
-      <div className="rounded-lg border border-classification-attention/20 bg-classification-attention/5 p-3 text-xs text-classification-attention max-w-2xl">
+      <div className="rounded-lg border border-classification-attention/20 bg-classification-attention/5 p-3 text-sm text-classification-attention max-w-2xl">
         {err}
       </div>
     );
@@ -457,7 +457,7 @@ export default function PatientRegistrationWizardPage() {
               <ClipboardCheck className="h-5 w-5 text-accent-cyan" />
               Cadastro completo do paciente
             </h1>
-            <p className="text-xs text-muted-foreground mt-0.5">
+            <p className="text-[15px] text-foreground/80 mt-0.5">
               {state?.patient.full_name || "Novo paciente"} ·
               {" "}
               {state?.patient.completeness?.completion_percentage ?? 0}% completo
@@ -465,7 +465,7 @@ export default function PatientRegistrationWizardPage() {
           </div>
         </div>
         {state?.active_session && (
-          <span className="text-[10px] px-2 py-1 rounded-full border border-accent-cyan/30 bg-accent-cyan/5 text-accent-cyan">
+          <span className="text-sm px-2 py-1 rounded-full border border-accent-cyan/30 bg-accent-cyan/5 text-accent-cyan">
             Sessão ativa · {REGISTERED_BY_ROLE_LABEL[state.active_session.registered_by_role]}
           </span>
         )}
@@ -476,7 +476,7 @@ export default function PatientRegistrationWizardPage() {
 
       {/* Conteúdo do passo */}
       <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-5 space-y-4">
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+        <div className="flex items-center gap-2 text-[15px] text-foreground/80">
           <span className="font-semibold text-foreground">Passo {step} de {TOTAL_STEPS}</span>
           <ChevronRight className="h-3 w-3" />
           <span>{stepMeta.label}</span>
@@ -525,7 +525,7 @@ export default function PatientRegistrationWizardPage() {
       </div>
 
       {err && (
-        <div className="rounded-lg border border-classification-attention/20 bg-classification-attention/5 p-3 text-xs text-classification-attention flex items-center gap-2">
+        <div className="rounded-lg border border-classification-attention/20 bg-classification-attention/5 p-3 text-sm text-classification-attention flex items-center gap-2">
           <AlertCircle className="h-3.5 w-3.5 flex-shrink-0" /> {err}
         </div>
       )}
@@ -536,7 +536,7 @@ export default function PatientRegistrationWizardPage() {
           type="button"
           onClick={() => setStep((s) => Math.max(s - 1, 1))}
           disabled={step === 1 || savingStep}
-          className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg border border-white/[0.06] hover:bg-white/[0.04] disabled:opacity-40"
+          className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-lg border border-white/[0.06] hover:bg-white/[0.04] disabled:opacity-40"
         >
           <ArrowLeft className="h-3.5 w-3.5" /> Voltar
         </button>
@@ -546,7 +546,7 @@ export default function PatientRegistrationWizardPage() {
             type="button"
             onClick={handleNext}
             disabled={savingStep}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-lg accent-gradient text-slate-900 text-xs font-medium disabled:opacity-50"
+            className="flex items-center gap-1.5 px-4 py-2 rounded-lg accent-gradient text-slate-900 text-base font-medium disabled:opacity-50"
           >
             {savingStep ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -561,7 +561,7 @@ export default function PatientRegistrationWizardPage() {
             type="button"
             onClick={handleFinish}
             disabled={savingStep}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-lg accent-gradient text-slate-900 text-xs font-medium disabled:opacity-50"
+            className="flex items-center gap-1.5 px-4 py-2 rounded-lg accent-gradient text-slate-900 text-base font-medium disabled:opacity-50"
           >
             {savingStep ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -599,7 +599,7 @@ function Stepper({
               type="button"
               onClick={() => onJump(s.id)}
               className={[
-                "flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-[10px] uppercase tracking-wider transition",
+                "flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-sm uppercase tracking-wider transition",
                 active
                   ? "bg-accent-cyan/15 border border-accent-cyan/40 text-accent-cyan"
                   : done
@@ -609,7 +609,7 @@ function Stepper({
             >
               <span
                 className={[
-                  "h-4 w-4 rounded-full flex items-center justify-center text-[9px] font-semibold",
+                  "h-4 w-4 rounded-full flex items-center justify-center text-[12px] font-semibold",
                   active
                     ? "bg-accent-cyan text-slate-900"
                     : done
@@ -651,7 +651,7 @@ function Step1Informant({
 
   return (
     <div className="space-y-4">
-      <p className="text-xs text-muted-foreground">
+      <p className="text-[15px] text-foreground/80">
         Identifique <b>quem está preenchendo</b> este cadastro. Cada item
         salvo carrega essa origem (provenance), o que permite ao clínico
         priorizar o que ainda precisa de validação.
@@ -679,10 +679,10 @@ function Step1Informant({
                 className="mt-0.5 accent-accent-cyan"
               />
               <div className="flex-1">
-                <div className="text-xs font-medium">
+                <div className="text-base font-medium">
                   {REGISTERED_BY_ROLE_LABEL[role]}
                 </div>
-                <div className="text-[10px] text-muted-foreground/80 mt-0.5">
+                <div className="text-sm text-muted-foreground mt-0.5">
                   {informantHint(role)}
                 </div>
               </div>
@@ -699,7 +699,7 @@ function Step1Informant({
             onChange={(e) => onChangeConsent(e.target.checked)}
             className="mt-0.5 accent-accent-cyan"
           />
-          <div className="text-[11px] leading-relaxed">
+          <div className="text-sm leading-relaxed">
             <b>Termo LGPD</b> — Confirmo que o cadastro é feito com
             conhecimento do paciente e/ou família, e autorizo o uso dos
             dados clínicos para acompanhamento de saúde no escopo da
@@ -710,7 +710,7 @@ function Step1Informant({
       )}
 
       {sessionActive && (
-        <div className="text-[11px] text-muted-foreground bg-white/[0.02] border border-white/[0.06] rounded-lg p-2 flex items-center gap-1.5">
+        <div className="text-sm text-muted-foreground bg-white/[0.02] border border-white/[0.06] rounded-lg p-2 flex items-center gap-1.5">
           <Info className="h-3 w-3" /> Sessão já iniciada — origem e termo
           LGPD ficam congelados nesta sessão.
         </div>
@@ -771,7 +771,7 @@ function Step2Demographics({
 
   return (
     <div className="space-y-4">
-      <p className="text-xs text-muted-foreground">
+      <p className="text-[15px] text-foreground/80">
         Identificação básica. <b>Nome completo</b> é obrigatório;{" "}
         <b>CPF</b> destrava integrações externas (Tecnosenior, etc.).
       </p>
@@ -846,7 +846,7 @@ function Step2Demographics({
         </Field>
       </div>
 
-      <label className="flex items-start gap-2 text-xs cursor-pointer">
+      <label className="flex items-start gap-2 text-sm cursor-pointer">
         <input
           type="checkbox"
           className="mt-0.5 accent-accent-cyan"
@@ -959,7 +959,7 @@ function Step3Conditions({
 
   return (
     <div className="space-y-4">
-      <p className="text-xs text-muted-foreground">
+      <p className="text-[15px] text-foreground/80">
         <b>Condições crônicas e diagnósticos.</b> Use a busca pra pegar o
         Código Internacional de Doenças (CID-10) e descrição padronizada;
         se não encontrar, pode digitar como texto livre.
@@ -994,14 +994,14 @@ function Step3Conditions({
                 onClick={() => addCid(r)}
                 className="w-full text-left px-3 py-2 hover:bg-white/[0.04] border-b border-white/[0.04] last:border-b-0"
               >
-                <div className="text-xs">
+                <div className="text-sm">
                   <span className="font-mono text-accent-cyan mr-2">
                     {r.code}
                   </span>
                   {r.description_pt}
                 </div>
                 {r.description_layman && (
-                  <div className="text-[10px] text-muted-foreground/80 mt-0.5">
+                  <div className="text-sm text-muted-foreground mt-0.5">
                     {r.description_layman}
                   </div>
                 )}
@@ -1017,9 +1017,9 @@ function Step3Conditions({
         renderItem={(it, idx) => (
           <div className="flex items-start justify-between gap-2">
             <div className="flex-1 space-y-1">
-              <div className="text-xs flex items-center gap-2">
+              <div className="text-sm flex items-center gap-2">
                 {it.cid10_code && (
-                  <span className="font-mono text-[10px] text-accent-cyan bg-accent-cyan/10 px-1.5 py-0.5 rounded">
+                  <span className="font-mono text-sm text-accent-cyan bg-accent-cyan/10 px-1.5 py-0.5 rounded">
                     {it.cid10_code}
                   </span>
                 )}
@@ -1027,7 +1027,7 @@ function Step3Conditions({
               </div>
               <div className="grid grid-cols-3 gap-2 mt-2">
                 <select
-                  className="input text-[11px]"
+                  className="input text-sm"
                   value={it.severity || ""}
                   onChange={(e) =>
                     updateField(idx, { severity: e.target.value as any })
@@ -1039,7 +1039,7 @@ function Step3Conditions({
                   <option value="severe">Severa</option>
                 </select>
                 <select
-                  className="input text-[11px]"
+                  className="input text-sm"
                   value={it.controlled === undefined ? "" : it.controlled ? "sim" : "nao"}
                   onChange={(e) =>
                     updateField(idx, {
@@ -1055,7 +1055,7 @@ function Step3Conditions({
                   <option value="nao">Descontrolada</option>
                 </select>
                 <input
-                  className="input text-[11px]"
+                  className="input text-sm"
                   placeholder="Notas"
                   value={it.notes || ""}
                   onChange={(e) => updateField(idx, { notes: e.target.value })}
@@ -1137,7 +1137,7 @@ function Step4Medications({
 
   return (
     <div className="space-y-4">
-      <p className="text-xs text-muted-foreground">
+      <p className="text-[15px] text-foreground/80">
         <b>Medicamentos em uso.</b> A plataforma identifica a classe
         terapêutica automaticamente quando reconhece o princípio ativo —
         isso alimenta o cruzamento condição × medicamento na próxima etapa.
@@ -1164,13 +1164,13 @@ function Step4Medications({
             type="button"
             onClick={addMedication}
             disabled={!name.trim()}
-            className="text-xs px-3 py-2 rounded-lg accent-gradient text-slate-900 font-medium disabled:opacity-40"
+            className="text-sm px-3 py-2 rounded-lg accent-gradient text-slate-900 font-medium disabled:opacity-40"
           >
             Adicionar
           </button>
         </div>
         {(looking || classMatch) && (
-          <div className="text-[11px] text-muted-foreground">
+          <div className="text-sm text-muted-foreground">
             {looking ? (
               <span className="flex items-center gap-1.5">
                 <Loader2 className="h-3 w-3 animate-spin" /> classificando…
@@ -1188,7 +1188,7 @@ function Step4Medications({
                     {classMatch.therapeutic_classes.join(" / ")}
                   </b>
                   {classMatch.brand_names.length > 0 && (
-                    <span className="text-muted-foreground/70">
+                    <span className="text-foreground/70">
                       {" "}
                       (referências comerciais: {classMatch.brand_names.slice(0, 3).join(", ")})
                     </span>
@@ -1206,30 +1206,30 @@ function Step4Medications({
         renderItem={(it, idx) => (
           <div className="flex items-start justify-between gap-2">
             <div className="flex-1 space-y-1">
-              <div className="text-xs font-medium flex items-center gap-2">
+              <div className="text-base font-medium flex items-center gap-2">
                 <Pill className="h-3 w-3 text-accent-cyan" />
                 {it.name}
                 {it.therapeutic_class && (
-                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-accent-cyan/10 text-accent-cyan">
+                  <span className="text-sm px-1.5 py-0.5 rounded bg-accent-cyan/10 text-accent-cyan">
                     {it.therapeutic_class}
                   </span>
                 )}
               </div>
               <div className="grid grid-cols-3 gap-2 mt-2">
                 <input
-                  className="input text-[11px]"
+                  className="input text-sm"
                   placeholder="Dose — ex: 50 mg"
                   value={it.dose || ""}
                   onChange={(e) => updateField(idx, { dose: e.target.value })}
                 />
                 <input
-                  className="input text-[11px]"
+                  className="input text-sm"
                   placeholder="Posologia — ex: 1x/dia manhã"
                   value={it.schedule || ""}
                   onChange={(e) => updateField(idx, { schedule: e.target.value })}
                 />
                 <input
-                  className="input text-[11px]"
+                  className="input text-sm"
                   placeholder="Notas"
                   value={it.notes || ""}
                   onChange={(e) => updateField(idx, { notes: e.target.value })}
@@ -1304,7 +1304,7 @@ function Step5Review({
       <section className="space-y-2">
         <div className="flex items-center gap-2 text-muted-foreground">
           <HeartPulse className="h-3.5 w-3.5" />
-          <span className="text-[10px] uppercase tracking-wider">Alergias</span>
+          <span className="text-sm uppercase tracking-wider">Alergias</span>
         </div>
         <div className="grid grid-cols-3 gap-2">
           <input
@@ -1322,7 +1322,7 @@ function Step5Review({
           <button
             type="button"
             onClick={addAllergy}
-            className="text-xs px-3 py-2 rounded-lg border border-white/[0.06] hover:bg-white/[0.04] disabled:opacity-40"
+            className="text-sm px-3 py-2 rounded-lg border border-white/[0.06] hover:bg-white/[0.04] disabled:opacity-40"
             disabled={!allergyName.trim()}
           >
             Adicionar
@@ -1333,7 +1333,7 @@ function Step5Review({
             {allergies.map((a, idx) => (
               <span
                 key={`${a.name}-${idx}`}
-                className="text-[11px] px-2 py-1 rounded-full bg-classification-attention/10 border border-classification-attention/30 text-classification-attention flex items-center gap-1"
+                className="text-sm px-2 py-1 rounded-full bg-classification-attention/10 border border-classification-attention/30 text-classification-attention flex items-center gap-1"
               >
                 {a.name}
                 <button
@@ -1353,7 +1353,7 @@ function Step5Review({
       <section className="space-y-2">
         <div className="flex items-center gap-2 text-muted-foreground">
           <Users className="h-3.5 w-3.5" />
-          <span className="text-[10px] uppercase tracking-wider">
+          <span className="text-sm uppercase tracking-wider">
             Responsável familiar
           </span>
         </div>
@@ -1420,7 +1420,7 @@ function Step5Review({
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 text-muted-foreground">
             <ShieldCheck className="h-3.5 w-3.5" />
-            <span className="text-[10px] uppercase tracking-wider">
+            <span className="text-sm uppercase tracking-wider">
               Cruzamento clínico (Henrique + Coordenadora PUC)
             </span>
           </div>
@@ -1428,7 +1428,7 @@ function Step5Review({
             type="button"
             onClick={onRevalidate}
             disabled={validating}
-            className="text-[10px] px-2 py-1 rounded border border-white/[0.06] hover:bg-white/[0.04] disabled:opacity-40 flex items-center gap-1"
+            className="text-sm px-2 py-1 rounded border border-white/[0.06] hover:bg-white/[0.04] disabled:opacity-40 flex items-center gap-1"
           >
             {validating && <Loader2 className="h-3 w-3 animate-spin" />}
             Revalidar
@@ -1436,11 +1436,11 @@ function Step5Review({
         </div>
 
         {validating && prompts.length === 0 ? (
-          <div className="text-xs text-muted-foreground">
+          <div className="text-[15px] text-foreground/80">
             Cruzando condições × medicamentos…
           </div>
         ) : prompts.length === 0 ? (
-          <div className="rounded-lg border border-classification-routine/20 bg-classification-routine/5 p-3 text-xs text-classification-routine flex items-center gap-2">
+          <div className="rounded-lg border border-classification-routine/20 bg-classification-routine/5 p-3 text-sm text-classification-routine flex items-center gap-2">
             <Check className="h-3.5 w-3.5" />
             Nenhuma inconsistência detectada nas regras de cruzamento ativas.
           </div>
@@ -1451,37 +1451,37 @@ function Step5Review({
               return (
                 <div
                   key={`${p.condition_label}-${idx}`}
-                  className={`rounded-lg border p-3 text-xs space-y-1.5 ${badge.className}`}
+                  className={`rounded-lg border p-3 text-sm space-y-1.5 ${badge.className}`}
                 >
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex items-start gap-2">
                       <AlertCircle className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" />
                       <div>
                         <div className="font-medium">{p.condition_label}</div>
-                        <div className="text-[11px] mt-1 leading-relaxed text-foreground/90">
+                        <div className="text-sm mt-1 leading-relaxed text-foreground/90">
                           {p.prompt_message}
                         </div>
                       </div>
                     </div>
-                    <span className="text-[9px] uppercase font-semibold tracking-wider">
+                    <span className="text-[12px] uppercase font-semibold tracking-wider">
                       {badge.label}
                     </span>
                   </div>
                   {p.expected_therapeutic_classes.length > 0 && (
-                    <div className="text-[10px] text-foreground/70">
+                    <div className="text-sm text-foreground/70">
                       Esperado: {p.expected_therapeutic_classes.join(", ")} ·
                       Encontrado: {p.found_classes.length > 0 ? p.found_classes.join(", ") : "—"}
                     </div>
                   )}
                   {p.clinical_rationale && (
-                    <div className="text-[10px] text-foreground/60 italic">
+                    <div className="text-sm text-foreground/60 italic">
                       {p.clinical_rationale}
                     </div>
                   )}
                 </div>
               );
             })}
-            <p className="text-[10px] text-muted-foreground italic">
+            <p className="text-sm text-muted-foreground italic">
               Estes alertas são <b>orientativos</b>, não bloqueiam a
               finalização. Validação clínica final fica com o(a)
               enfermeiro(a)/médico(a).
@@ -1491,7 +1491,7 @@ function Step5Review({
       </section>
 
       {/* Resumo do que vai ser salvo */}
-      <section className="rounded-lg border border-white/[0.06] bg-white/[0.02] p-3 text-[11px] text-muted-foreground">
+      <section className="rounded-lg border border-white/[0.06] bg-white/[0.02] p-3 text-sm text-muted-foreground">
         <div className="flex items-center gap-1.5 mb-1.5">
           <ClipboardCheck className="h-3 w-3" />
           <b className="text-foreground">Resumo do cadastro</b>
@@ -1531,10 +1531,10 @@ function Field({
 }) {
   return (
     <label className="block space-y-1">
-      <span className="text-[11px] text-muted-foreground">{label}</span>
+      <span className="text-sm text-muted-foreground">{label}</span>
       {children}
       {hint && (
-        <span className="text-[10px] text-muted-foreground/60 block">
+        <span className="text-sm text-foreground/70 block">
           {hint}
         </span>
       )}
@@ -1553,7 +1553,7 @@ function ItemList({
 }) {
   if (items.length === 0) {
     return (
-      <div className="text-[11px] text-muted-foreground italic px-3 py-4 text-center border border-dashed border-white/[0.06] rounded-lg">
+      <div className="text-sm text-muted-foreground italic px-3 py-4 text-center border border-dashed border-white/[0.06] rounded-lg">
         {emptyMessage}
       </div>
     );
@@ -1579,12 +1579,12 @@ function SourceBadge({ item }: { item: ClinicalItem }) {
   return (
     <div className="flex items-center gap-1.5 mt-1">
       {sourceLabel && (
-        <span className="text-[9px] px-1.5 py-0.5 rounded bg-white/[0.04] text-muted-foreground">
+        <span className="text-[12px] px-1.5 py-0.5 rounded bg-white/[0.04] text-muted-foreground">
           {sourceLabel}
         </span>
       )}
       {verified && (
-        <span className="text-[9px] px-1.5 py-0.5 rounded bg-classification-routine/10 text-classification-routine flex items-center gap-1">
+        <span className="text-[12px] px-1.5 py-0.5 rounded bg-classification-routine/10 text-classification-routine flex items-center gap-1">
           <UserCheck className="h-2.5 w-2.5" /> Validado por clínico
         </span>
       )}
