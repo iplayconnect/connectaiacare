@@ -276,7 +276,7 @@ export default async function ReportDetailPage({ params }: { params: { id: strin
                   <li key={i} className="text-sm flex items-start gap-2">
                     <span className="status-dot status-dot-warning mt-1.5 flex-shrink-0" />
                     <div>
-                      <span className="font-medium text-foreground">{c.description}</span>
+                      <span className="font-medium text-foreground">{c.description || c.name}</span>
                       {c.severity && (
                         <span className="text-[11px] ml-2 px-1.5 py-0.5 rounded bg-white/[0.04] text-muted-foreground">
                           {c.severity}

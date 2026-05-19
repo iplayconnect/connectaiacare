@@ -42,7 +42,7 @@ export function PatientsList({ patients }: Props) {
     const counts: Record<string, number> = {};
     patients.forEach((p) => {
       (p.conditions || []).forEach((c) => {
-        const name = c.description.toLowerCase();
+        const name = (c.description || c.name || "").toLowerCase();
         counts[name] = (counts[name] || 0) + 1;
       });
     });
@@ -78,7 +78,7 @@ export function PatientsList({ patients }: Props) {
     if (conditionFilter) {
       list = list.filter((p) =>
         (p.conditions || []).some((c) =>
-          c.description.toLowerCase().includes(conditionFilter),
+          (c.description || c.name || "").toLowerCase().includes(conditionFilter),
         ),
       );
     }
@@ -370,7 +370,7 @@ function PatientCard({ patient }: { patient: Patient }) {
                 key={i}
                 className="text-[10px] px-1.5 py-0.5 rounded-md bg-accent-cyan/5 border border-accent-cyan/20 text-accent-cyan/90 truncate max-w-full"
               >
-                {c.description}
+                {c.description || c.name}
               </span>
             ))}
             {(patient.conditions || []).length > 2 && (

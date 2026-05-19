@@ -44,7 +44,15 @@ const FORM_OF_ADDRESS_OPTIONS: {
   { value: "nickname", label: "Apelido", example: "Mariazinha" },
 ];
 
-const CARE_LEVEL_OPTIONS = ["", "I", "II", "III", "IV"];
+// Niveis conforme Portaria SAS-MS 73/2001 + nivel IV em padroes privados.
+// Labels descritivos pra usuario nao-clinico entender a escala.
+const CARE_LEVEL_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: "", label: "— Selecione" },
+  { value: "I", label: "I — Independente (sem auxilio em AVDs)" },
+  { value: "II", label: "II — Dependencia leve (ate 3 AVDs)" },
+  { value: "III", label: "III — Dependencia severa (3+ AVDs ou cognicao)" },
+  { value: "IV", label: "IV — Totalmente dependente (cuidados continuos)" },
+];
 const GENDER_OPTIONS = [
   { value: "", label: "—" },
   { value: "M", label: "Masculino" },
@@ -371,7 +379,7 @@ export default function PatientEditPage() {
               onChange={(e) => update("care_level", e.target.value)}
             >
               {CARE_LEVEL_OPTIONS.map((c) => (
-                <option key={c} value={c}>{c || "—"}</option>
+                <option key={c.value} value={c.value}>{c.label}</option>
               ))}
             </select>
           </Field>

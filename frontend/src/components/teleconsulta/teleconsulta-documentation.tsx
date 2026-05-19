@@ -511,7 +511,7 @@ function PatientBriefCard({ tc }: { tc: TeleconsultaRecord | null }) {
                   key={i}
                   className="px-2 py-0.5 rounded-full bg-white/[0.04] border border-white/[0.06]"
                 >
-                  {c.description}
+                  {c.description || c.name}
                 </span>
               ))}
             </div>
