@@ -97,6 +97,28 @@ def create_patient():
 
     from src.services.patient_service import get_patient_service
     svc = get_patient_service()
+
+    # Lookup proativo: se CPF foi informado e ja existe nesse tenant,
+    # retorna 409 com info do paciente existente em vez de tentar INSERT
+    # e expor o detail do PostgreSQL com tenant_id + CPF crus. Tambem
+    # cobre race condition: se outro request criar o mesmo CPF entre
+    # esse lookup e o INSERT abaixo, o except UniqueViolation pega.
+    cpf_input = body.get("cpf") or ""
+    import re as _re
+    cpf_clean = _re.sub(r"\D", "", cpf_input) or None
+    if cpf_clean:
+        existing = svc.find_by_cpf(tenant_id=tenant_id, cpf=cpf_clean)
+        if existing:
+            return jsonify({
+                "status": "error",
+                "reason": "cpf_already_exists",
+                "existing_patient": {
+                    "id": existing["id"],
+                    "full_name": existing["full_name"],
+                },
+                "hint": "Esse CPF ja esta cadastrado neste tenant. Abra o cadastro existente em vez de criar novo.",
+            }), 409
+
     try:
         patient = svc.create(
             tenant_id=tenant_id,
@@ -105,10 +127,31 @@ def create_patient():
             cpf=body.get("cpf"),
         )
     except Exception as exc:
-        logger.error("create_patient_failed error=%s", str(exc))
+        # Fallback de seguranca: psycopg2.errors.UniqueViolation explode com
+        # texto "duplicate key value violates unique constraint
+        # idx_patients_cpf_per_tenant" se o lookup proativo acima nao
+        # pegou (race condition). Resposta limpa sem vazar detail do SQL.
+        err_msg = str(exc)
+        is_cpf_dup = (
+            "idx_patients_cpf_per_tenant" in err_msg
+            or "duplicate key" in err_msg.lower() and "cpf" in err_msg.lower()
+        )
+        if is_cpf_dup:
+            existing = svc.find_by_cpf(tenant_id=tenant_id, cpf=cpf_clean or "") if cpf_clean else None
+            return jsonify({
+                "status": "error",
+                "reason": "cpf_already_exists",
+                "existing_patient": (
+                    {"id": existing["id"], "full_name": existing["full_name"]}
+                    if existing else None
+                ),
+                "hint": "Esse CPF ja esta cadastrado neste tenant.",
+            }), 409
+        logger.error("create_patient_failed error=%s", err_msg)
         return jsonify({
             "status": "error", "reason": "create_failed",
-            "detail": str(exc),
+            # Nao expor detail cru — pode conter PII (tenant_id, cpf, etc.).
+            "hint": "Erro interno ao criar paciente. Tente de novo ou contate suporte.",
         }), 500
 
     if not patient:
@@ -130,6 +173,49 @@ def create_patient():
     )
 
     return jsonify({"status": "ok", "patient": patient}), 201
+
+
+@bp.get("/api/patients/by-cpf")
+@require_role(*WIZARD_ROLES)
+def find_patient_by_cpf():
+    """Lookup leve por CPF — usado pelo modal "Novo paciente" pra
+    avisar em tempo real que o CPF ja esta cadastrado, ANTES do user
+    clicar "Criar". UX mais natural que esperar o submit dar 409.
+
+    Query: ?cpf=80605052034 (com ou sem mascara, normalizado)
+
+    Sempre retorna 200. Body:
+      { status: "ok", exists: bool, patient?: { id, full_name } }
+
+    Restringe ao tenant do JWT — usuario nao consegue olhar CPFs de
+    outros tenants mesmo sabendo o numero.
+    """
+    user = _user()
+    tenant_id = user.get("tenant_id") or user.get("tenantId")
+    if not tenant_id:
+        return jsonify({"status": "error", "reason": "tenant_indefinido"}), 400
+
+    import re as _re
+    cpf_raw = request.args.get("cpf", "")
+    cpf_clean = _re.sub(r"\D", "", cpf_raw) or None
+    if not cpf_clean or len(cpf_clean) != 11:
+        return jsonify({"status": "ok", "exists": False})
+
+    from src.services.patient_service import get_patient_service
+    existing = get_patient_service().find_by_cpf(
+        tenant_id=tenant_id, cpf=cpf_clean,
+    )
+    if not existing:
+        return jsonify({"status": "ok", "exists": False})
+
+    return jsonify({
+        "status": "ok",
+        "exists": True,
+        "patient": {
+            "id": existing["id"],
+            "full_name": existing["full_name"],
+        },
+    })
 
 
 # ════════════════════ LOOKUP DE BASES CURADAS ═══════════════════════

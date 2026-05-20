@@ -16,7 +16,7 @@
  * fica oculto.
  */
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { Loader2, Plus, X } from "lucide-react";
@@ -101,10 +101,65 @@ function NewPatientModal({
   const [cpf, setCpf] = useState("");
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  // Quando CPF ja existe no tenant, em vez de "erro" mostramos um
+  // call-to-action pra abrir o cadastro existente direto.
+  const [duplicate, setDuplicate] = useState<{
+    id: string;
+    full_name: string;
+  } | null>(null);
+  // Estado da checagem realtime de CPF (enquanto digita)
+  const [checkingCpf, setCheckingCpf] = useState(false);
+  const checkDebounceRef = useRef<number | null>(null);
+
+  // ── Validacao realtime de CPF (debounced 500ms) ─────────────────
+  // Assim que o user termina de digitar 11 digitos validos, consultamos
+  // o backend pra ver se ja existe paciente com esse CPF nesse tenant.
+  // Se sim, mostramos o card "Abrir cadastro existente" antes mesmo
+  // do user clicar em "Criar". UX mais natural que esperar o submit.
+  useEffect(() => {
+    if (checkDebounceRef.current) {
+      window.clearTimeout(checkDebounceRef.current);
+    }
+    const cpfDigits = cpf.replace(/\D/g, "");
+    // So checa quando CPF esta completo E e valido (evita request
+    // pra cada digito + nao consulta CPF invalido)
+    if (cpfDigits.length !== 11 || !isValidCpf(cpfDigits)) {
+      setDuplicate(null);
+      setCheckingCpf(false);
+      return;
+    }
+
+    setCheckingCpf(true);
+    checkDebounceRef.current = window.setTimeout(async () => {
+      try {
+        const res = await patientRegistrationApi.findByCpf(cpfDigits);
+        if (res.exists && res.patient) {
+          setDuplicate({
+            id: res.patient.id,
+            full_name: res.patient.full_name,
+          });
+        } else {
+          setDuplicate(null);
+        }
+      } catch {
+        // Erro de rede: silencioso. O submit ainda valida no backend.
+        setDuplicate(null);
+      } finally {
+        setCheckingCpf(false);
+      }
+    }, 500);
+
+    return () => {
+      if (checkDebounceRef.current) {
+        window.clearTimeout(checkDebounceRef.current);
+      }
+    };
+  }, [cpf]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setErr(null);
+    setDuplicate(null);
 
     const name = fullName.trim();
     if (name.length < 2) {
@@ -126,7 +181,23 @@ function NewPatientModal({
       });
       onCreated(res.patient.id);
     } catch (e: any) {
-      setErr(e?.message || "Falha ao criar paciente");
+      // 409 = CPF ja cadastrado neste tenant. Backend retorna o paciente
+      // existente; oferecemos "Abrir cadastro existente" em vez de
+      // mensagem de erro hostil.
+      if (e?.status === 409 && e?.reason === "cpf_already_exists") {
+        const existing = e?.body?.existing_patient;
+        if (existing?.id) {
+          setDuplicate({ id: existing.id, full_name: existing.full_name });
+          setSaving(false);
+          return;
+        }
+        setErr("Esse CPF já está cadastrado neste tenant.");
+        setSaving(false);
+        return;
+      }
+      // Outros erros: usar hint amigavel do backend OU fallback generico.
+      // Nao expor message completa pq pode conter detail tecnico.
+      setErr(e?.body?.hint || e?.reason || "Falha ao criar paciente. Tente de novo.");
       setSaving(false);
     }
   }
@@ -189,8 +260,13 @@ function NewPatientModal({
         </label>
 
         <label className="block space-y-1">
-          <span className="text-sm text-muted-foreground">
+          <span className="text-sm text-muted-foreground flex items-center gap-2">
             CPF (opcional)
+            {checkingCpf && (
+              <span className="inline-flex items-center gap-1 text-[12px] text-muted-foreground/70">
+                <Loader2 className="h-3 w-3 animate-spin" /> verificando…
+              </span>
+            )}
           </span>
           <input
             className="input w-full"
@@ -204,6 +280,31 @@ function NewPatientModal({
             integrações externas com parceiros.
           </span>
         </label>
+
+        {duplicate && (
+          <div className="rounded-lg border border-accent-cyan/30 bg-accent-cyan/5 p-3 text-sm space-y-2">
+            <div className="text-foreground">
+              Esse CPF já está cadastrado para{" "}
+              <span className="font-semibold">{duplicate.full_name}</span>{" "}
+              neste tenant.
+            </div>
+            <div className="text-muted-foreground text-[13px]">
+              Em vez de criar um novo, abra o cadastro existente e continue de
+              onde parou.
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                const id = duplicate.id;
+                setDuplicate(null);
+                onCreated(id);
+              }}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-accent-cyan/15 border border-accent-cyan/40 text-accent-cyan text-sm font-medium hover:bg-accent-cyan/25 transition"
+            >
+              Abrir cadastro existente
+            </button>
+          </div>
+        )}
 
         {err && (
           <div className="rounded-lg border border-classification-attention/20 bg-classification-attention/5 p-2.5 text-sm text-classification-attention">
@@ -222,8 +323,12 @@ function NewPatientModal({
           </button>
           <button
             type="submit"
-            disabled={saving}
-            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg accent-gradient text-slate-900 text-sm font-medium disabled:opacity-50"
+            // Bloqueia "Criar" se ja detectamos duplicate via lookup
+            // realtime — forca o user a clicar "Abrir cadastro existente"
+            // (UX mais clara que aceitar o submit e mostrar erro depois).
+            disabled={saving || !!duplicate}
+            title={duplicate ? "Esse CPF já está cadastrado — abra o cadastro existente" : undefined}
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg accent-gradient text-slate-900 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {saving ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
