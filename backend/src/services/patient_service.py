@@ -45,6 +45,21 @@ class PatientService:
         )
         return _serialize_row(row)
 
+    def find_by_cpf(self, *, tenant_id: str, cpf: str) -> dict | None:
+        """Busca por CPF dentro de um tenant. Usado pra detectar
+        duplicacao antes de criar (UX melhor que stack trace de UNIQUE
+        constraint). CPF deve vir limpo (so digitos)."""
+        if not cpf or not cpf.strip():
+            return None
+        row = self.db.fetch_one(
+            """SELECT id::text AS id, full_name, nickname, cpf, active
+               FROM aia_health_patients
+               WHERE tenant_id = %s AND cpf = %s
+               LIMIT 1""",
+            (tenant_id, cpf.strip()),
+        )
+        return _serialize_row(row)
+
     # ──────────────────────────────────────────────────────────────
     # Create — paciente novo do zero (não importado)
     # ──────────────────────────────────────────────────────────────

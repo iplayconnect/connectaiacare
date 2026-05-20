@@ -101,10 +101,17 @@ function NewPatientModal({
   const [cpf, setCpf] = useState("");
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  // Quando CPF ja existe no tenant, em vez de "erro" mostramos um
+  // call-to-action pra abrir o cadastro existente direto.
+  const [duplicate, setDuplicate] = useState<{
+    id: string;
+    full_name: string;
+  } | null>(null);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setErr(null);
+    setDuplicate(null);
 
     const name = fullName.trim();
     if (name.length < 2) {
@@ -126,7 +133,23 @@ function NewPatientModal({
       });
       onCreated(res.patient.id);
     } catch (e: any) {
-      setErr(e?.message || "Falha ao criar paciente");
+      // 409 = CPF ja cadastrado neste tenant. Backend retorna o paciente
+      // existente; oferecemos "Abrir cadastro existente" em vez de
+      // mensagem de erro hostil.
+      if (e?.status === 409 && e?.reason === "cpf_already_exists") {
+        const existing = e?.body?.existing_patient;
+        if (existing?.id) {
+          setDuplicate({ id: existing.id, full_name: existing.full_name });
+          setSaving(false);
+          return;
+        }
+        setErr("Esse CPF já está cadastrado neste tenant.");
+        setSaving(false);
+        return;
+      }
+      // Outros erros: usar hint amigavel do backend OU fallback generico.
+      // Nao expor message completa pq pode conter detail tecnico.
+      setErr(e?.body?.hint || e?.reason || "Falha ao criar paciente. Tente de novo.");
       setSaving(false);
     }
   }
@@ -204,6 +227,31 @@ function NewPatientModal({
             integrações externas com parceiros.
           </span>
         </label>
+
+        {duplicate && (
+          <div className="rounded-lg border border-accent-cyan/30 bg-accent-cyan/5 p-3 text-sm space-y-2">
+            <div className="text-foreground">
+              Esse CPF já está cadastrado para{" "}
+              <span className="font-semibold">{duplicate.full_name}</span>{" "}
+              neste tenant.
+            </div>
+            <div className="text-muted-foreground text-[13px]">
+              Em vez de criar um novo, abra o cadastro existente e continue de
+              onde parou.
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                const id = duplicate.id;
+                setDuplicate(null);
+                onCreated(id);
+              }}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-accent-cyan/15 border border-accent-cyan/40 text-accent-cyan text-sm font-medium hover:bg-accent-cyan/25 transition"
+            >
+              Abrir cadastro existente
+            </button>
+          </div>
+        )}
 
         {err && (
           <div className="rounded-lg border border-classification-attention/20 bg-classification-attention/5 p-2.5 text-sm text-classification-attention">
