@@ -175,6 +175,49 @@ def create_patient():
     return jsonify({"status": "ok", "patient": patient}), 201
 
 
+@bp.get("/api/patients/by-cpf")
+@require_role(*WIZARD_ROLES)
+def find_patient_by_cpf():
+    """Lookup leve por CPF — usado pelo modal "Novo paciente" pra
+    avisar em tempo real que o CPF ja esta cadastrado, ANTES do user
+    clicar "Criar". UX mais natural que esperar o submit dar 409.
+
+    Query: ?cpf=80605052034 (com ou sem mascara, normalizado)
+
+    Sempre retorna 200. Body:
+      { status: "ok", exists: bool, patient?: { id, full_name } }
+
+    Restringe ao tenant do JWT — usuario nao consegue olhar CPFs de
+    outros tenants mesmo sabendo o numero.
+    """
+    user = _user()
+    tenant_id = user.get("tenant_id") or user.get("tenantId")
+    if not tenant_id:
+        return jsonify({"status": "error", "reason": "tenant_indefinido"}), 400
+
+    import re as _re
+    cpf_raw = request.args.get("cpf", "")
+    cpf_clean = _re.sub(r"\D", "", cpf_raw) or None
+    if not cpf_clean or len(cpf_clean) != 11:
+        return jsonify({"status": "ok", "exists": False})
+
+    from src.services.patient_service import get_patient_service
+    existing = get_patient_service().find_by_cpf(
+        tenant_id=tenant_id, cpf=cpf_clean,
+    )
+    if not existing:
+        return jsonify({"status": "ok", "exists": False})
+
+    return jsonify({
+        "status": "ok",
+        "exists": True,
+        "patient": {
+            "id": existing["id"],
+            "full_name": existing["full_name"],
+        },
+    })
+
+
 # ════════════════════ LOOKUP DE BASES CURADAS ═══════════════════════
 
 @bp.get("/api/cid10/search")

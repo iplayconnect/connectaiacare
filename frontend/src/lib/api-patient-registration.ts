@@ -154,6 +154,15 @@ export const patientRegistrationApi = {
       { method: "POST", body: JSON.stringify(payload) },
     ),
 
+  /** Lookup leve por CPF — usado pra warning realtime no modal "Novo
+   *  paciente". Sempre retorna 200; checar `exists`. */
+  findByCpf: (cpf: string) =>
+    api.request<{
+      status: "ok";
+      exists: boolean;
+      patient?: { id: string; full_name: string };
+    }>(`/api/patients/by-cpf?cpf=${encodeURIComponent(cpf)}`),
+
   // ── Lookups ──
   searchCid10: (q: string, limit = 20) =>
     api.request<{ status: "ok"; count: number; items: Cid10SearchResult[] }>(

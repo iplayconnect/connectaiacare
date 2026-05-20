@@ -16,7 +16,7 @@
  * fica oculto.
  */
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { Loader2, Plus, X } from "lucide-react";
@@ -107,6 +107,54 @@ function NewPatientModal({
     id: string;
     full_name: string;
   } | null>(null);
+  // Estado da checagem realtime de CPF (enquanto digita)
+  const [checkingCpf, setCheckingCpf] = useState(false);
+  const checkDebounceRef = useRef<number | null>(null);
+
+  // ── Validacao realtime de CPF (debounced 500ms) ─────────────────
+  // Assim que o user termina de digitar 11 digitos validos, consultamos
+  // o backend pra ver se ja existe paciente com esse CPF nesse tenant.
+  // Se sim, mostramos o card "Abrir cadastro existente" antes mesmo
+  // do user clicar em "Criar". UX mais natural que esperar o submit.
+  useEffect(() => {
+    if (checkDebounceRef.current) {
+      window.clearTimeout(checkDebounceRef.current);
+    }
+    const cpfDigits = cpf.replace(/\D/g, "");
+    // So checa quando CPF esta completo E e valido (evita request
+    // pra cada digito + nao consulta CPF invalido)
+    if (cpfDigits.length !== 11 || !isValidCpf(cpfDigits)) {
+      setDuplicate(null);
+      setCheckingCpf(false);
+      return;
+    }
+
+    setCheckingCpf(true);
+    checkDebounceRef.current = window.setTimeout(async () => {
+      try {
+        const res = await patientRegistrationApi.findByCpf(cpfDigits);
+        if (res.exists && res.patient) {
+          setDuplicate({
+            id: res.patient.id,
+            full_name: res.patient.full_name,
+          });
+        } else {
+          setDuplicate(null);
+        }
+      } catch {
+        // Erro de rede: silencioso. O submit ainda valida no backend.
+        setDuplicate(null);
+      } finally {
+        setCheckingCpf(false);
+      }
+    }, 500);
+
+    return () => {
+      if (checkDebounceRef.current) {
+        window.clearTimeout(checkDebounceRef.current);
+      }
+    };
+  }, [cpf]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -212,8 +260,13 @@ function NewPatientModal({
         </label>
 
         <label className="block space-y-1">
-          <span className="text-sm text-muted-foreground">
+          <span className="text-sm text-muted-foreground flex items-center gap-2">
             CPF (opcional)
+            {checkingCpf && (
+              <span className="inline-flex items-center gap-1 text-[12px] text-muted-foreground/70">
+                <Loader2 className="h-3 w-3 animate-spin" /> verificando…
+              </span>
+            )}
           </span>
           <input
             className="input w-full"
@@ -270,8 +323,12 @@ function NewPatientModal({
           </button>
           <button
             type="submit"
-            disabled={saving}
-            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg accent-gradient text-slate-900 text-sm font-medium disabled:opacity-50"
+            // Bloqueia "Criar" se ja detectamos duplicate via lookup
+            // realtime — forca o user a clicar "Abrir cadastro existente"
+            // (UX mais clara que aceitar o submit e mostrar erro depois).
+            disabled={saving || !!duplicate}
+            title={duplicate ? "Esse CPF já está cadastrado — abra o cadastro existente" : undefined}
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg accent-gradient text-slate-900 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {saving ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
