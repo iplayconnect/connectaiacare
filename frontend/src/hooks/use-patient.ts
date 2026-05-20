@@ -144,7 +144,10 @@ function adaptApiPatient(p: ApiPatient): Patient {
         ? p.care_level
         : undefined,
     conditions: (p.conditions || []).map((c) => ({
-      name: c.description,
+      // c.description (legacy) OU c.name (novo, vindo de normalize_clinical_array).
+      // Tipo em api.ts ficou opcional pos-PR #184 pra cobrir os 2 shapes;
+      // aqui consolidamos pra string nao-opcional que Condition exige.
+      name: c.description || c.name || "",
       cid10: c.code,
       severity:
         c.severity === "mild" || c.severity === "moderate" || c.severity === "severe"
